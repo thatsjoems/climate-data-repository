@@ -218,6 +218,30 @@ class InstitutionAccessRequest(Base):
 
 
 # ---------------------------------------------------------------------------
+# PASSWORD RESET REQUESTS
+# ---------------------------------------------------------------------------
+
+class PasswordResetRequest(Base):
+    """
+    A user-initiated request to reset their password. Mirrors the same
+    'request -> admin review -> credential handed over out-of-band' pattern
+    used for institution access requests, since no SMTP integration is
+    available to email a reset link automatically.
+    """
+    __tablename__ = "password_reset_requests"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+
+    status = Column(SAEnum(AccessRequestStatus), default=AccessRequestStatus.PENDING, nullable=False)
+    reviewed_by_user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    review_notes = Column(Text, nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
 # NOTIFICATIONS
 # ---------------------------------------------------------------------------
 

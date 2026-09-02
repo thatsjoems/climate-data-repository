@@ -4,6 +4,7 @@ import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import RequestAccess from './pages/RequestAccess'
+import ForgotPassword from './pages/ForgotPassword'
 import InstitutionPortal from './pages/InstitutionPortal'
 import InternalPortal from './pages/InternalPortal'
 import AdminPanel from './pages/AdminPanel'
@@ -22,6 +23,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/request-access" element={<RequestAccess />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route
           path="/"
           element={

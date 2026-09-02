@@ -32,6 +32,14 @@ interface AccessRequestItem {
   created_at: string
 }
 
+interface PasswordResetItem {
+  id: string
+  username: string
+  full_name: string
+  status: string
+  created_at: string
+}
+
 export default function AdminPanel() {
   const [users, setUsers] = useState<UserItem[]>([])
   const [institutions, setInstitutions] = useState<InstitutionItem[]>([])
@@ -43,16 +51,44 @@ export default function AdminPanel() {
   const [newInstitution, setNewInstitution] = useState({ code: '', name: '', type: 'BANK' })
   const [accessRequests, setAccessRequests] = useState<AccessRequestItem[]>([])
   const [generatedCredential, setGeneratedCredential] = useState<{ username: string; password: string } | null>(null)
+  const [passwordResets, setPasswordResets] = useState<PasswordResetItem[]>([])
+  const [generatedResetPassword, setGeneratedResetPassword] = useState<{ username: string; password: string } | null>(null)
 
   async function loadAll() {
-    const [usersRes, instRes, reqRes] = await Promise.all([
+    const [usersRes, instRes, reqRes, resetRes] = await Promise.all([
       apiClient.get('/users'),
       apiClient.get('/institutions'),
       apiClient.get('/access-requests'),
+      apiClient.get('/password-reset-requests'),
     ])
     setUsers(usersRes.data)
     setInstitutions(instRes.data)
     setAccessRequests(reqRes.data)
+    setPasswordResets(resetRes.data)
+  }
+
+  async function handleApprovePasswordReset(id: string) {
+    setMessage(null)
+    try {
+      const res = await apiClient.post(`/password-reset-requests/${id}/approve`, {})
+      setGeneratedResetPassword({
+        username: res.data.request.username,
+        password: res.data.new_temporary_password,
+      })
+      loadAll()
+    } catch (err: any) {
+      setMessage(err?.response?.data?.detail || 'Failed to approve the password reset.')
+    }
+  }
+
+  async function handleRejectPasswordReset(id: string) {
+    const notes = window.prompt('Reason for rejecting this reset request (optional):') || ''
+    try {
+      await apiClient.post(`/password-reset-requests/${id}/reject`, { notes })
+      loadAll()
+    } catch (err: any) {
+      setMessage(err?.response?.data?.detail || 'Failed to reject the request.')
+    }
   }
 
   async function handleApproveRequest(id: string) {
@@ -164,6 +200,50 @@ export default function AdminPanel() {
             ))}
             {accessRequests.filter((r) => r.status === 'PENDING').length === 0 && (
               <tr><td colSpan={6}>No pending requests.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </section>
+
+      {generatedResetPassword && (
+        <section className="card" style={{ borderLeft: '3px solid var(--color-accent)' }}>
+          <h2>🔑 Password Reset</h2>
+          <p>
+            Share this new password with the user through a verified channel
+            (phone/official email) — the system does not send emails automatically.
+          </p>
+          <p>
+            <strong>Username:</strong> <code>{generatedResetPassword.username}</code><br />
+            <strong>New Temporary Password:</strong> <code>{generatedResetPassword.password}</code>
+          </p>
+          <button onClick={() => setGeneratedResetPassword(null)}>Dismiss</button>
+        </section>
+      )}
+
+      <section className="card">
+        <h2>🔑 Pending Password Reset Requests</h2>
+        <p className="note">
+          Requests submitted via the public "Forgot Password" page. Approving generates a
+          new temporary password for that user.
+        </p>
+        <table>
+          <thead>
+            <tr><th>User</th><th>Username</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            {passwordResets.filter((r) => r.status === 'PENDING').map((r) => (
+              <tr key={r.id}>
+                <td>{r.full_name}</td>
+                <td>{r.username}</td>
+                <td><span className="badge badge-pending">Pending</span></td>
+                <td>
+                  <button onClick={() => handleApprovePasswordReset(r.id)}>Approve</button>
+                  <button onClick={() => handleRejectPasswordReset(r.id)}>Reject</button>
+                </td>
+              </tr>
+            ))}
+            {passwordResets.filter((r) => r.status === 'PENDING').length === 0 && (
+              <tr><td colSpan={4}>No pending requests.</td></tr>
             )}
           </tbody>
         </table>

@@ -163,6 +163,25 @@ class AccessRequestApprovalOut(BaseModel):
     generated_temporary_password: str
 
 
+# ---------- PASSWORD RESET ----------
+class PasswordResetRequestCreate(BaseModel):
+    username_or_email: str
+
+
+class PasswordResetRequestOut(BaseModel):
+    id: str
+    username: str
+    full_name: str
+    status: str
+    review_notes: Optional[str] = None
+    created_at: datetime
+
+
+class PasswordResetApprovalOut(BaseModel):
+    request: PasswordResetRequestOut
+    new_temporary_password: str
+
+
 # ---------- NOTIFICATIONS ----------
 class NotificationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
