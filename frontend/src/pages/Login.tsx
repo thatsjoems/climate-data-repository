@@ -1,5 +1,5 @@
 import { useState, FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
@@ -46,6 +46,10 @@ export default function Login() {
         <button type="submit" disabled={isLoading}>
           {isLoading ? 'Signing in...' : 'Log In'}
         </button>
+
+        <p style={{ textAlign: 'center', fontSize: '0.82rem', color: 'var(--color-muted)', marginTop: '1rem' }}>
+          New reporting institution? <Link to="/request-access">Request Access</Link>
+        </p>
 
         <div className="demo-hint">
           <strong>DEMO accounts (after running init_db.py):</strong>

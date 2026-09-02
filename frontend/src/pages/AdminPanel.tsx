@@ -19,6 +19,19 @@ interface InstitutionItem {
   is_active: boolean
 }
 
+interface AccessRequestItem {
+  id: string
+  institution_name: string
+  institution_code: string | null
+  institution_type: string
+  contact_full_name: string
+  contact_email: string
+  contact_phone: string | null
+  message: string | null
+  status: string
+  created_at: string
+}
+
 export default function AdminPanel() {
   const [users, setUsers] = useState<UserItem[]>([])
   const [institutions, setInstitutions] = useState<InstitutionItem[]>([])
@@ -28,14 +41,42 @@ export default function AdminPanel() {
     full_name: '', username: '', email: '', password: '', role: 'INSTITUTION_USER', institution_id: '',
   })
   const [newInstitution, setNewInstitution] = useState({ code: '', name: '', type: 'BANK' })
+  const [accessRequests, setAccessRequests] = useState<AccessRequestItem[]>([])
+  const [generatedCredential, setGeneratedCredential] = useState<{ username: string; password: string } | null>(null)
 
   async function loadAll() {
-    const [usersRes, instRes] = await Promise.all([
+    const [usersRes, instRes, reqRes] = await Promise.all([
       apiClient.get('/users'),
       apiClient.get('/institutions'),
+      apiClient.get('/access-requests'),
     ])
     setUsers(usersRes.data)
     setInstitutions(instRes.data)
+    setAccessRequests(reqRes.data)
+  }
+
+  async function handleApproveRequest(id: string) {
+    setMessage(null)
+    try {
+      const res = await apiClient.post(`/access-requests/${id}/approve`, {})
+      setGeneratedCredential({
+        username: res.data.generated_username,
+        password: res.data.generated_temporary_password,
+      })
+      loadAll()
+    } catch (err: any) {
+      setMessage(err?.response?.data?.detail || 'Failed to approve the request.')
+    }
+  }
+
+  async function handleRejectRequest(id: string) {
+    const notes = window.prompt('Reason for rejecting this request (optional):') || ''
+    try {
+      await apiClient.post(`/access-requests/${id}/reject`, { notes })
+      loadAll()
+    } catch (err: any) {
+      setMessage(err?.response?.data?.detail || 'Failed to reject the request.')
+    }
   }
 
   useEffect(() => {
@@ -82,8 +123,54 @@ export default function AdminPanel() {
       <h1>System Administration</h1>
       {message && <div className="alert-info">{message}</div>}
 
+      {generatedCredential && (
+        <section className="card" style={{ borderLeft: '3px solid var(--color-accent)' }}>
+          <h2>✅ Account Created</h2>
+          <p>
+            Share these credentials with the institution through a verified channel
+            (phone/official email) — the system does not send emails automatically.
+          </p>
+          <p>
+            <strong>Username:</strong> <code>{generatedCredential.username}</code><br />
+            <strong>Temporary Password:</strong> <code>{generatedCredential.password}</code>
+          </p>
+          <button onClick={() => setGeneratedCredential(null)}>Dismiss</button>
+        </section>
+      )}
+
       <section className="card">
-        <h2>Add New Institution</h2>
+        <h2>📨 Pending Access Requests</h2>
+        <p className="note">
+          Institutions that used the public "Request Access" form. Approving a request
+          creates the Institution (if new) and a user account with a temporary password.
+        </p>
+        <table>
+          <thead>
+            <tr><th>Institution</th><th>Contact</th><th>Email / Phone</th><th>Message</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            {accessRequests.filter((r) => r.status === 'PENDING').map((r) => (
+              <tr key={r.id}>
+                <td>{r.institution_name}{r.institution_code ? ` (${r.institution_code})` : ''}</td>
+                <td>{r.contact_full_name}</td>
+                <td>{r.contact_email}{r.contact_phone ? ` / ${r.contact_phone}` : ''}</td>
+                <td>{r.message || '-'}</td>
+                <td><span className="badge badge-pending">Pending</span></td>
+                <td>
+                  <button onClick={() => handleApproveRequest(r.id)}>Approve</button>
+                  <button onClick={() => handleRejectRequest(r.id)}>Reject</button>
+                </td>
+              </tr>
+            ))}
+            {accessRequests.filter((r) => r.status === 'PENDING').length === 0 && (
+              <tr><td colSpan={6}>No pending requests.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="card">
+        <h2>🏢 Add New Institution</h2>
         <form onSubmit={handleCreateInstitution} className="upload-form">
           <label>Code (e.g. BANK-C)</label>
           <input value={newInstitution.code} onChange={(e) => setNewInstitution({ ...newInstitution, code: e.target.value })} required />
@@ -101,7 +188,7 @@ export default function AdminPanel() {
       </section>
 
       <section className="card">
-        <h2>Add New User</h2>
+        <h2>👤 Add New User</h2>
         <form onSubmit={handleCreateUser} className="upload-form">
           <label>Full Name</label>
           <input value={newUser.full_name} onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })} required />
@@ -129,7 +216,7 @@ export default function AdminPanel() {
       </section>
 
       <section className="card">
-        <h2>Users</h2>
+        <h2>👥 Users</h2>
         <table>
           <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th></th></tr></thead>
           <tbody>
@@ -147,7 +234,7 @@ export default function AdminPanel() {
       </section>
 
       <section className="card">
-        <h2>Institutions</h2>
+        <h2>🏢 Institutions</h2>
         <table>
           <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Status</th></tr></thead>
           <tbody>

@@ -20,6 +20,10 @@
 - **Live integration** with RTIS, BSIS, QGIS, ArcGIS - no real credentials/API access were available.
 - **Real data** from TMA (Tanzania Meteorological Authority) and PMO (Climate Vulnerability Maps) - not available in this environment.
 - Password recovery (forgot password) workflow.
+- Automated email delivery for approved access requests: generated usernames/temporary
+  passwords are shown once to the approving System Admin, who must relay them to the
+  institution through a verified channel (phone/official email); no SMTP integration was
+  available in this training environment.
 - Dashboard export to PDF/Excel/Image (the underlying data structure exists, but export endpoints have not been added).
 - Enterprise SSO, production-grade deployment, and formal security certification.
 

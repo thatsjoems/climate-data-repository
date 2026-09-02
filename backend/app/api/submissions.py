@@ -18,6 +18,7 @@ from app.models.models import (
 from app.schemas.schemas import SubmissionOut, SubmissionDetailOut, ReviewRequest
 from app.services.validation_service import validate_excel_file
 from app.services.audit_service import record_audit
+from app.services.notification_service import notify_roles, notify_user
 
 router = APIRouter(prefix="/submissions", tags=["Submissions"])
 
@@ -95,6 +96,16 @@ def upload_submission(
         db, current_user.id, "SUBMISSION_CREATED", "Submission", submission.id,
         f"File '{file.filename}' - status: {overall_status.value}"
     )
+
+    institution_name = current_user.institution.name if current_user.institution else "An institution"
+    notify_roles(
+        db, [RoleEnum.BOT_USER, RoleEnum.SYSTEM_ADMIN],
+        message=f"{institution_name} submitted '{file.filename}' for {reporting_period} "
+                 f"({overall_status.value.title()} - {valid_count}/{total} valid records).",
+        notif_type="SUBMISSION_UPLOADED",
+        related_entity_type="Submission",
+        related_entity_id=submission.id,
+    )
     return submission
 
 
@@ -151,5 +162,15 @@ def review_submission(
     record_audit(
         db, current_user.id, f"SUBMISSION_{payload.decision.upper()}D", "Submission",
         submission.id, payload.notes or ""
+    )
+
+    decision_word = "approved" if payload.decision.upper() == "APPROVE" else "rejected"
+    notify_user(
+        db, submission.submitted_by_user_id,
+        message=f"Your submission '{submission.file_name}' for {submission.reporting_period} "
+                 f"was {decision_word}." + (f" Note: {payload.notes}" if payload.notes else ""),
+        notif_type="SUBMISSION_REVIEWED",
+        related_entity_type="Submission",
+        related_entity_id=submission.id,
     )
     return submission

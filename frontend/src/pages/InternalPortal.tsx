@@ -77,19 +77,19 @@ export default function InternalPortal() {
 
       {kpi && (
         <section className="kpi-grid">
-          <div className="kpi-card"><span className="kpi-value">{kpi.total_institutions}</span><span>Reporting Institutions</span></div>
-          <div className="kpi-card"><span className="kpi-value">{kpi.total_submissions}</span><span>Total Submissions</span></div>
-          <div className="kpi-card"><span className="kpi-value">{kpi.pending_submissions}</span><span>Pending</span></div>
-          <div className="kpi-card"><span className="kpi-value">{kpi.invalid_submissions}</span><span>With Errors</span></div>
-          <div className="kpi-card"><span className="kpi-value">{kpi.approved_submissions}</span><span>Approved</span></div>
-          <div className="kpi-card"><span className="kpi-value">{kpi.rejected_submissions}</span><span>Rejected</span></div>
-          <div className="kpi-card wide"><span className="kpi-value">{formatTZS(kpi.total_loan_exposure_tzs)}</span><span>Total Loan Value (Valid Records)</span></div>
-          <div className="kpi-card wide"><span className="kpi-value">{formatTZS(kpi.total_collateral_value_tzs)}</span><span>Total Collateral Value</span></div>
+          <div className="kpi-card"><span className="kpi-icon">🏦</span><span className="kpi-value">{kpi.total_institutions}</span><span>Reporting Institutions</span></div>
+          <div className="kpi-card"><span className="kpi-icon">📄</span><span className="kpi-value">{kpi.total_submissions}</span><span>Total Submissions</span></div>
+          <div className="kpi-card"><span className="kpi-icon">⏳</span><span className="kpi-value">{kpi.pending_submissions}</span><span>Pending</span></div>
+          <div className="kpi-card"><span className="kpi-icon">⚠️</span><span className="kpi-value">{kpi.invalid_submissions}</span><span>With Errors</span></div>
+          <div className="kpi-card"><span className="kpi-icon">✅</span><span className="kpi-value">{kpi.approved_submissions}</span><span>Approved</span></div>
+          <div className="kpi-card"><span className="kpi-icon">⛔</span><span className="kpi-value">{kpi.rejected_submissions}</span><span>Rejected</span></div>
+          <div className="kpi-card wide"><span className="kpi-icon">💰</span><span className="kpi-value">{formatTZS(kpi.total_loan_exposure_tzs)}</span><span>Total Loan Value (Valid Records)</span></div>
+          <div className="kpi-card wide"><span className="kpi-icon">🛡️</span><span className="kpi-value">{formatTZS(kpi.total_collateral_value_tzs)}</span><span>Total Collateral Value</span></div>
         </section>
       )}
 
       <section className="card">
-        <h2>Submission Monitoring</h2>
+        <h2>🔍 Submission Monitoring</h2>
         <label>Filter by Status: </label>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option value="ALL">All</option>
@@ -137,7 +137,7 @@ export default function InternalPortal() {
       </section>
 
       <section className="card">
-        <h2>Climate & Financial Exposure by Region</h2>
+        <h2>🌦️ Climate & Financial Exposure by Region</h2>
         <p className="note">Shows the total value of loans (from valid submissions) per region and reported climate hazard.</p>
         <table>
           <thead><tr><th>Region</th><th>Hazard</th><th>Loan Exposure</th><th>Record Count</th></tr></thead>

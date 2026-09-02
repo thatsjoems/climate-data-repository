@@ -177,6 +177,68 @@ class ClimateRecord(Base):
 
 
 # ---------------------------------------------------------------------------
+# INSTITUTION ACCESS REQUESTS ("Request Access" — not self-registration)
+# ---------------------------------------------------------------------------
+
+class AccessRequestStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class InstitutionAccessRequest(Base):
+    """
+    A request from a prospective reporting institution asking to be onboarded.
+    This is NOT self-registration: submitting a request never creates a login.
+    Only a SYSTEM_ADMIN reviewing and approving the request creates an
+    Institution + User account, after out-of-band verification.
+    """
+    __tablename__ = "institution_access_requests"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+
+    institution_name = Column(String(255), nullable=False)
+    institution_code = Column(String(20), nullable=True)
+    institution_type = Column(SAEnum(InstitutionType), default=InstitutionType.BANK, nullable=False)
+
+    contact_full_name = Column(String(255), nullable=False)
+    contact_email = Column(String(255), nullable=False)
+    contact_phone = Column(String(50), nullable=True)
+    message = Column(Text, nullable=True)
+
+    status = Column(SAEnum(AccessRequestStatus), default=AccessRequestStatus.PENDING, nullable=False)
+    reviewed_by_user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    review_notes = Column(Text, nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+
+    created_institution_id = Column(String, ForeignKey("institutions.id"), nullable=True)
+    created_user_id = Column(String, ForeignKey("users.id"), nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
+# NOTIFICATIONS
+# ---------------------------------------------------------------------------
+
+class Notification(Base):
+    """
+    In-app notification for a single user (e.g. 'your submission was approved',
+    'a new submission is awaiting review'). Polled by the frontend bell icon.
+    """
+    __tablename__ = "notifications"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    type = Column(String(50), nullable=False, default="INFO")  # e.g. SUBMISSION_UPLOADED, SUBMISSION_REVIEWED
+    message = Column(String(500), nullable=False)
+    related_entity_type = Column(String(100), nullable=True)   # e.g. "Submission"
+    related_entity_id = Column(String, nullable=True)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
 # AUDIT LOG
 # ---------------------------------------------------------------------------
 

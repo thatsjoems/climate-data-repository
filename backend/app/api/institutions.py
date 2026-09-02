@@ -9,6 +9,7 @@ from app.core.deps import require_roles, get_current_user
 from app.models.models import Institution, User, RoleEnum
 from app.schemas.schemas import InstitutionCreate, InstitutionOut
 from app.services.audit_service import record_audit
+from app.services.notification_service import notify_roles
 
 router = APIRouter(prefix="/institutions", tags=["Institutions"])
 
@@ -35,6 +36,14 @@ def create_institution(
     db.commit()
     db.refresh(inst)
     record_audit(db, current_user.id, "INSTITUTION_CREATED", "Institution", inst.id, inst.name)
+    notify_roles(
+        db, [RoleEnum.SYSTEM_ADMIN, RoleEnum.BOT_USER],
+        message=f"{current_user.full_name} added a new institution: {inst.name}.",
+        notif_type="INSTITUTION_CREATED",
+        related_entity_type="Institution",
+        related_entity_id=inst.id,
+        exclude_user_id=current_user.id,
+    )
     return inst
 
 
@@ -51,4 +60,12 @@ def deactivate_institution(
     db.commit()
     db.refresh(inst)
     record_audit(db, current_user.id, "INSTITUTION_DEACTIVATED", "Institution", inst.id)
+    notify_roles(
+        db, [RoleEnum.SYSTEM_ADMIN, RoleEnum.BOT_USER],
+        message=f"{current_user.full_name} deactivated institution: {inst.name}.",
+        notif_type="INSTITUTION_DEACTIVATED",
+        related_entity_type="Institution",
+        related_entity_id=inst.id,
+        exclude_user_id=current_user.id,
+    )
     return inst

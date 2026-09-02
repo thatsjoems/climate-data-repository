@@ -10,6 +10,7 @@ from app.core.security import hash_password
 from app.models.models import User, RoleEnum
 from app.schemas.schemas import UserCreate, UserOut
 from app.services.audit_service import record_audit
+from app.services.notification_service import notify_user, notify_roles
 
 router = APIRouter(prefix="/users", tags=["User Management"])
 
@@ -46,6 +47,11 @@ def create_user(
     db.refresh(user)
 
     record_audit(db, current_user.id, "USER_CREATED", "User", user.id, f"Created user {user.username}")
+    notify_user(
+        db, user.id,
+        message=f"Welcome to the Climate Data Repository, {user.full_name}. Your account has been created.",
+        notif_type="ACCOUNT_CREATED",
+    )
     return user
 
 
@@ -62,6 +68,14 @@ def deactivate_user(
     db.commit()
     db.refresh(user)
     record_audit(db, current_user.id, "USER_DEACTIVATED", "User", user.id)
+    notify_roles(
+        db, [RoleEnum.SYSTEM_ADMIN],
+        message=f"{current_user.full_name} deactivated the account of {user.full_name} ({user.username}).",
+        notif_type="USER_DEACTIVATED",
+        related_entity_type="User",
+        related_entity_id=user.id,
+        exclude_user_id=current_user.id,
+    )
     return user
 
 
@@ -78,4 +92,9 @@ def activate_user(
     db.commit()
     db.refresh(user)
     record_audit(db, current_user.id, "USER_ACTIVATED", "User", user.id)
+    notify_user(
+        db, user.id,
+        message="Your account has been reactivated. You can now log in again.",
+        notif_type="ACCOUNT_ACTIVATED",
+    )
     return user

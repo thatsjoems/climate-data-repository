@@ -127,6 +127,58 @@ class HazardExposurePoint(BaseModel):
     record_count: int
 
 
+# ---------- INSTITUTION ACCESS REQUESTS ----------
+class AccessRequestCreate(BaseModel):
+    institution_name: str
+    institution_code: Optional[str] = None
+    institution_type: InstitutionType = InstitutionType.BANK
+    contact_full_name: str
+    contact_email: EmailStr
+    contact_phone: Optional[str] = None
+    message: Optional[str] = None
+
+
+class AccessRequestOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    institution_name: str
+    institution_code: Optional[str] = None
+    institution_type: InstitutionType
+    contact_full_name: str
+    contact_email: str
+    contact_phone: Optional[str] = None
+    message: Optional[str] = None
+    status: str
+    review_notes: Optional[str] = None
+    created_at: datetime
+
+
+class AccessRequestDecision(BaseModel):
+    notes: Optional[str] = None
+
+
+class AccessRequestApprovalOut(BaseModel):
+    request: AccessRequestOut
+    generated_username: str
+    generated_temporary_password: str
+
+
+# ---------- NOTIFICATIONS ----------
+class NotificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    type: str
+    message: str
+    related_entity_type: Optional[str] = None
+    related_entity_id: Optional[str] = None
+    is_read: bool
+    created_at: datetime
+
+
+class UnreadCountOut(BaseModel):
+    unread_count: int
+
+
 # ---------- AUDIT ----------
 class AuditLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)

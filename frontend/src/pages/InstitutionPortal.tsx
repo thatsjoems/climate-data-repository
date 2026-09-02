@@ -95,13 +95,13 @@ export default function InstitutionPortal() {
       <h1>Reporting Institution Portal</h1>
 
       <section className="card">
-        <h2>1. Download the Standardized Template</h2>
+        <h2>📥 1. Download the Standardized Template</h2>
         <p>Download the Excel template, fill it in with your loan/collateral data, then upload it below.</p>
         <button onClick={handleDownloadTemplate}>Download Template (.xlsx)</button>
       </section>
 
       <section className="card">
-        <h2>2. Upload Data</h2>
+        <h2>📤 2. Upload Data</h2>
         <form onSubmit={handleUpload} className="upload-form">
           <label>Reporting Period (e.g. 2026-Q3)</label>
           <input
@@ -124,7 +124,7 @@ export default function InstitutionPortal() {
       </section>
 
       <section className="card">
-        <h2>3. Submission History</h2>
+        <h2>🗂️ 3. Submission History</h2>
         <table>
           <thead>
             <tr>

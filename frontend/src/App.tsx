@@ -3,6 +3,7 @@ import { useAuth } from './context/AuthContext'
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
+import RequestAccess from './pages/RequestAccess'
 import InstitutionPortal from './pages/InstitutionPortal'
 import InternalPortal from './pages/InternalPortal'
 import AdminPanel from './pages/AdminPanel'
@@ -20,6 +21,7 @@ export default function App() {
       <Navbar />
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/request-access" element={<RequestAccess />} />
         <Route
           path="/"
           element={
