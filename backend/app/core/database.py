@@ -1,5 +1,5 @@
 """
-Muunganisho na database (SQLAlchemy engine + session).
+Database connection (SQLAlchemy engine + session).
 """
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -8,7 +8,7 @@ from app.core.config import settings
 
 connect_args = {}
 if settings.DATABASE_URL.startswith("sqlite"):
-    # SQLite inahitaji hii ili ifanye kazi vizuri na FastAPI (multi-threaded)
+    # SQLite needs this to work correctly with FastAPI (multi-threaded)
     connect_args = {"check_same_thread": False}
 
 engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
@@ -18,7 +18,7 @@ Base = declarative_base()
 
 
 def get_db():
-    """Dependency inayotoa 'session' ya database kwa kila request, na kuifunga baada ya kumaliza."""
+    """Dependency that provides a database session per request and closes it afterwards."""
     db = SessionLocal()
     try:
         yield db

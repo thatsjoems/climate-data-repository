@@ -73,26 +73,26 @@ export default function InternalPortal() {
 
   return (
     <div className="page">
-      <h1>Dashboard ya Ndani (Bank of Tanzania)</h1>
+      <h1>Internal Dashboard (Bank of Tanzania)</h1>
 
       {kpi && (
         <section className="kpi-grid">
-          <div className="kpi-card"><span className="kpi-value">{kpi.total_institutions}</span><span>Taasisi Zinazoripoti</span></div>
-          <div className="kpi-card"><span className="kpi-value">{kpi.total_submissions}</span><span>Jumla ya Submissions</span></div>
-          <div className="kpi-card"><span className="kpi-value">{kpi.pending_submissions}</span><span>Zinazosubiri</span></div>
-          <div className="kpi-card"><span className="kpi-value">{kpi.invalid_submissions}</span><span>Zenye Makosa</span></div>
-          <div className="kpi-card"><span className="kpi-value">{kpi.approved_submissions}</span><span>Zilizokubaliwa</span></div>
-          <div className="kpi-card"><span className="kpi-value">{kpi.rejected_submissions}</span><span>Zilizokataliwa</span></div>
-          <div className="kpi-card wide"><span className="kpi-value">{formatTZS(kpi.total_loan_exposure_tzs)}</span><span>Jumla ya Mikopo (Valid Records)</span></div>
-          <div className="kpi-card wide"><span className="kpi-value">{formatTZS(kpi.total_collateral_value_tzs)}</span><span>Jumla ya Collateral</span></div>
+          <div className="kpi-card"><span className="kpi-value">{kpi.total_institutions}</span><span>Reporting Institutions</span></div>
+          <div className="kpi-card"><span className="kpi-value">{kpi.total_submissions}</span><span>Total Submissions</span></div>
+          <div className="kpi-card"><span className="kpi-value">{kpi.pending_submissions}</span><span>Pending</span></div>
+          <div className="kpi-card"><span className="kpi-value">{kpi.invalid_submissions}</span><span>With Errors</span></div>
+          <div className="kpi-card"><span className="kpi-value">{kpi.approved_submissions}</span><span>Approved</span></div>
+          <div className="kpi-card"><span className="kpi-value">{kpi.rejected_submissions}</span><span>Rejected</span></div>
+          <div className="kpi-card wide"><span className="kpi-value">{formatTZS(kpi.total_loan_exposure_tzs)}</span><span>Total Loan Value (Valid Records)</span></div>
+          <div className="kpi-card wide"><span className="kpi-value">{formatTZS(kpi.total_collateral_value_tzs)}</span><span>Total Collateral Value</span></div>
         </section>
       )}
 
       <section className="card">
-        <h2>Ufuatiliaji wa Submissions (Submission Monitoring)</h2>
-        <label>Chuja kwa Status: </label>
+        <h2>Submission Monitoring</h2>
+        <label>Filter by Status: </label>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          <option value="ALL">Zote</option>
+          <option value="ALL">All</option>
           <option value="PENDING">Pending</option>
           <option value="VALID">Valid</option>
           <option value="INVALID">Invalid</option>
@@ -103,8 +103,8 @@ export default function InternalPortal() {
         <table>
           <thead>
             <tr>
-              <th>Faili</th><th>Kipindi</th><th>Status</th><th>Sahihi/Jumla</th><th>Tarehe</th>
-              {(user?.role === 'BOT_USER' || user?.role === 'SYSTEM_ADMIN') && <th>Maoni + Uamuzi</th>}
+              <th>File</th><th>Period</th><th>Status</th><th>Valid/Total</th><th>Date</th>
+              {(user?.role === 'BOT_USER' || user?.role === 'SYSTEM_ADMIN') && <th>Notes + Decision</th>}
             </tr>
           </thead>
           <tbody>
@@ -119,28 +119,28 @@ export default function InternalPortal() {
                   <td>
                     <input
                       type="text"
-                      placeholder="Maoni (hiari)"
+                      placeholder="Notes (optional)"
                       value={notesById[s.id] || ''}
                       onChange={(e) => setNotesById({ ...notesById, [s.id]: e.target.value })}
                     />
-                    <button onClick={() => handleReview(s.id, 'APPROVE')}>Kubali</button>
-                    <button onClick={() => handleReview(s.id, 'REJECT')}>Kataa</button>
+                    <button onClick={() => handleReview(s.id, 'APPROVE')}>Approve</button>
+                    <button onClick={() => handleReview(s.id, 'REJECT')}>Reject</button>
                   </td>
                 )}
               </tr>
             ))}
             {filteredSubmissions.length === 0 && (
-              <tr><td colSpan={6}>Hakuna submissions zinazolingana na chujio hili.</td></tr>
+              <tr><td colSpan={6}>No submissions match this filter.</td></tr>
             )}
           </tbody>
         </table>
       </section>
 
       <section className="card">
-        <h2>Climate & Financial Exposure kwa Mkoa</h2>
-        <p className="note">Inaonyesha jumla ya thamani ya mikopo (kutoka submissions halali) kwa kila mkoa na hatari ya kimazingira iliyoripotiwa.</p>
+        <h2>Climate & Financial Exposure by Region</h2>
+        <p className="note">Shows the total value of loans (from valid submissions) per region and reported climate hazard.</p>
         <table>
-          <thead><tr><th>Mkoa</th><th>Hatari (Hazard)</th><th>Mikopo Iliyowekwa Wazi</th><th>Idadi ya Rekodi</th></tr></thead>
+          <thead><tr><th>Region</th><th>Hazard</th><th>Loan Exposure</th><th>Record Count</th></tr></thead>
           <tbody>
             {hazardExposure.map((h, idx) => (
               <tr key={idx}>
@@ -150,7 +150,7 @@ export default function InternalPortal() {
                 <td>{h.record_count}</td>
               </tr>
             ))}
-            {hazardExposure.length === 0 && <tr><td colSpan={4}>Hakuna data bado.</td></tr>}
+            {hazardExposure.length === 0 && <tr><td colSpan={4}>No data yet.</td></tr>}
           </tbody>
         </table>
       </section>

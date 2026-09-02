@@ -1,6 +1,6 @@
 """
-Dependencies za FastAPI: kupata mtumiaji aliyeingia (current user) na
-kuzuia (guard) ufikiaji kulingana na role - Role Based Access Control (RBAC).
+FastAPI dependencies: resolving the current authenticated user and
+enforcing access based on role - Role Based Access Control (RBAC).
 """
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -16,7 +16,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Huwezi kutambuliwa - tafadhali ingia (login) tena",
+        detail="Could not validate credentials - please log in again",
         headers={"WWW-Authenticate": "Bearer"},
     )
     payload = decode_access_token(token)
@@ -32,12 +32,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 
 def require_roles(*allowed_roles: RoleEnum):
-    """Guard: inaruhusu tu watumiaji wenye role zilizoorodheshwa kufikia endpoint husika."""
+    """Guard: only allows users whose role is in the given list to access the endpoint."""
     def checker(current_user: User = Depends(get_current_user)) -> User:
         if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Huna ruhusa ya kufikia rasilimali hii (insufficient permissions)",
+                detail="You do not have permission to access this resource (insufficient permissions)",
             )
         return current_user
     return checker

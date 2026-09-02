@@ -1,28 +1,28 @@
 # Database Schema
 
-Mfumo huu unatumia SQLAlchemy ORM (angalia `backend/app/models/models.py`) kama
-"chanzo cha ukweli" (single source of truth) cha muundo wa database.
+This system uses SQLAlchemy ORM (see `backend/app/models/models.py`) as the
+single source of truth for the database structure.
 
-Majedwali (tables) yanatengenezwa moja kwa moja unapoendesha:
+Tables are created automatically when you run:
 
 ```
 python init_db.py
 ```
 
-Hii inatumika kwa SQLite (default, hauitaji usanidi) na PostgreSQL (baada ya
-kubadilisha DATABASE_URL kwenye .env).
+This works for both SQLite (default, no setup required) and PostgreSQL (after
+changing DATABASE_URL in `.env`).
 
-## Muhtasari wa Majedwali (Entity Summary)
+## Entity Summary
 
-| Jedwali | Kusudi |
+| Table | Purpose |
 |---|---|
-| institutions | Taasisi zinazoripoti (mabenki, TMA, n.k.) |
-| users | Watumiaji wote wa mfumo (Admin, BOT_USER, INSTITUTION_USER) |
-| submissions | Kila uwasilishaji wa faili ya data |
-| submission_records | Kila safu (row) ya data ndani ya submission (mfano: mkopo mmoja) |
-| validation_errors | Makosa yaliyopatikana wakati wa validation ya submission |
-| climate_records | Data za hali ya hewa (SAMPLE/SYNTHETIC - angalia backend README) |
-| audit_logs | Kumbukumbu za matukio muhimu ya mfumo |
+| institutions | Reporting institutions (banks, TMA, etc.) |
+| users | All system users (Admin, BOT_USER, INSTITUTION_USER) |
+| submissions | Each data file submission |
+| submission_records | Each row of data within a submission (e.g. one loan) |
+| validation_errors | Errors found while validating a submission |
+| climate_records | Climate data (SAMPLE/SYNTHETIC - see backend README) |
+| audit_logs | Records of significant system events |
 
-Kwa ERD kamili, tumia zana kama `dbdiagram.io` ukiweka muundo wa juu, au
-tumia `sqlalchemy_schemadisplay` baada ya kusakinisha packages zote.
+For a full ERD, use a tool such as `dbdiagram.io` from the structure above, or
+`sqlalchemy_schemadisplay` once all packages are installed.

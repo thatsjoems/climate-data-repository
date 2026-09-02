@@ -1,7 +1,7 @@
 """
-MODULE: Climate & Financial Analytics - hesabu za KPI, mielekeo (trends), na exposure.
-Hesabu zote hapa ni descriptive statistics (jumla, wastani) zinazotokana moja kwa moja
-na data zilizopo kwenye database - hakuna 'climate risk score' ya kubuni.
+MODULE: Climate & Financial Analytics - KPI, trend, and exposure calculations.
+All figures here are descriptive statistics (totals, averages) computed directly
+from the data stored in the database - there is no invented "climate risk score".
 """
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -62,8 +62,8 @@ def get_climate_trends(db: Session, region: str | None = None) -> list[dict]:
 
 def get_hazard_exposure(db: Session) -> list[dict]:
     """
-    Inaunganisha SubmissionRecord (loan exposure) na eneo (region) kuonyesha
-    ni kiasi gani cha mikopo kipo kwenye maeneo yenye hatari za kimazingira zilizoripotiwa.
+    Joins SubmissionRecord (loan exposure) with region to show how much loan
+    value sits in areas with reported climate hazard exposure.
     """
     results = (
         db.query(

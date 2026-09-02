@@ -1,6 +1,6 @@
 """
 Climate Data Repository (CDR) - Bank of Tanzania
-Entry point ya backend (FastAPI application).
+Backend entry point (FastAPI application).
 
 Run: uvicorn app.main:app --reload
 """
@@ -9,16 +9,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import Base, engine
-from app.models import models  # noqa: F401 - inahakikisha tables zote zime-register kwenye Base
+from app.models import models  # noqa: F401 - ensures all tables are registered on Base
 from app.api import auth, users, institutions, templates, submissions, analytics, audit
 
-# Tengeneza majedwali ya database kama hayapo bado (kwa SQLite/dev quick-start).
-# Kwa uzalishaji halisi (production), tumia migrations badala ya hii.
+# Create database tables if they do not already exist (quick-start for SQLite/dev).
+# For real production use, use migrations instead of this.
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="Prototype ya mfumo wa CDR - imejengwa kwa ajili ya EASTC 8-Week Practical Training",
+    description="CDR prototype system - built as part of the EASTC 8-Week Practical Training Programme",
     version="0.1.0",
 )
 

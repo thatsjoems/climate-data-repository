@@ -6,7 +6,7 @@ export const apiClient = axios.create({
   baseURL: API_URL,
 })
 
-// Ambatanisha token ya login kwenye kila request kiotomatiki
+// Automatically attach the login token to every request
 apiClient.interceptors.request.use((config) => {
   const token = localStorage.getItem('cdr_token')
   if (token && config.headers) {
@@ -15,7 +15,7 @@ apiClient.interceptors.request.use((config) => {
   return config
 })
 
-// Kama token imeisha muda (401), rudisha mtumiaji kwenye login
+// If the token has expired (401), send the user back to the login page
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {

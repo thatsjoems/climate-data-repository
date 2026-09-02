@@ -1,5 +1,5 @@
 """
-MODULE E, F, G: Data Upload/Submission, Validation, Review.
+MODULES E, F, G: Data Upload/Submission, Validation, Review.
 """
 import os
 import uuid
@@ -30,11 +30,11 @@ def upload_submission(
     current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.SYSTEM_ADMIN)),
 ):
     if not current_user.institution_id:
-        raise HTTPException(status_code=400, detail="Mtumiaji huyu hajaunganishwa na taasisi yoyote")
+        raise HTTPException(status_code=400, detail="This user is not linked to any institution")
 
     file_bytes = file.file.read()
 
-    # Hifadhi faili halisi kwenye diski (uploads/)
+    # Persist the raw file to disk (uploads/)
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     safe_name = f"{uuid.uuid4()}_{file.filename}"
     saved_path = os.path.join(settings.UPLOAD_DIR, safe_name)
@@ -62,7 +62,7 @@ def upload_submission(
         invalid_records=invalid_count,
     )
     db.add(submission)
-    db.flush()  # pata submission.id kabla ya commit
+    db.flush()  # obtain submission.id before commit
 
     for r in records:
         db.add(SubmissionRecord(
@@ -93,7 +93,7 @@ def upload_submission(
 
     record_audit(
         db, current_user.id, "SUBMISSION_CREATED", "Submission", submission.id,
-        f"Faili '{file.filename}' - status: {overall_status.value}"
+        f"File '{file.filename}' - status: {overall_status.value}"
     )
     return submission
 
@@ -104,7 +104,7 @@ def list_submissions(
     current_user: User = Depends(get_current_user),
 ):
     query = db.query(Submission)
-    # Data isolation: mtumiaji wa taasisi anaona submissions za taasisi yake TU
+    # Data isolation: an institution user only sees submissions belonging to their own institution
     if current_user.role == RoleEnum.INSTITUTION_USER:
         query = query.filter(Submission.institution_id == current_user.institution_id)
     return query.order_by(Submission.created_at.desc()).all()
@@ -118,9 +118,9 @@ def get_submission(
 ):
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
     if not submission:
-        raise HTTPException(status_code=404, detail="Submission haijapatikana")
+        raise HTTPException(status_code=404, detail="Submission not found")
     if current_user.role == RoleEnum.INSTITUTION_USER and submission.institution_id != current_user.institution_id:
-        raise HTTPException(status_code=403, detail="Huna ruhusa ya kuona submission hii")
+        raise HTTPException(status_code=403, detail="You do not have permission to view this submission")
     return submission
 
 
@@ -133,14 +133,14 @@ def review_submission(
 ):
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
     if not submission:
-        raise HTTPException(status_code=404, detail="Submission haijapatikana")
+        raise HTTPException(status_code=404, detail="Submission not found")
 
     if payload.decision.upper() == "APPROVE":
         submission.status = SubmissionStatus.APPROVED
     elif payload.decision.upper() == "REJECT":
         submission.status = SubmissionStatus.REJECTED
     else:
-        raise HTTPException(status_code=400, detail="decision lazima iwe APPROVE au REJECT")
+        raise HTTPException(status_code=400, detail="decision must be APPROVE or REJECT")
 
     submission.review_notes = payload.notes
     submission.reviewed_by_user_id = current_user.id

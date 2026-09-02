@@ -1,6 +1,6 @@
 """
-Mipangilio mikuu ya mfumo (Configuration).
-Thamani zote nyeti (siri) zinasomwa kutoka faili ya .env - HAZIWEKWI hapa moja kwa moja.
+Application configuration.
+All sensitive values are read from the .env file - never hardcoded here.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     UPLOAD_DIR: str = "uploads"
 
+    # Allow the frontend (Vite dev server) to talk to this backend during development
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",

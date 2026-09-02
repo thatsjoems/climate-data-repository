@@ -1,25 +1,25 @@
 # CDR Frontend (React + TypeScript + Vite)
 
-## Kuanzisha
+## Getting Started
 
 ```bash
 cd frontend
 npm install
-copy .env.example .env     # Windows (Mac/Linux: cp .env.example .env)
+copy .env.example .env     # Windows (macOS/Linux: cp .env.example .env)
 npm run dev
 ```
 
-Frontend itapatikana kwenye: http://localhost:5173
+The frontend will be available at: http://localhost:5173
 
-**MUHIMU**: Backend (`uvicorn app.main:app --reload`) LAZIMA iwe inaendesha kwanza,
-vinginevyo login na kurasa zote hazitafanya kazi.
+**IMPORTANT**: The backend (`uvicorn app.main:app --reload`) must already be running,
+otherwise login and all pages will fail to load data.
 
-## Muundo
+## Structure
 
 ```
 src/
-  api/        -> axios client inayoongea na backend
-  context/    -> AuthContext (usimamizi wa login/session)
+  api/        -> axios client that talks to the backend
+  context/    -> AuthContext (login/session management)
   components/ -> Navbar, ProtectedRoute
-  pages/      -> Login, InstitutionPortal (taasisi), InternalPortal (BOT), AdminPanel
+  pages/      -> Login, InstitutionPortal, InternalPortal (BOT), AdminPanel
 ```

@@ -1,7 +1,7 @@
 """
 MODULE F: Automated Data Validation.
-Inasoma faili ya Excel iliyopakiwa (uploaded) na kuithibitisha dhidi ya template sanifu.
-Inarudisha: (list ya records zilizosomwa, list ya errors zilizopatikana).
+Reads an uploaded Excel file and validates it against the standardized template.
+Returns: (list of parsed records, list of validation issues found).
 """
 import io
 import re
@@ -23,16 +23,16 @@ def validate_excel_file(file_bytes: bytes, filename: str):
 
     # ---- 1. File-level validation ----
     if not (filename.lower().endswith(".xlsx") or filename.lower().endswith(".xls")):
-        issues.append(ValidationIssue(None, None, "Aina ya faili si sahihi - lazima iwe .xlsx au .xls"))
+        issues.append(ValidationIssue(None, None, "Invalid file type - must be .xlsx or .xls"))
         return records, issues
 
     try:
         df = pd.read_excel(io.BytesIO(file_bytes), sheet_name="Loan_Collateral_Data")
     except Exception:
         try:
-            df = pd.read_excel(io.BytesIO(file_bytes))  # jaribu sheet ya kwanza kama jina halifanani
+            df = pd.read_excel(io.BytesIO(file_bytes))  # fall back to the first sheet if the name doesn't match
         except Exception as exc:
-            issues.append(ValidationIssue(None, None, f"Imeshindikana kusoma faili ya Excel: {exc}"))
+            issues.append(ValidationIssue(None, None, f"Could not read the Excel file: {exc}"))
             return records, issues
 
     # ---- 2. Template structure validation ----
@@ -40,8 +40,8 @@ def validate_excel_file(file_bytes: bytes, filename: str):
     if missing_cols:
         issues.append(ValidationIssue(
             None, None,
-            f"Column zifuatazo za lazima hazipo kwenye faili: {', '.join(missing_cols)}. "
-            f"Tafadhali tumia template sanifu."
+            f"The following required columns are missing from the file: {', '.join(missing_cols)}. "
+            f"Please use the standardized template."
         ))
         return records, issues
 
@@ -49,16 +49,16 @@ def validate_excel_file(file_bytes: bytes, filename: str):
 
     # ---- 3. Row-level data validation ----
     for idx, row in df.iterrows():
-        row_number = idx + 2  # +2 kwa sababu row 1 ni header, na pandas huanza na 0
+        row_number = idx + 2  # +2 because row 1 is the header, and pandas is 0-indexed
         row_is_valid = True
         record = {}
 
         loan_id = str(row.get("loan_id", "")).strip()
         if not loan_id or loan_id.lower() == "nan":
-            issues.append(ValidationIssue(row_number, "loan_id", "loan_id haipo (mandatory field)"))
+            issues.append(ValidationIssue(row_number, "loan_id", "loan_id is missing (mandatory field)"))
             row_is_valid = False
         elif loan_id in seen_loan_ids:
-            issues.append(ValidationIssue(row_number, "loan_id", f"loan_id '{loan_id}' imerudiwa (duplicate)"))
+            issues.append(ValidationIssue(row_number, "loan_id", f"loan_id '{loan_id}' is duplicated"))
             row_is_valid = False
         else:
             seen_loan_ids.add(loan_id)
@@ -66,7 +66,7 @@ def validate_excel_file(file_bytes: bytes, filename: str):
 
         borrower_name = str(row.get("borrower_name", "")).strip()
         if not borrower_name or borrower_name.lower() == "nan":
-            issues.append(ValidationIssue(row_number, "borrower_name", "borrower_name haipo (mandatory field)"))
+            issues.append(ValidationIssue(row_number, "borrower_name", "borrower_name is missing (mandatory field)"))
             row_is_valid = False
         record["borrower_name"] = borrower_name
 
@@ -75,17 +75,17 @@ def validate_excel_file(file_bytes: bytes, filename: str):
             try:
                 val = float(raw_val)
                 if val <= 0:
-                    issues.append(ValidationIssue(row_number, amount_col, f"{amount_col} lazima iwe zaidi ya 0"))
+                    issues.append(ValidationIssue(row_number, amount_col, f"{amount_col} must be greater than 0"))
                     row_is_valid = False
                 record[amount_col] = val
             except (TypeError, ValueError):
-                issues.append(ValidationIssue(row_number, amount_col, f"{amount_col} si namba sahihi"))
+                issues.append(ValidationIssue(row_number, amount_col, f"{amount_col} is not a valid number"))
                 row_is_valid = False
                 record[amount_col] = None
 
         region = str(row.get("region", "")).strip()
         if region not in TANZANIA_REGIONS:
-            issues.append(ValidationIssue(row_number, "region", f"'{region}' si mkoa sahihi wa Tanzania"))
+            issues.append(ValidationIssue(row_number, "region", f"'{region}' is not a valid Tanzanian region"))
             row_is_valid = False
         record["region"] = region
 
@@ -96,7 +96,7 @@ def validate_excel_file(file_bytes: bytes, filename: str):
         if not re.match(r"^\d{4}-Q[1-4]$", reporting_period):
             issues.append(ValidationIssue(
                 row_number, "reporting_period",
-                f"'{reporting_period}' si muundo sahihi - tumia YYYY-Qn (mfano 2026-Q3)"
+                f"'{reporting_period}' is not a valid format - use YYYY-Qn (e.g. 2026-Q3)"
             ))
             row_is_valid = False
         record["reporting_period"] = reporting_period
@@ -106,7 +106,7 @@ def validate_excel_file(file_bytes: bytes, filename: str):
         if hazard not in HAZARD_OPTIONS:
             issues.append(ValidationIssue(
                 row_number, "climate_hazard_exposure",
-                f"'{hazard}' si chaguo sahihi", severity="WARNING"
+                f"'{hazard}' is not a valid option", severity="WARNING"
             ))
             hazard = "None"
         record["climate_hazard_exposure"] = hazard

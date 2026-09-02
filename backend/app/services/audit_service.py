@@ -1,5 +1,5 @@
 """
-MODULE: Audit Logging - kurekodi matukio muhimu ya mfumo.
+MODULE: Audit Logging - recording important system events.
 """
 from sqlalchemy.orm import Session
 from app.models.models import AuditLog

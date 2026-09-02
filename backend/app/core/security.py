@@ -1,6 +1,6 @@
 """
-Usalama: password hashing na JWT tokens.
-Hakuna password wala secret iliyowekwa moja kwa moja (hardcoded) hapa - zote zinatoka .env
+Security utilities: password hashing and JWT tokens.
+No password or secret is ever hardcoded here - all values come from .env
 """
 from datetime import datetime, timedelta, timezone
 from passlib.context import CryptContext

@@ -1,5 +1,5 @@
 """
-Pydantic Schemas - kuthibitisha (validate) data zinazoingia/kutoka kwenye API.
+Pydantic Schemas - validate data going into and coming out of the API.
 """
 from datetime import datetime
 from typing import Optional

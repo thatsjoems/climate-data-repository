@@ -29,9 +29,9 @@ def create_user(
     current_user: User = Depends(require_roles(RoleEnum.SYSTEM_ADMIN)),
 ):
     if db.query(User).filter(User.username == payload.username).first():
-        raise HTTPException(status_code=400, detail="Username hii tayari inatumika")
+        raise HTTPException(status_code=400, detail="This username is already taken")
     if db.query(User).filter(User.email == payload.email).first():
-        raise HTTPException(status_code=400, detail="Email hii tayari inatumika")
+        raise HTTPException(status_code=400, detail="This email is already in use")
 
     user = User(
         full_name=payload.full_name,
@@ -45,7 +45,7 @@ def create_user(
     db.commit()
     db.refresh(user)
 
-    record_audit(db, current_user.id, "USER_CREATED", "User", user.id, f"Aliundwa mtumiaji {user.username}")
+    record_audit(db, current_user.id, "USER_CREATED", "User", user.id, f"Created user {user.username}")
     return user
 
 
@@ -57,7 +57,7 @@ def deactivate_user(
 ):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        raise HTTPException(status_code=404, detail="Mtumiaji hajapatikana")
+        raise HTTPException(status_code=404, detail="User not found")
     user.is_active = False
     db.commit()
     db.refresh(user)
@@ -73,7 +73,7 @@ def activate_user(
 ):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        raise HTTPException(status_code=404, detail="Mtumiaji hajapatikana")
+        raise HTTPException(status_code=404, detail="User not found")
     user.is_active = True
     db.commit()
     db.refresh(user)

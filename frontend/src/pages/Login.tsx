@@ -14,7 +14,7 @@ export default function Login() {
       await login(username, password)
       navigate('/')
     } catch {
-      // error tayari imeonyeshwa kupitia AuthContext
+      // error is already surfaced via AuthContext
     }
   }
 
@@ -44,15 +44,15 @@ export default function Login() {
         />
 
         <button type="submit" disabled={isLoading}>
-          {isLoading ? 'Inaingia...' : 'Ingia (Login)'}
+          {isLoading ? 'Signing in...' : 'Log In'}
         </button>
 
         <div className="demo-hint">
-          <strong>Akaunti za DEMO (baada ya kuendesha init_db.py):</strong>
+          <strong>DEMO accounts (after running init_db.py):</strong>
           <ul>
             <li>Admin: <code>admin</code> / <code>Admin@123</code></li>
             <li>BOT Analyst: <code>bot_analyst</code> / <code>Analyst@123</code></li>
-            <li>Taasisi (Bank A): <code>bankA_user</code> / <code>BankA@123</code></li>
+            <li>Institution (Bank A): <code>bankA_user</code> / <code>BankA@123</code></li>
           </ul>
         </div>
       </form>

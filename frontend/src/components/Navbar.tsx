@@ -19,13 +19,13 @@ export default function Navbar() {
         <span className="navbar-subtitle">Bank of Tanzania</span>
       </div>
       <div className="navbar-links">
-        {user.role === 'INSTITUTION_USER' && <Link to="/">Dashboard Yangu</Link>}
-        {(user.role === 'BOT_USER' || user.role === 'SYSTEM_ADMIN') && <Link to="/">Dashboard ya Ndani</Link>}
-        {user.role === 'SYSTEM_ADMIN' && <Link to="/admin">Usimamizi (Admin)</Link>}
+        {user.role === 'INSTITUTION_USER' && <Link to="/">My Dashboard</Link>}
+        {(user.role === 'BOT_USER' || user.role === 'SYSTEM_ADMIN') && <Link to="/">Internal Dashboard</Link>}
+        {user.role === 'SYSTEM_ADMIN' && <Link to="/admin">Administration</Link>}
       </div>
       <div className="navbar-user">
         <span>{user.full_name} <em>({user.role})</em></span>
-        <button onClick={handleLogout}>Toka (Logout)</button>
+        <button onClick={handleLogout}>Log Out</button>
       </div>
     </nav>
   )

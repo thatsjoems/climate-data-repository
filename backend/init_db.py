@@ -1,11 +1,11 @@
 """
-Script ya kuanzisha database na kuweka SEED DATA ya awali (kwa ajili ya demo/majaribio).
+Script to initialize the database and load initial SEED DATA (for demo/testing purposes).
 
-MUHIMU: Data zote hapa (watumiaji, taasisi, climate records) ni za SAMPLE/DEMO
-kwa ajili ya kuonyesha mfumo unavyofanya kazi. SIYO data halisi za kiuchumi
-au za hali ya hewa za Tanzania.
+IMPORTANT: All data here (users, institutions, climate records) is SAMPLE/DEMO
+data used to demonstrate how the system works. It is NOT real financial or
+climate data for Tanzania.
 
-Endesha kwa: python init_db.py
+Run with: python init_db.py
 """
 import random
 from datetime import datetime
@@ -14,28 +14,28 @@ from app.core.database import Base, engine, SessionLocal
 from app.core.security import hash_password
 from app.models.models import User, Institution, RoleEnum, InstitutionType, ClimateRecord
 
-print("Inatengeneza majedwali ya database...")
+print("Creating database tables...")
 Base.metadata.create_all(bind=engine)
 
 db = SessionLocal()
 
 try:
     if db.query(User).count() > 0:
-        print("Database tayari ina data. Sitaongeza tena seed data (epuka duplicate).")
+        print("The database already contains data. Skipping seed data to avoid duplicates.")
     else:
-        print("Inaweka SEED DATA (demo)...")
+        print("Loading SEED DATA (demo)...")
 
-        # ---- Taasisi za mfano ----
+        # ---- Sample institutions ----
         bot = Institution(
             code="BOT-HQ", name="Bank of Tanzania (Headquarters)",
             type=InstitutionType.GOVERNMENT_AGENCY, contact_email="info@bot.go.tz",
         )
         bank_a = Institution(
-            code="BANK-A", name="Mfano Commercial Bank Ltd",
+            code="BANK-A", name="Sample Commercial Bank Ltd",
             type=InstitutionType.BANK, contact_email="reports@bankA-sample.co.tz",
         )
         bank_b = Institution(
-            code="BANK-B", name="Sampuli National Bank Ltd",
+            code="BANK-B", name="Sample National Bank Ltd",
             type=InstitutionType.BANK, contact_email="reports@bankB-sample.co.tz",
         )
         tma = Institution(
@@ -45,7 +45,7 @@ try:
         db.add_all([bot, bank_a, bank_b, tma])
         db.flush()
 
-        # ---- Watumiaji wa mfano ----
+        # ---- Sample users ----
         users = [
             User(
                 full_name="System Administrator", username="admin", email="admin@cdr-demo.local",
@@ -70,10 +70,10 @@ try:
         ]
         db.add_all(users)
 
-        # ---- Climate records - SYNTHETIC SAMPLE DATA pekee ----
+        # ---- Climate records - SYNTHETIC SAMPLE DATA only ----
         regions = ["Dodoma", "Morogoro", "Mwanza", "Mbeya", "Dar es Salaam", "Singida"]
         hazards = [None, None, "Drought", "Flood", None, "Cyclone"]
-        random.seed(42)  # matokeo yanayorudiwa (reproducible) - kwa ajili ya demo tu
+        random.seed(42)  # fixed seed for reproducible demo output
         for year in [2024, 2025, 2026]:
             for month in range(1, 13):
                 for region in regions:
@@ -90,15 +90,15 @@ try:
                     ))
 
         db.commit()
-        print("Seed data imewekwa kikamilifu.")
+        print("Seed data loaded successfully.")
         print("")
-        print("========== TAARIFA ZA KUINGIA (LOGIN) ZA DEMO ==========")
+        print("========== DEMO LOGIN CREDENTIALS ==========")
         print("System Admin   -> username: admin        password: Admin@123")
         print("BOT Analyst    -> username: bot_analyst   password: Analyst@123")
         print("Bank A User    -> username: bankA_user    password: BankA@123")
         print("Bank B User    -> username: bankB_user    password: BankB@123")
-        print("=========================================================")
-        print("MUHIMU: Badilisha password hizi kabla ya matumizi halisi (production).")
+        print("=============================================")
+        print("IMPORTANT: Change these passwords before any real/production use.")
 
 finally:
     db.close()

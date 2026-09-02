@@ -19,15 +19,15 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == payload.username).first()
     if not user or not verify_password(payload.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Username au password si sahihi")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
     if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Akaunti hii imezimwa (deactivated)")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account has been deactivated")
 
     user.last_login_at = datetime.utcnow()
     db.commit()
 
     token = create_access_token({"sub": user.id, "role": user.role.value})
-    record_audit(db, user.id, "LOGIN", "User", user.id, f"Mtumiaji {user.username} ameingia")
+    record_audit(db, user.id, "LOGIN", "User", user.id, f"User {user.username} logged in")
 
     return TokenResponse(access_token=token, user=UserOut.model_validate(user))
 

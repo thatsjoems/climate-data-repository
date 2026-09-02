@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('cdr_user', JSON.stringify(res.data.user))
       setUser(res.data.user)
     } catch (err: any) {
-      const msg = err?.response?.data?.detail || 'Imeshindikana kuingia. Jaribu tena.'
+      const msg = err?.response?.data?.detail || 'Login failed. Please try again.'
       setError(msg)
       throw err
     } finally {

@@ -21,11 +21,11 @@ interface ValidationErrorItem {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  PENDING: 'Inasubiri',
-  VALID: 'Sahihi (Valid)',
-  INVALID: 'Kuna Makosa',
-  APPROVED: 'Imekubaliwa',
-  REJECTED: 'Imekataliwa',
+  PENDING: 'Pending',
+  VALID: 'Valid',
+  INVALID: 'Has Errors',
+  APPROVED: 'Approved',
+  REJECTED: 'Rejected',
 }
 
 export default function InstitutionPortal() {
@@ -59,7 +59,7 @@ export default function InstitutionPortal() {
   async function handleUpload(e: FormEvent) {
     e.preventDefault()
     if (!file || !reportingPeriod) {
-      setUploadMessage('Tafadhali chagua faili na weka reporting period (mfano 2026-Q3).')
+      setUploadMessage('Please select a file and enter a reporting period (e.g. 2026-Q3).')
       return
     }
     setUploading(true)
@@ -72,14 +72,14 @@ export default function InstitutionPortal() {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       setUploadMessage(
-        `Imepakiwa. Status: ${STATUS_LABELS[res.data.status] || res.data.status}. ` +
-        `Records sahihi: ${res.data.valid_records}/${res.data.total_records}.`
+        `Uploaded. Status: ${STATUS_LABELS[res.data.status] || res.data.status}. ` +
+        `Valid records: ${res.data.valid_records}/${res.data.total_records}.`
       )
       setFile(null)
       setReportingPeriod('')
       loadSubmissions()
     } catch (err: any) {
-      setUploadMessage(err?.response?.data?.detail || 'Imeshindikana kupakia faili.')
+      setUploadMessage(err?.response?.data?.detail || 'Failed to upload the file.')
     } finally {
       setUploading(false)
     }
@@ -92,47 +92,47 @@ export default function InstitutionPortal() {
 
   return (
     <div className="page">
-      <h1>Portal ya Taasisi Inayoripoti</h1>
+      <h1>Reporting Institution Portal</h1>
 
       <section className="card">
-        <h2>1. Pakua Template Sanifu</h2>
-        <p>Pakua template ya Excel, ijaze data zako za mikopo/collateral, kisha uipakie hapa chini.</p>
-        <button onClick={handleDownloadTemplate}>Pakua Template (.xlsx)</button>
+        <h2>1. Download the Standardized Template</h2>
+        <p>Download the Excel template, fill it in with your loan/collateral data, then upload it below.</p>
+        <button onClick={handleDownloadTemplate}>Download Template (.xlsx)</button>
       </section>
 
       <section className="card">
-        <h2>2. Pakia Data (Upload)</h2>
+        <h2>2. Upload Data</h2>
         <form onSubmit={handleUpload} className="upload-form">
-          <label>Reporting Period (mfano: 2026-Q3)</label>
+          <label>Reporting Period (e.g. 2026-Q3)</label>
           <input
             type="text"
             value={reportingPeriod}
             onChange={(e) => setReportingPeriod(e.target.value)}
             placeholder="2026-Q3"
           />
-          <label>Faili ya Excel iliyojazwa</label>
+          <label>Completed Excel file</label>
           <input
             type="file"
             accept=".xlsx,.xls"
             onChange={(e) => setFile(e.target.files ? e.target.files[0] : null)}
           />
           <button type="submit" disabled={uploading}>
-            {uploading ? 'Inapakia...' : 'Pakia (Upload)'}
+            {uploading ? 'Uploading...' : 'Upload'}
           </button>
         </form>
         {uploadMessage && <div className="alert-info">{uploadMessage}</div>}
       </section>
 
       <section className="card">
-        <h2>3. Historia ya Uwasilishaji (Submission History)</h2>
+        <h2>3. Submission History</h2>
         <table>
           <thead>
             <tr>
-              <th>Faili</th>
-              <th>Kipindi</th>
+              <th>File</th>
+              <th>Period</th>
               <th>Status</th>
-              <th>Sahihi / Jumla</th>
-              <th>Tarehe</th>
+              <th>Valid / Total</th>
+              <th>Date</th>
               <th></th>
             </tr>
           </thead>
@@ -144,11 +144,11 @@ export default function InstitutionPortal() {
                 <td><span className={`badge badge-${s.status.toLowerCase()}`}>{STATUS_LABELS[s.status]}</span></td>
                 <td>{s.valid_records}/{s.total_records}</td>
                 <td>{new Date(s.created_at).toLocaleString()}</td>
-                <td><button onClick={() => viewDetails(s.id)}>Angalia</button></td>
+                <td><button onClick={() => viewDetails(s.id)}>View</button></td>
               </tr>
             ))}
             {submissions.length === 0 && (
-              <tr><td colSpan={6}>Bado hujapakia submission yoyote.</td></tr>
+              <tr><td colSpan={6}>You have not uploaded any submissions yet.</td></tr>
             )}
           </tbody>
         </table>
@@ -156,16 +156,16 @@ export default function InstitutionPortal() {
 
       {selected && (
         <section className="card">
-          <h2>Maelezo ya Submission: {selected.submission.file_name}</h2>
+          <h2>Submission Details: {selected.submission.file_name}</h2>
           {selected.submission.review_notes && (
-            <p><strong>Maoni ya BOT:</strong> {selected.submission.review_notes}</p>
+            <p><strong>BOT Reviewer Notes:</strong> {selected.submission.review_notes}</p>
           )}
           {selected.errors.length === 0 ? (
-            <p>Hakuna makosa yaliyopatikana.</p>
+            <p>No errors were found.</p>
           ) : (
             <table>
               <thead>
-                <tr><th>Row</th><th>Column</th><th>Kosa</th><th>Ukali</th></tr>
+                <tr><th>Row</th><th>Column</th><th>Error</th><th>Severity</th></tr>
               </thead>
               <tbody>
                 {selected.errors.map((err, idx) => (
@@ -179,7 +179,7 @@ export default function InstitutionPortal() {
               </tbody>
             </table>
           )}
-          <button onClick={() => setSelected(null)}>Funga</button>
+          <button onClick={() => setSelected(null)}>Close</button>
         </section>
       )}
     </div>

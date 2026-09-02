@@ -1,11 +1,11 @@
 """
-Database Models (Majedwali ya database) - SQLAlchemy ORM.
+Database Models - SQLAlchemy ORM.
 
-Majedwali yaliyopo:
-- User, Institution           -> Identity & Access
-- Submission, SubmissionRecord, ValidationError -> Usimamizi wa Submission
-- ClimateRecord                -> Data za hali ya hewa (SAMPLE/SYNTHETIC data - angalia README)
-- AuditLog                     -> Ufuatiliaji wa matukio muhimu
+Tables present:
+- User, Institution               -> Identity & Access
+- Submission, SubmissionRecord, ValidationError -> Submission Management
+- ClimateRecord                    -> Climate/weather data (SAMPLE/SYNTHETIC data - see README)
+- AuditLog                         -> Tracking of important system events
 """
 import enum
 import uuid
@@ -28,17 +28,17 @@ def gen_uuid() -> str:
 # ---------------------------------------------------------------------------
 
 class RoleEnum(str, enum.Enum):
-    SYSTEM_ADMIN = "SYSTEM_ADMIN"          # Msimamizi mkuu wa mfumo (BOT IT)
-    BOT_USER = "BOT_USER"                  # Mtumiaji wa ndani wa Benki Kuu (ukaguzi/uchambuzi)
-    INSTITUTION_USER = "INSTITUTION_USER"  # Mtumiaji wa taasisi ya nje (benki/TMA n.k.)
+    SYSTEM_ADMIN = "SYSTEM_ADMIN"          # Overall system administrator (BOT IT)
+    BOT_USER = "BOT_USER"                  # Internal Bank of Tanzania user (review/analysis)
+    INSTITUTION_USER = "INSTITUTION_USER"  # External reporting institution user (bank, TMA, etc.)
 
 
 class SubmissionStatus(str, enum.Enum):
-    PENDING = "PENDING"                # Imepokelewa, bado haijafanyiwa validation
-    VALID = "VALID"                    # Validation imepita bila error
-    INVALID = "INVALID"                # Validation imekuta error - inasubiri kurekebishwa
-    APPROVED = "APPROVED"              # Imekaguliwa na kukubaliwa na BOT_USER
-    REJECTED = "REJECTED"              # Imekaguliwa na kukataliwa na BOT_USER
+    PENDING = "PENDING"                # Received, not yet validated
+    VALID = "VALID"                    # Validation passed with no errors
+    INVALID = "INVALID"                # Validation found errors - awaiting correction
+    APPROVED = "APPROVED"              # Reviewed and approved by a BOT_USER
+    REJECTED = "REJECTED"              # Reviewed and rejected by a BOT_USER
 
 
 class InstitutionType(str, enum.Enum):
@@ -98,7 +98,7 @@ class Submission(Base):
 
     file_name = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
-    reporting_period = Column(String(20), nullable=False)  # mfano: "2026-Q2"
+    reporting_period = Column(String(20), nullable=False)  # e.g. "2026-Q2"
 
     status = Column(SAEnum(SubmissionStatus), default=SubmissionStatus.PENDING, nullable=False)
 
@@ -119,7 +119,7 @@ class Submission(Base):
 
 
 class SubmissionRecord(Base):
-    """Safu moja ya data (mfano: mkopo mmoja/loan moja) iliyotolewa kwenye faili ya Excel iliyopakiwa."""
+    """A single data row (e.g. one loan) extracted from an uploaded Excel submission."""
     __tablename__ = "submission_records"
 
     id = Column(String, primary_key=True, default=gen_uuid)
@@ -133,7 +133,7 @@ class SubmissionRecord(Base):
     collateral_value_tzs = Column(Float, nullable=True)
     region = Column(String(100), nullable=True)
     district = Column(String(100), nullable=True)
-    climate_hazard_exposure = Column(String(100), nullable=True)  # mfano: Drought, Flood, None
+    climate_hazard_exposure = Column(String(100), nullable=True)  # e.g. Drought, Flood, None
     is_valid = Column(Boolean, default=True)
 
     submission = relationship("Submission", back_populates="records")
@@ -153,14 +153,14 @@ class ValidationError(Base):
 
 
 # ---------------------------------------------------------------------------
-# CLIMATE DATA (SAMPLE / SYNTHETIC - tazama README kwa maelezo)
+# CLIMATE DATA (SAMPLE / SYNTHETIC - see README for details)
 # ---------------------------------------------------------------------------
 
 class ClimateRecord(Base):
     """
-    Data za hali ya hewa/hatari za kimazingira.
-    MUHIMU: Data zilizopo kwenye 'seed' ni SYNTHETIC (za mfano) kwa ajili ya
-    kuonyesha jinsi analytics zitakavyofanya kazi - SI data halisi za TMA/PMO.
+    Climate / environmental hazard data.
+    IMPORTANT: The records loaded via the seed script are SYNTHETIC (sample)
+    data used to demonstrate how the analytics will work - NOT real TMA/PMO data.
     """
     __tablename__ = "climate_records"
 
@@ -185,8 +185,8 @@ class AuditLog(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     user_id = Column(String, ForeignKey("users.id"), nullable=True)
-    action = Column(String(100), nullable=False)      # mfano: LOGIN, SUBMISSION_CREATED, USER_CREATED
-    entity_type = Column(String(100), nullable=True)  # mfano: Submission, User
+    action = Column(String(100), nullable=False)      # e.g. LOGIN, SUBMISSION_CREATED, USER_CREATED
+    entity_type = Column(String(100), nullable=True)  # e.g. Submission, User
     entity_id = Column(String, nullable=True)
     details = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

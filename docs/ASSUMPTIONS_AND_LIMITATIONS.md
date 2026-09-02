@@ -1,35 +1,35 @@
-# Assumptions, Sample Data, na Limitations
+# Assumptions, Sample Data, and Limitations
 
-## Data - Kilichotumika
+## Data Used
 
-| Aina ya Data | Hali | Maelezo |
+| Data Type | Status | Notes |
 |---|---|---|
-| Loan / Collateral records | **SAMPLE tu (mfano mmoja kwenye template)** | Data halisi zitatoka kwa taasisi zinazoripoti kupitia upload |
-| Climate records (rainfall, temperature, hazard) | **SYNTHETIC (imetengenezwa kirandomly)** | `init_db.py` inatengeneza miaka 2024-2026, mikoa 6, kwa madhumuni ya kuonyesha jinsi analytics/dashboard zitakavyofanya kazi. **SI data halisi za TMA au PMO** |
-| Users / Institutions | **DEMO accounts** | `admin`, `bot_analyst`, `bankA_user`, `bankB_user` - badilisha password kabla ya matumizi halisi |
+| Loan / Collateral records | **SAMPLE only (one example row in the template)** | Real data will come from reporting institutions via upload |
+| Climate records (rainfall, temperature, hazard) | **SYNTHETIC (randomly generated)** | `init_db.py` generates data for 2024-2026 across 6 regions, purely to demonstrate how analytics/dashboards will work. **NOT real TMA or PMO data** |
+| Users / Institutions | **DEMO accounts** | `admin`, `bot_analyst`, `bankA_user`, `bankB_user` - change passwords before real use |
 
-## Assumptions zilizofanywa (kwa sababu ICN haikutaja kwa undani)
+## Assumptions Made (where the ICN did not specify details)
 
-1. Roles tatu zimechaguliwa: `SYSTEM_ADMIN`, `BOT_USER` (mtumiaji wa ndani wa BOT), `INSTITUTION_USER` (taasisi ya nje). ICN ilitaja "role-based access" bila kuorodhesha majina rasmi ya roles.
-2. Muundo wa template ya Excel (column: loan_id, borrower_name, loan_amount_tzs, n.k.) ni **pendekezo la kiufundi** - siyo muundo rasmi uliotolewa na BOT. Taasisi halisi itahitaji kutoa muundo rasmi wa data zake.
-3. Workflow ya "Approve/Reject" kwa BOT_USER ni assumption ya kiprototype - ICN haikuainisha kama approval workflow rasmi ipo.
-4. `reporting_period` format (YYYY-Qn) ni uamuzi wa kiufundi, siyo rasmi kutoka ICN.
+1. Three roles were chosen: `SYSTEM_ADMIN`, `BOT_USER` (internal BOT user), `INSTITUTION_USER` (external institution). The ICN referred to "role-based access" without naming formal roles.
+2. The Excel template layout (columns: loan_id, borrower_name, loan_amount_tzs, etc.) is a **technical proposal**, not an officially issued BOT data specification. A real institution will need to provide the official data layout.
+3. The Approve/Reject workflow for BOT_USER is a prototype assumption - the ICN did not specify a formal approval workflow.
+4. The `reporting_period` format (YYYY-Qn) is a technical decision, not an official specification from the ICN.
 
-## Ambazo HAZIJAJENGWA kwa makusudi (nje ya wigo wa wiki 8 / hazina access)
+## Deliberately Not Built (out of scope for this 8-week prototype / no access available)
 
-- **Live integration** na RTIS, BSIS, QGIS, ArcGIS - hazina credentials/API access halisi.
-- **Data halisi** kutoka TMA (Tanzania Meteorological Authority) na PMO (Climate Vulnerability Maps) - hazipo kwenye mazingira haya.
+- **Live integration** with RTIS, BSIS, QGIS, ArcGIS - no real credentials/API access were available.
+- **Real data** from TMA (Tanzania Meteorological Authority) and PMO (Climate Vulnerability Maps) - not available in this environment.
 - Password recovery (forgot password) workflow.
-- Export ya Dashboard kwa PDF/Excel/Image (muundo wa data upo, lakini export endpoints hazijaongezwa).
-- Enterprise SSO, production-grade deployment, na certification za usalama.
+- Dashboard export to PDF/Excel/Image (the underlying data structure exists, but export endpoints have not been added).
+- Enterprise SSO, production-grade deployment, and formal security certification.
 
-## Usalama - Kilichofanyika kwa Prototype hii
+## Security - What Was Implemented in This Prototype
 
-- Password zote zime-hash (bcrypt) - hazihifadhiwi kama maandishi wazi (plain text).
-- Hakuna secret/password iliyowekwa moja kwa moja kwenye code (hardcoded) - zote zinatoka `.env`.
-- RBAC (Role-Based Access Control) imetekelezwa kwenye kila endpoint nyeti.
-- Data isolation: mtumiaji wa taasisi (`INSTITUTION_USER`) anaona TU submissions za taasisi yake mwenyewe.
+- All passwords are hashed (bcrypt) - never stored as plain text.
+- No secret or password is hardcoded in the code - all come from `.env`.
+- Role-Based Access Control (RBAC) is enforced on every sensitive endpoint.
+- Data isolation: an institution user (`INSTITUTION_USER`) can only see submissions from their own institution.
 
-**Kabla ya matumizi ya uzalishaji (production):** hii ni prototype ya mafunzo (EASTC 8-week
-training) - haijafanyiwa penetration testing, haina production security certification,
-na SECRET_KEY ya demo LAZIMA ibadilishwe.
+**Before any production use:** this is a training prototype (EASTC 8-week
+programme) - it has not undergone penetration testing, does not have production
+security certification, and the demo SECRET_KEY MUST be changed.

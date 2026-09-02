@@ -18,7 +18,7 @@ def list_institutions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Watumiaji wote walioingia wanaweza kuona orodha ya taasisi (kwa ajili ya dropdowns n.k.)
+    # Any authenticated user can view the list of institutions (needed for dropdowns, etc.)
     return db.query(Institution).order_by(Institution.name).all()
 
 
@@ -29,7 +29,7 @@ def create_institution(
     current_user: User = Depends(require_roles(RoleEnum.SYSTEM_ADMIN)),
 ):
     if db.query(Institution).filter(Institution.code == payload.code).first():
-        raise HTTPException(status_code=400, detail="Institution code hii tayari ipo")
+        raise HTTPException(status_code=400, detail="This institution code already exists")
     inst = Institution(**payload.model_dump())
     db.add(inst)
     db.commit()
@@ -46,7 +46,7 @@ def deactivate_institution(
 ):
     inst = db.query(Institution).filter(Institution.id == institution_id).first()
     if not inst:
-        raise HTTPException(status_code=404, detail="Taasisi haijapatikana")
+        raise HTTPException(status_code=404, detail="Institution not found")
     inst.is_active = False
     db.commit()
     db.refresh(inst)
