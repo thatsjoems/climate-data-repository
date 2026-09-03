@@ -111,6 +111,7 @@ class KPISummary(BaseModel):
     rejected_submissions: int
     total_loan_exposure_tzs: float
     total_collateral_value_tzs: float
+    total_borrowers: int
 
 
 class ClimateTrendPoint(BaseModel):

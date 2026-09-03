@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import apiClient from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import PortalShell, { SidebarItem, PlatformStatus } from '../components/PortalShell'
 
 interface KPI {
   total_institutions: number
@@ -37,6 +38,45 @@ function formatTZS(n: number) {
   return new Intl.NumberFormat('en-TZ', { maximumFractionDigits: 0 }).format(n) + ' TZS'
 }
 
+function scrollTo(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+const PIE_COLORS = ['#12395B', '#0FA47F', '#E28413', '#C0362C', '#7F77DD', '#94A3B8']
+
+function buildConicGradient(segments: { label: string; value: number; color: string }[]) {
+  const total = segments.reduce((sum, s) => sum + s.value, 0)
+  if (total === 0) return { css: '#EDEBE3', legend: segments.map((s) => ({ ...s, pct: 0 })) }
+  let acc = 0
+  const stops: string[] = []
+  const legend = segments.map((s) => {
+    const pct = (s.value / total) * 100
+    const start = acc
+    const end = acc + pct
+    stops.push(`${s.color} ${start}% ${end}%`)
+    acc = end
+    return { ...s, pct: Math.round(pct) }
+  })
+  return { css: `conic-gradient(${stops.join(', ')})`, legend }
+}
+
+function PieChart({ segments }: { segments: { label: string; value: number; color: string }[] }) {
+  const { css, legend } = buildConicGradient(segments)
+  return (
+    <div className="pie-chart-row">
+      <div className="pie-chart" style={{ background: css }} />
+      <div className="pie-legend">
+        {legend.map((s) => (
+          <div className="pie-legend-item" key={s.label}>
+            <span className="pie-legend-swatch" style={{ background: s.color }} />
+            <span>{s.label} — {s.pct}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function InternalPortal() {
   const { user } = useAuth()
   const [kpi, setKpi] = useState<KPI | null>(null)
@@ -44,6 +84,7 @@ export default function InternalPortal() {
   const [hazardExposure, setHazardExposure] = useState<HazardExposure[]>([])
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [notesById, setNotesById] = useState<Record<string, string>>({})
+  const [showExportNotice, setShowExportNotice] = useState(false)
 
   async function loadAll() {
     const [kpiRes, subsRes, hazardRes] = await Promise.all([
@@ -71,25 +112,115 @@ export default function InternalPortal() {
   const filteredSubmissions =
     statusFilter === 'ALL' ? submissions : submissions.filter((s) => s.status === statusFilter)
 
+  const statusSegments = kpi ? [
+    { label: 'Pending', value: kpi.pending_submissions, color: '#94A3B8' },
+    { label: 'Valid', value: kpi.valid_submissions, color: '#0FA47F' },
+    { label: 'Invalid', value: kpi.invalid_submissions, color: '#C0362C' },
+    { label: 'Approved', value: kpi.approved_submissions, color: '#12395B' },
+    { label: 'Rejected', value: kpi.rejected_submissions, color: '#7F2C2C' },
+  ] : []
+
+  const hazardTotals: Record<string, number> = {}
+  hazardExposure.forEach((h) => {
+    const key = h.hazard_type || 'None'
+    hazardTotals[key] = (hazardTotals[key] || 0) + h.exposed_loan_amount_tzs
+  })
+  const hazardSegments = Object.entries(hazardTotals).map(([label, value], i) => ({
+    label, value, color: PIE_COLORS[i % PIE_COLORS.length],
+  }))
+
+  const platforms: PlatformStatus[] = [
+    { name: 'ArcGIS', connected: false },
+    { name: 'QGIS', connected: false },
+    { name: 'BSIS', connected: false },
+    { name: 'RTIS', connected: false },
+  ]
+
+  const sidebarItems: SidebarItem[] = [
+    { key: 'overview', icon: '📊', label: 'Overview', active: true, onClick: () => scrollTo('top-anchor') },
+    { key: 'loan', icon: '💰', label: 'Loan Data', onClick: () => scrollTo('kpi-section') },
+    { key: 'collateral', icon: '🛡️', label: 'Collateral Data', onClick: () => scrollTo('kpi-section') },
+    { key: 'climate', icon: '🌦️', label: 'Climate & Hazard Data', onClick: () => scrollTo('hazard-section') },
+    { key: 'submissions', icon: '📄', label: 'Submission Status', onClick: () => scrollTo('monitoring-section') },
+    { key: 'map', icon: '🗺️', label: 'Geospatial Map', onClick: () => scrollTo('map-section') },
+    { key: 'export', icon: '⬇️', label: 'Download / Export', onClick: () => setShowExportNotice(true) },
+  ]
+
   return (
-    <div className="page">
-      <h1>Internal Dashboard (Bank of Tanzania)</h1>
+    <PortalShell
+      theme="bot"
+      brandTitle="Climate Data Repository"
+      brandSubtitle="Bank of Tanzania"
+      pageTitle="Climate Data Repository"
+      pageSubtitle="Reliable climate data. Informed decisions. Resilient financial sector."
+      items={sidebarItems}
+      platforms={platforms}
+    >
+      <div id="top-anchor" />
+
+      {showExportNotice && (
+        <div className="alert-info">
+          Export functionality (PDF / Excel / CSV) is planned for a future release — see the
+          Requirements Traceability Matrix.
+          <button style={{ marginLeft: '0.75rem' }} onClick={() => setShowExportNotice(false)}>Dismiss</button>
+        </div>
+      )}
 
       {kpi && (
-        <section className="kpi-grid">
-          <div className="kpi-card"><span className="kpi-icon">🏦</span><span className="kpi-value">{kpi.total_institutions}</span><span>Reporting Institutions</span></div>
-          <div className="kpi-card"><span className="kpi-icon">📄</span><span className="kpi-value">{kpi.total_submissions}</span><span>Total Submissions</span></div>
-          <div className="kpi-card"><span className="kpi-icon">⏳</span><span className="kpi-value">{kpi.pending_submissions}</span><span>Pending</span></div>
-          <div className="kpi-card"><span className="kpi-icon">⚠️</span><span className="kpi-value">{kpi.invalid_submissions}</span><span>With Errors</span></div>
-          <div className="kpi-card"><span className="kpi-icon">✅</span><span className="kpi-value">{kpi.approved_submissions}</span><span>Approved</span></div>
-          <div className="kpi-card"><span className="kpi-icon">⛔</span><span className="kpi-value">{kpi.rejected_submissions}</span><span>Rejected</span></div>
-          <div className="kpi-card wide"><span className="kpi-icon">💰</span><span className="kpi-value">{formatTZS(kpi.total_loan_exposure_tzs)}</span><span>Total Loan Value (Valid Records)</span></div>
-          <div className="kpi-card wide"><span className="kpi-icon">🛡️</span><span className="kpi-value">{formatTZS(kpi.total_collateral_value_tzs)}</span><span>Total Collateral Value</span></div>
+        <section className="kpi-grid-v2" id="kpi-section">
+          <div className="kpi-card-v2">
+            <div className="kpi-icon-box" style={{ background: '#FDF0DC' }}>💰</div>
+            <div className="kpi-card-v2-text">
+              <span className="kpi-label">Total Loan Value</span>
+              <span className="kpi-number">{formatTZS(kpi.total_loan_exposure_tzs)}</span>
+            </div>
+          </div>
+          <div className="kpi-card-v2">
+            <div className="kpi-icon-box" style={{ background: '#E6F1FB' }}>🛡️</div>
+            <div className="kpi-card-v2-text">
+              <span className="kpi-label">Total Collateral Value</span>
+              <span className="kpi-number">{formatTZS(kpi.total_collateral_value_tzs)}</span>
+            </div>
+          </div>
+          <div className="kpi-card-v2">
+            <div className="kpi-icon-box" style={{ background: '#EAF3DE' }}>🏦</div>
+            <div className="kpi-card-v2-text">
+              <span className="kpi-label">Reporting Institutions</span>
+              <span className="kpi-number">{kpi.total_institutions}</span>
+            </div>
+          </div>
+          <div className="kpi-card-v2">
+            <div className="kpi-icon-box" style={{ background: '#FAECE7' }}>📄</div>
+            <div className="kpi-card-v2-text">
+              <span className="kpi-label">Total Submissions</span>
+              <span className="kpi-number">{kpi.total_submissions}</span>
+            </div>
+          </div>
         </section>
       )}
 
+      <section className="card" id="map-section">
+        <h2>🗺️ Geospatial Overview — Hazard Exposure & Portfolio</h2>
+        <div className="placeholder-panel">
+          <span className="placeholder-icon">🗺️</span>
+          <strong>Geospatial visualization requires QGIS / ArcGIS integration</strong>
+          <span>Not available in this training environment — see Assumptions &amp; Limitations. The tabular hazard exposure below uses real submission data.</span>
+        </div>
+      </section>
+
+      <section className="card" id="hazard-section">
+        <h2>🌦️ Climate Hazard Exposure Distribution</h2>
+        <p className="note">Share of valid loan exposure associated with each reported climate hazard.</p>
+        <PieChart segments={hazardSegments.length ? hazardSegments : [{ label: 'No data yet', value: 1, color: '#EDEBE3' }]} />
+      </section>
+
       <section className="card">
-        <h2>🔍 Submission Monitoring</h2>
+        <h2>📊 Submission Status Distribution</h2>
+        <PieChart segments={statusSegments.length ? statusSegments : [{ label: 'No data yet', value: 1, color: '#EDEBE3' }]} />
+      </section>
+
+      <section className="card" id="monitoring-section">
+        <h2>📄 Submission Monitoring</h2>
         <label>Filter by Status: </label>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option value="ALL">All</option>
@@ -137,8 +268,8 @@ export default function InternalPortal() {
       </section>
 
       <section className="card">
-        <h2>🌦️ Climate & Financial Exposure by Region</h2>
-        <p className="note">Shows the total value of loans (from valid submissions) per region and reported climate hazard.</p>
+        <h2>🌍 Climate & Financial Exposure by Region</h2>
+        <p className="note">Total value of loans (from valid submissions) per region and reported climate hazard.</p>
         <table>
           <thead><tr><th>Region</th><th>Hazard</th><th>Loan Exposure</th><th>Record Count</th></tr></thead>
           <tbody>
@@ -154,6 +285,6 @@ export default function InternalPortal() {
           </tbody>
         </table>
       </section>
-    </div>
+    </PortalShell>
   )
 }

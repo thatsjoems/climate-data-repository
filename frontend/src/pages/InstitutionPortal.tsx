@@ -1,5 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react'
 import apiClient from '../api/client'
+import { useAuth } from '../context/AuthContext'
+import PortalShell, { SidebarItem } from '../components/PortalShell'
 
 interface Submission {
   id: string
@@ -28,7 +30,12 @@ const STATUS_LABELS: Record<string, string> = {
   REJECTED: 'Rejected',
 }
 
+function scrollTo(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 export default function InstitutionPortal() {
+  const { user } = useAuth()
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [reportingPeriod, setReportingPeriod] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -90,41 +97,88 @@ export default function InstitutionPortal() {
     setSelected({ submission: res.data, errors: res.data.errors })
   }
 
+  const totalSubmissions = submissions.length
+  const pendingReview = submissions.filter((s) => s.status === 'VALID' || s.status === 'PENDING').length
+  const approved = submissions.filter((s) => s.status === 'APPROVED').length
+
+  const sidebarItems: SidebarItem[] = [
+    { key: 'overview', icon: '🏠', label: 'Overview', active: true, onClick: () => scrollTo('top-anchor') },
+    { key: 'download', icon: '📥', label: 'Download Template', onClick: () => scrollTo('download-card') },
+    { key: 'upload', icon: '📤', label: 'Upload Data', onClick: () => scrollTo('upload-card') },
+    { key: 'history', icon: '🗂️', label: 'Submitted Files', onClick: () => scrollTo('history-card') },
+  ]
+
   return (
-    <div className="page">
-      <h1>Reporting Institution Portal</h1>
+    <PortalShell
+      theme="institution"
+      brandTitle="Financial Institution Portal"
+      brandSubtitle="Climate Data Repository"
+      pageTitle="Overview"
+      pageSubtitle={user?.role === 'INSTITUTION_USER' ? 'Your institution\'s reporting dashboard' : undefined}
+      items={sidebarItems}
+    >
+      <div id="top-anchor" />
 
-      <section className="card">
-        <h2>📥 1. Download the Standardized Template</h2>
-        <p>Download the Excel template, fill it in with your loan/collateral data, then upload it below.</p>
-        <button onClick={handleDownloadTemplate}>Download Template (.xlsx)</button>
+      <section className="kpi-grid-v2">
+        <div className="kpi-card-v2">
+          <div className="kpi-icon-box" style={{ background: '#E6F1FB' }}>📄</div>
+          <div className="kpi-card-v2-text">
+            <span className="kpi-label">Total Submissions</span>
+            <span className="kpi-number">{totalSubmissions}</span>
+          </div>
+        </div>
+        <div className="kpi-card-v2">
+          <div className="kpi-icon-box" style={{ background: '#FAEEDA' }}>⏳</div>
+          <div className="kpi-card-v2-text">
+            <span className="kpi-label">Pending Review</span>
+            <span className="kpi-number">{pendingReview}</span>
+          </div>
+        </div>
+        <div className="kpi-card-v2">
+          <div className="kpi-icon-box" style={{ background: '#EAF3DE' }}>✅</div>
+          <div className="kpi-card-v2-text">
+            <span className="kpi-label">Approved</span>
+            <span className="kpi-number">{approved}</span>
+          </div>
+        </div>
       </section>
 
-      <section className="card">
-        <h2>📤 2. Upload Data</h2>
-        <form onSubmit={handleUpload} className="upload-form">
-          <label>Reporting Period (e.g. 2026-Q3)</label>
-          <input
-            type="text"
-            value={reportingPeriod}
-            onChange={(e) => setReportingPeriod(e.target.value)}
-            placeholder="2026-Q3"
-          />
-          <label>Completed Excel file</label>
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={(e) => setFile(e.target.files ? e.target.files[0] : null)}
-          />
-          <button type="submit" disabled={uploading}>
-            {uploading ? 'Uploading...' : 'Upload'}
-          </button>
-        </form>
-        {uploadMessage && <div className="alert-info">{uploadMessage}</div>}
+      <section className="action-card-grid">
+        <div className="action-card" id="download-card">
+          <div className="action-card-icon" style={{ background: '#E6F1FB', color: '#185FA5' }}>📥</div>
+          <h3>Download Template</h3>
+          <p>Download the official standardized template for reporting loan and collateral data.</p>
+          <button className="btn-accent" onClick={handleDownloadTemplate}>Download Template</button>
+        </div>
+
+        <div className="action-card" id="upload-card">
+          <div className="action-card-icon" style={{ background: '#FAEEDA', color: '#854F0B' }}>📤</div>
+          <h3>Upload Data</h3>
+          <p>Upload your completed template file for automated validation.</p>
+          <form onSubmit={handleUpload} className="upload-form" style={{ maxWidth: 'none' }}>
+            <label>Reporting Period (e.g. 2026-Q3)</label>
+            <input
+              type="text"
+              value={reportingPeriod}
+              onChange={(e) => setReportingPeriod(e.target.value)}
+              placeholder="2026-Q3"
+            />
+            <label>Completed Excel file</label>
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => setFile(e.target.files ? e.target.files[0] : null)}
+            />
+            <button className="btn-accent" type="submit" disabled={uploading} style={{ alignSelf: 'stretch', textAlign: 'center' }}>
+              {uploading ? 'Uploading...' : 'Submit Data'}
+            </button>
+          </form>
+          {uploadMessage && <div className="alert-info">{uploadMessage}</div>}
+        </div>
       </section>
 
-      <section className="card">
-        <h2>🗂️ 3. Submission History</h2>
+      <section className="card" id="history-card">
+        <h2>🗂️ Recent Submissions</h2>
         <table>
           <thead>
             <tr>
@@ -182,6 +236,6 @@ export default function InstitutionPortal() {
           <button onClick={() => setSelected(null)}>Close</button>
         </section>
       )}
-    </div>
+    </PortalShell>
   )
 }

@@ -1,5 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
+import PortalShell, { SidebarItem, PlatformStatus } from '../components/PortalShell'
 
 interface UserItem {
   id: string
@@ -41,6 +43,7 @@ interface PasswordResetItem {
 }
 
 export default function AdminPanel() {
+  const navigate = useNavigate()
   const [users, setUsers] = useState<UserItem[]>([])
   const [institutions, setInstitutions] = useState<InstitutionItem[]>([])
   const [message, setMessage] = useState<string | null>(null)
@@ -154,9 +157,35 @@ export default function AdminPanel() {
     loadAll()
   }
 
+  function scrollTo(id: string) {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const platforms: PlatformStatus[] = [
+    { name: 'ArcGIS', connected: false },
+    { name: 'QGIS', connected: false },
+    { name: 'BSIS', connected: false },
+    { name: 'RTIS', connected: false },
+  ]
+
+  const sidebarItems: SidebarItem[] = [
+    { key: 'dashboard', icon: '📊', label: 'Back to Dashboard', onClick: () => navigate('/') },
+    { key: 'requests', icon: '📨', label: 'Access Requests', active: true, onClick: () => scrollTo('access-requests-card') },
+    { key: 'resets', icon: '🔑', label: 'Password Resets', onClick: () => scrollTo('password-resets-card') },
+    { key: 'institutions', icon: '🏢', label: 'Institutions', onClick: () => scrollTo('institutions-card') },
+    { key: 'users', icon: '👥', label: 'Users', onClick: () => scrollTo('users-card') },
+  ]
+
   return (
-    <div className="page">
-      <h1>System Administration</h1>
+    <PortalShell
+      theme="bot"
+      brandTitle="Climate Data Repository"
+      brandSubtitle="Bank of Tanzania"
+      pageTitle="System Administration"
+      pageSubtitle="Identity, access, and institution management"
+      items={sidebarItems}
+      platforms={platforms}
+    >
       {message && <div className="alert-info">{message}</div>}
 
       {generatedCredential && (
@@ -175,7 +204,7 @@ export default function AdminPanel() {
       )}
 
       <section className="card">
-        <h2>📨 Pending Access Requests</h2>
+        <h2 id="access-requests-card">📨 Pending Access Requests</h2>
         <p className="note">
           Institutions that used the public "Request Access" form. Approving a request
           creates the Institution (if new) and a user account with a temporary password.
@@ -221,7 +250,7 @@ export default function AdminPanel() {
       )}
 
       <section className="card">
-        <h2>🔑 Pending Password Reset Requests</h2>
+        <h2 id="password-resets-card">🔑 Pending Password Reset Requests</h2>
         <p className="note">
           Requests submitted via the public "Forgot Password" page. Approving generates a
           new temporary password for that user.
@@ -250,7 +279,7 @@ export default function AdminPanel() {
       </section>
 
       <section className="card">
-        <h2>🏢 Add New Institution</h2>
+        <h2 id="institutions-card">🏢 Add New Institution</h2>
         <form onSubmit={handleCreateInstitution} className="upload-form">
           <label>Code (e.g. BANK-C)</label>
           <input value={newInstitution.code} onChange={(e) => setNewInstitution({ ...newInstitution, code: e.target.value })} required />
@@ -268,7 +297,7 @@ export default function AdminPanel() {
       </section>
 
       <section className="card">
-        <h2>👤 Add New User</h2>
+        <h2 id="users-card">👤 Add New User</h2>
         <form onSubmit={handleCreateUser} className="upload-form">
           <label>Full Name</label>
           <input value={newUser.full_name} onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })} required />
@@ -329,6 +358,6 @@ export default function AdminPanel() {
           </tbody>
         </table>
       </section>
-    </div>
+    </PortalShell>
   )
 }

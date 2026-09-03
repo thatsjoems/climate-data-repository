@@ -24,6 +24,12 @@ def get_kpi_summary(db: Session) -> dict:
         SubmissionRecord.is_valid == True  # noqa: E712
     ).scalar()
 
+    total_borrowers = db.query(func.count(func.distinct(SubmissionRecord.borrower_name))).filter(
+        SubmissionRecord.is_valid == True,  # noqa: E712
+        SubmissionRecord.borrower_name.isnot(None),
+        SubmissionRecord.borrower_name != "",
+    ).scalar()
+
     return {
         "total_institutions": total_institutions,
         "total_submissions": total_submissions,
@@ -34,6 +40,7 @@ def get_kpi_summary(db: Session) -> dict:
         "rejected_submissions": count_status(SubmissionStatus.REJECTED),
         "total_loan_exposure_tzs": float(total_loan or 0.0),
         "total_collateral_value_tzs": float(total_collateral or 0.0),
+        "total_borrowers": int(total_borrowers or 0),
     }
 
 
