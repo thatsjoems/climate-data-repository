@@ -53,9 +53,9 @@ export default function AdminPanel() {
   })
   const [newInstitution, setNewInstitution] = useState({ code: '', name: '', type: 'BANK' })
   const [accessRequests, setAccessRequests] = useState<AccessRequestItem[]>([])
-  const [generatedCredential, setGeneratedCredential] = useState<{ username: string; password: string } | null>(null)
+  const [generatedCredential, setGeneratedCredential] = useState<{ username: string; password: string; emailSent: boolean } | null>(null)
   const [passwordResets, setPasswordResets] = useState<PasswordResetItem[]>([])
-  const [generatedResetPassword, setGeneratedResetPassword] = useState<{ username: string; password: string } | null>(null)
+  const [generatedResetPassword, setGeneratedResetPassword] = useState<{ username: string; password: string; emailSent: boolean } | null>(null)
 
   async function loadAll() {
     const [usersRes, instRes, reqRes, resetRes] = await Promise.all([
@@ -77,6 +77,7 @@ export default function AdminPanel() {
       setGeneratedResetPassword({
         username: res.data.request.username,
         password: res.data.new_temporary_password,
+        emailSent: res.data.email_sent,
       })
       loadAll()
     } catch (err: any) {
@@ -101,6 +102,7 @@ export default function AdminPanel() {
       setGeneratedCredential({
         username: res.data.generated_username,
         password: res.data.generated_temporary_password,
+        emailSent: res.data.email_sent,
       })
       loadAll()
     } catch (err: any) {
@@ -191,10 +193,14 @@ export default function AdminPanel() {
       {generatedCredential && (
         <section className="card" style={{ borderLeft: '3px solid var(--color-accent)' }}>
           <h2>✅ Account Created</h2>
-          <p>
-            Share these credentials with the institution through a verified channel
-            (phone/official email) — the system does not send emails automatically.
-          </p>
+          {generatedCredential.emailSent ? (
+            <p>An email with these credentials was sent automatically to the institution's contact address.</p>
+          ) : (
+            <p>
+              Email delivery is not configured in this environment — share these credentials
+              with the institution through a verified channel (phone/official email) yourself.
+            </p>
+          )}
           <p>
             <strong>Username:</strong> <code>{generatedCredential.username}</code><br />
             <strong>Temporary Password:</strong> <code>{generatedCredential.password}</code>
@@ -237,10 +243,14 @@ export default function AdminPanel() {
       {generatedResetPassword && (
         <section className="card" style={{ borderLeft: '3px solid var(--color-accent)' }}>
           <h2>🔑 Password Reset</h2>
-          <p>
-            Share this new password with the user through a verified channel
-            (phone/official email) — the system does not send emails automatically.
-          </p>
+          {generatedResetPassword.emailSent ? (
+            <p>An email with the new password was sent automatically to the user.</p>
+          ) : (
+            <p>
+              Email delivery is not configured in this environment — share this new password
+              with the user through a verified channel (phone/official email) yourself.
+            </p>
+          )}
           <p>
             <strong>Username:</strong> <code>{generatedResetPassword.username}</code><br />
             <strong>New Temporary Password:</strong> <code>{generatedResetPassword.password}</code>

@@ -24,6 +24,7 @@ from app.schemas.schemas import (
 )
 from app.services.audit_service import record_audit
 from app.services.notification_service import notify_roles, notify_user
+from app.services.email_service import send_email
 
 router = APIRouter(prefix="/access-requests", tags=["Institution Access Requests"])
 
@@ -140,10 +141,25 @@ def approve_access_request(
         exclude_user_id=current_user.id,
     )
 
+    email_sent = send_email(
+        to_email=req.contact_email,
+        subject="Your Climate Data Repository Access - Bank of Tanzania",
+        body=(
+            f"Dear {req.contact_full_name},\n\n"
+            f"Your access request on behalf of {institution.name} has been approved.\n\n"
+            f"Username: {username}\n"
+            f"Temporary Password: {temp_password}\n\n"
+            f"Please log in and note this password is temporary. If you did not request this, "
+            f"please contact the Bank of Tanzania immediately.\n\n"
+            f"Regards,\nClimate Data Repository - Bank of Tanzania"
+        ),
+    )
+
     return AccessRequestApprovalOut(
         request=req,
         generated_username=username,
         generated_temporary_password=temp_password,
+        email_sent=email_sent,
     )
 
 
@@ -175,5 +191,16 @@ def reject_access_request(
         related_entity_type="InstitutionAccessRequest",
         related_entity_id=req.id,
         exclude_user_id=current_user.id,
+    )
+    send_email(
+        to_email=req.contact_email,
+        subject="Update on your Climate Data Repository Access Request",
+        body=(
+            f"Dear {req.contact_full_name},\n\n"
+            f"Your access request on behalf of {req.institution_name} was not approved at this time."
+            + (f"\n\nReason: {payload.notes}" if payload.notes else "")
+            + "\n\nIf you have questions, please contact the Bank of Tanzania.\n\n"
+              "Regards,\nClimate Data Repository - Bank of Tanzania"
+        ),
     )
     return req

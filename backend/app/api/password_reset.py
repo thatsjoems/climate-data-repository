@@ -25,6 +25,7 @@ from app.schemas.schemas import (
 )
 from app.services.audit_service import record_audit
 from app.services.notification_service import notify_roles, notify_user
+from app.services.email_service import send_email
 
 router = APIRouter(prefix="/password-reset-requests", tags=["Password Recovery"])
 
@@ -130,7 +131,22 @@ def approve_password_reset(
         exclude_user_id=current_user.id,
     )
 
-    return PasswordResetApprovalOut(request=_to_out(req, user), new_temporary_password=temp_password)
+    email_sent = send_email(
+        to_email=user.email,
+        subject="Your Climate Data Repository Password Has Been Reset",
+        body=(
+            f"Dear {user.full_name},\n\n"
+            f"Your password has been reset by a System Administrator.\n\n"
+            f"Username: {user.username}\n"
+            f"New Temporary Password: {temp_password}\n\n"
+            f"Please log in and note this password is temporary.\n\n"
+            f"Regards,\nClimate Data Repository - Bank of Tanzania"
+        ),
+    )
+
+    return PasswordResetApprovalOut(
+        request=_to_out(req, user), new_temporary_password=temp_password, email_sent=email_sent,
+    )
 
 
 @router.post("/{request_id}/reject", response_model=PasswordResetRequestOut)
@@ -164,6 +180,17 @@ def reject_password_reset(
             related_entity_type="User",
             related_entity_id=user.id,
             exclude_user_id=current_user.id,
+        )
+        send_email(
+            to_email=user.email,
+            subject="Update on your Password Reset Request",
+            body=(
+                f"Dear {user.full_name},\n\n"
+                f"Your password reset request was not approved at this time."
+                + (f"\n\nReason: {payload.notes}" if payload.notes else "")
+                + "\n\nIf you have questions, please contact the Bank of Tanzania.\n\n"
+                  "Regards,\nClimate Data Repository - Bank of Tanzania"
+            ),
         )
 
     return _to_out(req, user)

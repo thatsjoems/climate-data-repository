@@ -17,6 +17,16 @@ class Settings(BaseSettings):
 
     UPLOAD_DIR: str = "uploads"
 
+    # Optional SMTP configuration for automatically emailing approved credentials.
+    # If SMTP_HOST is left empty, the system falls back to showing the credentials
+    # once to the approving Admin, who relays them manually (no crash, no silent data loss).
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_USE_TLS: bool = True
+
     # Allow the frontend (Vite dev server) to talk to this backend during development
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",

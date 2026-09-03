@@ -162,6 +162,7 @@ class AccessRequestApprovalOut(BaseModel):
     request: AccessRequestOut
     generated_username: str
     generated_temporary_password: str
+    email_sent: bool = False
 
 
 # ---------- PASSWORD RESET ----------
@@ -181,6 +182,7 @@ class PasswordResetRequestOut(BaseModel):
 class PasswordResetApprovalOut(BaseModel):
     request: PasswordResetRequestOut
     new_temporary_password: str
+    email_sent: bool = False
 
 
 # ---------- NOTIFICATIONS ----------

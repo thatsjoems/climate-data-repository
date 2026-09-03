@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import PortalShell, { SidebarItem, PlatformStatus } from '../components/PortalShell'
@@ -79,6 +80,7 @@ function PieChart({ segments }: { segments: { label: string; value: number; colo
 
 export default function InternalPortal() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [kpi, setKpi] = useState<KPI | null>(null)
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [hazardExposure, setHazardExposure] = useState<HazardExposure[]>([])
@@ -144,6 +146,9 @@ export default function InternalPortal() {
     { key: 'submissions', icon: '📄', label: 'Submission Status', onClick: () => scrollTo('monitoring-section') },
     { key: 'map', icon: '🗺️', label: 'Geospatial Map', onClick: () => scrollTo('map-section') },
     { key: 'export', icon: '⬇️', label: 'Download / Export', onClick: () => setShowExportNotice(true) },
+    ...(user?.role === 'SYSTEM_ADMIN'
+      ? [{ key: 'admin', icon: '⚙️', label: 'Administration', onClick: () => navigate('/admin') } as SidebarItem]
+      : []),
   ]
 
   return (
