@@ -92,3 +92,33 @@ def get_hazard_exposure(db: Session) -> list[dict]:
         }
         for r in results
     ]
+
+
+def get_exposure_snapshot(db: Session, region: str | None = None, hazard_type: str | None = None) -> dict:
+    """
+    Real, queryable figures for a given region/hazard combination (or overall if
+    both are omitted) - captured at the moment a Risk Advisory Note is authored,
+    so the note stays defensible and auditable. Returns only actual data; never
+    fabricates or infers a figure.
+    """
+    query = db.query(SubmissionRecord).filter(SubmissionRecord.is_valid == True)  # noqa: E712
+    if region:
+        query = query.filter(SubmissionRecord.region == region)
+    if hazard_type:
+        query = query.filter(SubmissionRecord.climate_hazard_exposure == hazard_type)
+
+    total_exposure = query.with_entities(
+        func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0)
+    ).scalar() or 0.0
+    total_collateral = query.with_entities(
+        func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0)
+    ).scalar() or 0.0
+    record_count = query.count()
+
+    return {
+        "region": region,
+        "hazard_type": hazard_type,
+        "total_loan_exposure_tzs": float(total_exposure),
+        "total_collateral_value_tzs": float(total_collateral),
+        "matching_record_count": record_count,
+    }

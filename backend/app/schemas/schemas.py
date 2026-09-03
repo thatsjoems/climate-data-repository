@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, EmailStr, ConfigDict
 
-from app.models.models import RoleEnum, SubmissionStatus, InstitutionType
+from app.models.models import RoleEnum, SubmissionStatus, InstitutionType, RiskLevel
 
 
 # ---------- AUTH ----------
@@ -126,6 +126,30 @@ class HazardExposurePoint(BaseModel):
     hazard_type: Optional[str] = None
     exposed_loan_amount_tzs: float
     record_count: int
+
+
+# ---------- RISK ADVISORY REPORTS ----------
+class RiskAdvisoryCreate(BaseModel):
+    title: str
+    region: Optional[str] = None
+    hazard_type: Optional[str] = None
+    risk_level: RiskLevel
+    narrative: str
+    recommendation: Optional[str] = None
+
+
+class RiskAdvisoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    title: str
+    region: Optional[str] = None
+    hazard_type: Optional[str] = None
+    risk_level: RiskLevel
+    narrative: str
+    recommendation: Optional[str] = None
+    data_snapshot: Optional[str] = None
+    created_by_user_id: str
+    created_at: datetime
 
 
 # ---------- INSTITUTION ACCESS REQUESTS ----------

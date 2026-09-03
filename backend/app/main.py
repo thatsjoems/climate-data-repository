@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import Base, engine
 from app.models import models  # noqa: F401 - ensures all tables are registered on Base
-from app.api import auth, users, institutions, templates, submissions, analytics, audit, notifications, access_requests, password_reset
+from app.api import auth, users, institutions, templates, submissions, analytics, audit, notifications, access_requests, password_reset, risk_advisories
 
 # Create database tables if they do not already exist (quick-start for SQLite/dev).
 # For real production use, use migrations instead of this.
@@ -40,6 +40,7 @@ app.include_router(audit.router, prefix=settings.API_V1_PREFIX)
 app.include_router(notifications.router, prefix=settings.API_V1_PREFIX)
 app.include_router(access_requests.router, prefix=settings.API_V1_PREFIX)
 app.include_router(password_reset.router, prefix=settings.API_V1_PREFIX)
+app.include_router(risk_advisories.router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/")

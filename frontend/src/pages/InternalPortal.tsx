@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuth } from '../context/AuthContext'
@@ -33,6 +33,24 @@ interface HazardExposure {
   hazard_type: string | null
   exposed_loan_amount_tzs: number
   record_count: number
+}
+
+interface RiskAdvisory {
+  id: string
+  title: string
+  region: string | null
+  hazard_type: string | null
+  risk_level: string
+  narrative: string
+  recommendation: string | null
+  data_snapshot: string | null
+  created_by_user_id: string
+  created_at: string
+}
+
+interface SimpleUser {
+  id: string
+  full_name: string
 }
 
 function formatTZS(n: number) {
@@ -87,16 +105,51 @@ export default function InternalPortal() {
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [notesById, setNotesById] = useState<Record<string, string>>({})
   const [showExportNotice, setShowExportNotice] = useState(false)
+  const [riskAdvisories, setRiskAdvisories] = useState<RiskAdvisory[]>([])
+  const [userMap, setUserMap] = useState<Record<string, string>>({})
+  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
+  const [advisoryForm, setAdvisoryForm] = useState({
+    title: '', region: '', hazard_type: '', risk_level: 'MEDIUM', narrative: '', recommendation: '',
+  })
+  const [advisoryMessage, setAdvisoryMessage] = useState<string | null>(null)
+  const [submittingAdvisory, setSubmittingAdvisory] = useState(false)
 
   async function loadAll() {
-    const [kpiRes, subsRes, hazardRes] = await Promise.all([
+    const [kpiRes, subsRes, hazardRes, advisoryRes, usersRes] = await Promise.all([
       apiClient.get('/analytics/kpi-summary'),
       apiClient.get('/submissions'),
       apiClient.get('/analytics/hazard-exposure'),
+      apiClient.get('/risk-advisories'),
+      apiClient.get('/users'),
     ])
     setKpi(kpiRes.data)
     setSubmissions(subsRes.data)
     setHazardExposure(hazardRes.data)
+    setRiskAdvisories(advisoryRes.data)
+    const map: Record<string, string> = {}
+    ;(usersRes.data as SimpleUser[]).forEach((u) => { map[u.id] = u.full_name })
+    setUserMap(map)
+  }
+
+  async function handleCreateAdvisory(e: FormEvent) {
+    e.preventDefault()
+    setAdvisoryMessage(null)
+    setSubmittingAdvisory(true)
+    try {
+      await apiClient.post('/risk-advisories', {
+        ...advisoryForm,
+        region: advisoryForm.region || null,
+        hazard_type: advisoryForm.hazard_type || null,
+        recommendation: advisoryForm.recommendation || null,
+      })
+      setAdvisoryForm({ title: '', region: '', hazard_type: '', risk_level: 'MEDIUM', narrative: '', recommendation: '' })
+      setAdvisoryMessage('Risk advisory published.')
+      loadAll()
+    } catch (err: any) {
+      setAdvisoryMessage(err?.response?.data?.detail || 'Failed to publish the advisory.')
+    } finally {
+      setSubmittingAdvisory(false)
+    }
   }
 
   useEffect(() => {
@@ -143,6 +196,7 @@ export default function InternalPortal() {
     { key: 'loan', icon: '💰', label: 'Loan Data', onClick: () => scrollTo('kpi-section') },
     { key: 'collateral', icon: '🛡️', label: 'Collateral Data', onClick: () => scrollTo('kpi-section') },
     { key: 'climate', icon: '🌦️', label: 'Climate & Hazard Data', onClick: () => scrollTo('hazard-section') },
+    { key: 'risk', icon: '🧭', label: 'Risk Advisory Reports', onClick: () => scrollTo('risk-advisory-section') },
     { key: 'submissions', icon: '📄', label: 'Submission Status', onClick: () => scrollTo('monitoring-section') },
     { key: 'map', icon: '🗺️', label: 'Geospatial Map', onClick: () => scrollTo('map-section') },
     { key: 'export', icon: '⬇️', label: 'Download / Export', onClick: () => setShowExportNotice(true) },
@@ -222,6 +276,120 @@ export default function InternalPortal() {
       <section className="card">
         <h2>📊 Submission Status Distribution</h2>
         <PieChart segments={statusSegments.length ? statusSegments : [{ label: 'No data yet', value: 1, color: '#EDEBE3' }]} />
+      </section>
+
+      <section className="card" id="risk-advisory-section">
+        <h2>🧭 Risk Advisory Reports</h2>
+        <p className="note">
+          Analyst-authored climate risk assessments for internal BOT decision-making —
+          e.g. "elevated flood exposure in Region X suggests caution on new large loans
+          in that area." The risk level and recommendation are the analyst's own
+          professional judgement; the figures shown are always real, queried data,
+          never invented.
+        </p>
+
+        {user?.role === 'BOT_USER' && (
+          <form onSubmit={handleCreateAdvisory} className="upload-form" style={{ maxWidth: 560, marginBottom: '1.25rem' }}>
+            <label>Title</label>
+            <input
+              required
+              value={advisoryForm.title}
+              onChange={(e) => setAdvisoryForm({ ...advisoryForm, title: e.target.value })}
+              placeholder="e.g. Elevated flood exposure — Morogoro"
+            />
+            <label>Region (optional — leave blank for a cross-region note)</label>
+            <input
+              value={advisoryForm.region}
+              onChange={(e) => setAdvisoryForm({ ...advisoryForm, region: e.target.value })}
+              placeholder="e.g. Morogoro"
+              list="region-options"
+            />
+            <datalist id="region-options">
+              {[...new Set(hazardExposure.map((h) => h.region))].map((r) => <option key={r} value={r} />)}
+            </datalist>
+            <label>Hazard Type (optional)</label>
+            <select
+              value={advisoryForm.hazard_type}
+              onChange={(e) => setAdvisoryForm({ ...advisoryForm, hazard_type: e.target.value })}
+            >
+              <option value="">-- Any / Not specific --</option>
+              <option value="Drought">Drought</option>
+              <option value="Flood">Flood</option>
+              <option value="Cyclone">Cyclone</option>
+              <option value="Landslide">Landslide</option>
+            </select>
+            <label>Risk Level (your assessment)</label>
+            <select
+              value={advisoryForm.risk_level}
+              onChange={(e) => setAdvisoryForm({ ...advisoryForm, risk_level: e.target.value })}
+            >
+              <option value="LOW">Low</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="HIGH">High</option>
+              <option value="CRITICAL">Critical</option>
+            </select>
+            <label>Narrative / Analysis</label>
+            <textarea
+              required
+              rows={4}
+              value={advisoryForm.narrative}
+              onChange={(e) => setAdvisoryForm({ ...advisoryForm, narrative: e.target.value })}
+              placeholder="What does the data show, and why does it matter?"
+              style={{ padding: '0.6rem', borderRadius: 8, border: '1px solid var(--color-border)', fontFamily: 'inherit', fontSize: '0.88rem' }}
+            />
+            <label>Recommendation to BOT decision-makers (optional)</label>
+            <textarea
+              rows={3}
+              value={advisoryForm.recommendation}
+              onChange={(e) => setAdvisoryForm({ ...advisoryForm, recommendation: e.target.value })}
+              placeholder="e.g. Recommend enhanced due diligence on new large loans in this region."
+              style={{ padding: '0.6rem', borderRadius: 8, border: '1px solid var(--color-border)', fontFamily: 'inherit', fontSize: '0.88rem' }}
+            />
+            <button className="btn-accent" type="submit" disabled={submittingAdvisory}>
+              {submittingAdvisory ? 'Publishing...' : 'Publish Advisory'}
+            </button>
+            {advisoryMessage && <div className="alert-info">{advisoryMessage}</div>}
+          </form>
+        )}
+
+        <div className="advisory-list">
+          {riskAdvisories.map((note) => {
+            let snapshot: any = null
+            try { snapshot = note.data_snapshot ? JSON.parse(note.data_snapshot) : null } catch { /* ignore */ }
+            const expanded = expandedNoteId === note.id
+            return (
+              <div className="advisory-item" key={note.id} onClick={() => setExpandedNoteId(expanded ? null : note.id)}>
+                <div className="advisory-item-head">
+                  <div>
+                    <h4>{note.title}</h4>
+                    <div className="advisory-meta">
+                      {note.region || 'All regions'} · {note.hazard_type || 'General'} · by {userMap[note.created_by_user_id] || 'Analyst'} · {new Date(note.created_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <span className={`badge badge-${note.risk_level.toLowerCase()}`}>{note.risk_level}</span>
+                </div>
+                {expanded && (
+                  <div className="advisory-detail">
+                    <h5>Narrative</h5>
+                    <p>{note.narrative}</p>
+                    {note.recommendation && (<><h5>Recommendation</h5><p>{note.recommendation}</p></>)}
+                    {snapshot && (
+                      <>
+                        <h5>Data Snapshot (at time of writing)</h5>
+                        <div className="advisory-snapshot">
+                          Loan Exposure: {formatTZS(snapshot.total_loan_exposure_tzs || 0)} ·
+                          {' '}Collateral: {formatTZS(snapshot.total_collateral_value_tzs || 0)} ·
+                          {' '}Records: {snapshot.matching_record_count ?? 0}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {riskAdvisories.length === 0 && <p className="note">No risk advisory reports have been published yet.</p>}
+        </div>
       </section>
 
       <section className="card" id="monitoring-section">

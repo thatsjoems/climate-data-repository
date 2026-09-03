@@ -177,6 +177,49 @@ class ClimateRecord(Base):
 
 
 # ---------------------------------------------------------------------------
+# RISK ADVISORY REPORTS (Climate Risk Assessment & Supervisory Reporting)
+# ---------------------------------------------------------------------------
+
+class RiskLevel(str, enum.Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class RiskAdvisoryNote(Base):
+    """
+    An analyst-authored climate risk advisory note - the direct implementation of the
+    ICN's core objective to 'strengthen climate risk assessment' and support
+    'supervisory activities and evidence-based decision-making'.
+
+    IMPORTANT (by design, per project honesty rules): the risk_level and narrative
+    are the BOT Analyst's own professional judgement, not a system-computed score.
+    The system only supplies the underlying data_snapshot (real aggregated figures
+    at the time of writing) so the note is defensible and auditable - it never
+    invents or infers a risk rating on the analyst's behalf.
+
+    Notes are append-only (no edit/delete) so they function as a defensible,
+    timestamped supervisory record - consistent with the audit log.
+    """
+    __tablename__ = "risk_advisory_notes"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    title = Column(String(255), nullable=False)
+    region = Column(String(100), nullable=True)          # null = applies broadly / multiple regions
+    hazard_type = Column(String(100), nullable=True)      # null = general / cross-hazard note
+    risk_level = Column(SAEnum(RiskLevel), nullable=False)
+
+    narrative = Column(Text, nullable=False)               # analyst's assessment in their own words
+    recommendation = Column(Text, nullable=True)            # analyst's recommendation to BOT decision-makers
+
+    data_snapshot = Column(Text, nullable=True)             # JSON string: real figures the note was based on
+
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
 # INSTITUTION ACCESS REQUESTS ("Request Access" — not self-registration)
 # ---------------------------------------------------------------------------
 
