@@ -35,6 +35,17 @@ interface HazardExposure {
   record_count: number
 }
 
+interface CombinedExposure {
+  region: string
+  reporting_period: string
+  avg_rainfall_mm: number | null
+  avg_temperature_c: number | null
+  hazard_types_recorded: string[]
+  total_loan_exposure_tzs: number
+  total_collateral_value_tzs: number
+  record_count: number
+}
+
 interface RiskAdvisory {
   id: string
   title: string
@@ -102,6 +113,7 @@ export default function InternalPortal() {
   const [kpi, setKpi] = useState<KPI | null>(null)
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [hazardExposure, setHazardExposure] = useState<HazardExposure[]>([])
+  const [combinedExposure, setCombinedExposure] = useState<CombinedExposure[]>([])
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [notesById, setNotesById] = useState<Record<string, string>>({})
   const [showExportNotice, setShowExportNotice] = useState(false)
@@ -115,16 +127,18 @@ export default function InternalPortal() {
   const [submittingAdvisory, setSubmittingAdvisory] = useState(false)
 
   async function loadAll() {
-    const [kpiRes, subsRes, hazardRes, advisoryRes, usersRes] = await Promise.all([
+    const [kpiRes, subsRes, hazardRes, combinedRes, advisoryRes, usersRes] = await Promise.all([
       apiClient.get('/analytics/kpi-summary'),
       apiClient.get('/submissions'),
       apiClient.get('/analytics/hazard-exposure'),
+      apiClient.get('/analytics/combined-climate-financial-exposure'),
       apiClient.get('/risk-advisories'),
       apiClient.get('/users'),
     ])
     setKpi(kpiRes.data)
     setSubmissions(subsRes.data)
     setHazardExposure(hazardRes.data)
+    setCombinedExposure(combinedRes.data)
     setRiskAdvisories(advisoryRes.data)
     const map: Record<string, string> = {}
     ;(usersRes.data as SimpleUser[]).forEach((u) => { map[u.id] = u.full_name })
@@ -196,6 +210,7 @@ export default function InternalPortal() {
     { key: 'loan', icon: '💰', label: 'Loan Data', onClick: () => scrollTo('kpi-section') },
     { key: 'collateral', icon: '🛡️', label: 'Collateral Data', onClick: () => scrollTo('kpi-section') },
     { key: 'climate', icon: '🌦️', label: 'Climate & Hazard Data', onClick: () => scrollTo('hazard-section') },
+    { key: 'combined', icon: '🔗', label: 'Combined Climate-Financial', onClick: () => scrollTo('combined-section') },
     { key: 'risk', icon: '🧭', label: 'Risk Advisory Reports', onClick: () => scrollTo('risk-advisory-section') },
     { key: 'submissions', icon: '📄', label: 'Submission Status', onClick: () => scrollTo('monitoring-section') },
     { key: 'map', icon: '🗺️', label: 'Geospatial Map', onClick: () => scrollTo('map-section') },
@@ -276,6 +291,40 @@ export default function InternalPortal() {
       <section className="card">
         <h2>📊 Submission Status Distribution</h2>
         <PieChart segments={statusSegments.length ? statusSegments : [{ label: 'No data yet', value: 1, color: '#EDEBE3' }]} />
+      </section>
+
+      <section className="card" id="combined-section">
+        <h2>🔗 Combined Climate-Financial Exposure</h2>
+        <p className="note">
+          Real meteorological readings (rainfall, temperature, recorded hazards) joined with
+          real loan/collateral exposure for the same region and reporting period — this is
+          what directly links climate data to financial stability, rather than the two
+          datasets sitting in separate, unrelated tables. A blank climate column means no
+          meteorological reading exists for that region/period — it is never guessed or filled in.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Region</th><th>Period</th><th>Avg Rainfall</th><th>Avg Temp</th>
+              <th>Hazards Recorded</th><th>Loan Exposure</th><th>Collateral</th><th>Records</th>
+            </tr>
+          </thead>
+          <tbody>
+            {combinedExposure.map((c, idx) => (
+              <tr key={idx}>
+                <td>{c.region}</td>
+                <td>{c.reporting_period}</td>
+                <td>{c.avg_rainfall_mm !== null ? `${c.avg_rainfall_mm} mm` : '—'}</td>
+                <td>{c.avg_temperature_c !== null ? `${c.avg_temperature_c} °C` : '—'}</td>
+                <td>{c.hazard_types_recorded.length ? c.hazard_types_recorded.join(', ') : '—'}</td>
+                <td>{formatTZS(c.total_loan_exposure_tzs)}</td>
+                <td>{formatTZS(c.total_collateral_value_tzs)}</td>
+                <td>{c.record_count}</td>
+              </tr>
+            ))}
+            {combinedExposure.length === 0 && <tr><td colSpan={8}>No matching data yet.</td></tr>}
+          </tbody>
+        </table>
       </section>
 
       <section className="card" id="risk-advisory-section">
@@ -380,6 +429,16 @@ export default function InternalPortal() {
                           Loan Exposure: {formatTZS(snapshot.total_loan_exposure_tzs || 0)} ·
                           {' '}Collateral: {formatTZS(snapshot.total_collateral_value_tzs || 0)} ·
                           {' '}Records: {snapshot.matching_record_count ?? 0}
+                          {snapshot.latest_climate_reading && (
+                            <>
+                              <br />
+                              Latest Climate Reading ({snapshot.latest_climate_reading.year}-{String(snapshot.latest_climate_reading.month).padStart(2, '0')}):
+                              {' '}{snapshot.latest_climate_reading.rainfall_mm} mm rainfall,
+                              {' '}{snapshot.latest_climate_reading.avg_temperature_c}°C,
+                              {' '}hazard: {snapshot.latest_climate_reading.hazard_type || 'None'}
+                              {' '}({snapshot.latest_climate_reading.source})
+                            </>
+                          )}
                         </div>
                       </>
                     )}

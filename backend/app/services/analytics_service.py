@@ -5,6 +5,7 @@ from the data stored in the database - there is no invented "climate risk score"
 """
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+import re
 from app.models.models import (
     Institution, Submission, SubmissionRecord, ClimateRecord, SubmissionStatus
 )
@@ -115,10 +116,111 @@ def get_exposure_snapshot(db: Session, region: str | None = None, hazard_type: s
     ).scalar() or 0.0
     record_count = query.count()
 
-    return {
+    snapshot = {
         "region": region,
         "hazard_type": hazard_type,
         "total_loan_exposure_tzs": float(total_exposure),
         "total_collateral_value_tzs": float(total_collateral),
         "matching_record_count": record_count,
     }
+
+    # Attach the most recent real meteorological reading for this region, if any exists -
+    # this is what actually lets the analyst combine financial exposure with climate data
+    # in a single advisory note, instead of the two datasets living in isolation.
+    if region:
+        latest_climate = (
+            db.query(ClimateRecord)
+            .filter(ClimateRecord.region == region)
+            .order_by(ClimateRecord.year.desc(), ClimateRecord.month.desc())
+            .first()
+        )
+        if latest_climate:
+            snapshot["latest_climate_reading"] = {
+                "year": latest_climate.year,
+                "month": latest_climate.month,
+                "rainfall_mm": latest_climate.rainfall_mm,
+                "avg_temperature_c": latest_climate.avg_temperature_c,
+                "hazard_type": latest_climate.hazard_type,
+                "hazard_severity": latest_climate.hazard_severity,
+                "source": latest_climate.source,
+            }
+
+    return snapshot
+
+
+def _quarter_to_months(reporting_period: str) -> tuple[int, list[int]] | None:
+    """Parses 'YYYY-Qn' into (year, [month numbers in that quarter]). Returns None if unparseable."""
+    match = re.match(r"^(\d{4})-Q([1-4])$", reporting_period.strip())
+    if not match:
+        return None
+    year = int(match.group(1))
+    quarter = int(match.group(2))
+    start_month = (quarter - 1) * 3 + 1
+    return year, [start_month, start_month + 1, start_month + 2]
+
+
+def get_combined_climate_financial_exposure(db: Session) -> list[dict]:
+    """
+    THE core ICN aim: combine financial sector data with climate/meteorological data
+    so climate impact on financial stability can actually be assessed together,
+    rather than the two datasets living in separate, unrelated tables.
+
+    For every (region, reporting_period) pair that has valid submitted loan data,
+    this looks up the REAL meteorological readings (rainfall, temperature, hazard)
+    recorded for that same region during the matching months/year, and returns
+    both sets of figures side by side. No figure here is invented - a null/absent
+    climate reading is honestly represented as null, not backfilled with a guess.
+    """
+    combos = (
+        db.query(
+            SubmissionRecord.region,
+            Submission.reporting_period,
+            func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0).label("total_loan"),
+            func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0).label("total_collateral"),
+            func.count(SubmissionRecord.id).label("record_count"),
+        )
+        .join(Submission, Submission.id == SubmissionRecord.submission_id)
+        .filter(SubmissionRecord.is_valid == True)  # noqa: E712
+        .group_by(SubmissionRecord.region, Submission.reporting_period)
+        .all()
+    )
+
+    results = []
+    for combo in combos:
+        parsed = _quarter_to_months(combo.reporting_period)
+        avg_rainfall = None
+        avg_temp = None
+        hazard_types_present: list[str] = []
+
+        if parsed:
+            year, months = parsed
+            climate_rows = (
+                db.query(ClimateRecord)
+                .filter(
+                    ClimateRecord.region == combo.region,
+                    ClimateRecord.year == year,
+                    ClimateRecord.month.in_(months),
+                )
+                .all()
+            )
+            if climate_rows:
+                rainfall_values = [c.rainfall_mm for c in climate_rows if c.rainfall_mm is not None]
+                temp_values = [c.avg_temperature_c for c in climate_rows if c.avg_temperature_c is not None]
+                avg_rainfall = round(sum(rainfall_values) / len(rainfall_values), 1) if rainfall_values else None
+                avg_temp = round(sum(temp_values) / len(temp_values), 1) if temp_values else None
+                hazard_types_present = sorted({
+                    c.hazard_type for c in climate_rows if c.hazard_type and c.hazard_type != "None"
+                })
+
+        results.append({
+            "region": combo.region,
+            "reporting_period": combo.reporting_period,
+            "avg_rainfall_mm": avg_rainfall,
+            "avg_temperature_c": avg_temp,
+            "hazard_types_recorded": hazard_types_present,
+            "total_loan_exposure_tzs": float(combo.total_loan or 0.0),
+            "total_collateral_value_tzs": float(combo.total_collateral or 0.0),
+            "record_count": combo.record_count,
+        })
+
+    return results

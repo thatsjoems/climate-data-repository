@@ -128,6 +128,17 @@ class HazardExposurePoint(BaseModel):
     record_count: int
 
 
+class CombinedExposurePoint(BaseModel):
+    region: str
+    reporting_period: str
+    avg_rainfall_mm: Optional[float] = None
+    avg_temperature_c: Optional[float] = None
+    hazard_types_recorded: list[str] = []
+    total_loan_exposure_tzs: float
+    total_collateral_value_tzs: float
+    record_count: int
+
+
 # ---------- RISK ADVISORY REPORTS ----------
 class RiskAdvisoryCreate(BaseModel):
     title: str
