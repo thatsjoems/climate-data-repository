@@ -1,0 +1,59 @@
+# Climate Data Repository (CDR) - full stack, containerized.
+#
+# Usage:
+#   docker compose up --build
+#   Then open http://localhost:5173
+#
+# This is an ALTERNATIVE to the manual setup in README.md - both work, they are
+# independent of each other. Manual setup uses SQLite (zero config); this Docker
+# setup uses PostgreSQL, closer to the production-recommended stack.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: climate_data_repository
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - cdr_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/climate_data_repository
+      SECRET_KEY: change-this-to-a-long-unique-secret-before-production-use
+      ACCESS_TOKEN_EXPIRE_MINUTES: "480"
+      # Optional SMTP - leave blank to keep the manual credential-relay fallback (see docs/ASSUMPTIONS_AND_LIMITATIONS.md)
+      SMTP_HOST: ""
+      SMTP_FROM_EMAIL: ""
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - cdr_uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+volumes:
+  cdr_postgres_data:
+  cdr_uploads:

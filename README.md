@@ -83,6 +83,20 @@ Use one of the demo accounts printed by `init_db.py`:
 
 ---
 
+## Alternative: Running with Docker
+
+Instead of the manual steps above, the whole stack (PostgreSQL + backend + frontend)
+can also be started with a single command using Docker Desktop:
+
+```bash
+docker compose up --build
+```
+
+See `docs/DOCKER.md` for details. This is fully optional — the manual setup above
+remains the primary, zero-dependency way to run the project.
+
+---
+
 ## Project Structure
 
 ```
