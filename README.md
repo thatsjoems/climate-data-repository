@@ -95,6 +95,21 @@ docker compose up --build
 See `docs/DOCKER.md` for details. This is fully optional — the manual setup above
 remains the primary, zero-dependency way to run the project.
 
+## One-Click Startup (Windows)
+
+Instead of opening two terminals manually every time, double-click `start.bat`
+in the project's root folder — it starts both Backend and Frontend
+automatically in their own windows. (You still need to have completed the
+first-time setup above at least once.)
+
+## Sharing with Other Devices on Your Network
+
+By default, the system is only reachable from the computer running it. To let
+a colleague's laptop or your own phone open it over the same WiFi, see
+`docs/NETWORK_ACCESS.md`. For access from anywhere on the internet, the system
+needs to be deployed to a real hosting server — this is tracked as outstanding
+in `docs/ICN_REQUIREMENTS_TRACEABILITY_MATRIX.md`.
+
 ---
 
 ## Project Structure
