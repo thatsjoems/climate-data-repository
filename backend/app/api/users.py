@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import require_roles, get_current_user
 from app.core.security import hash_password
+from app.core.password_policy import validate_password_strength
 from app.models.models import User, RoleEnum
 from app.schemas.schemas import UserCreate, UserOut
 from app.services.audit_service import record_audit
@@ -33,6 +34,10 @@ def create_user(
         raise HTTPException(status_code=400, detail="This username is already taken")
     if db.query(User).filter(User.email == payload.email).first():
         raise HTTPException(status_code=400, detail="This email is already in use")
+
+    problems = validate_password_strength(payload.password)
+    if problems:
+        raise HTTPException(status_code=400, detail="Password must " + "; ".join(problems) + ".")
 
     user = User(
         full_name=payload.full_name,

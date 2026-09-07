@@ -70,6 +70,10 @@ export default function PortalShell({
               {!collapsed && <span className="sidebar-label">{item.label}</span>}
             </button>
           ))}
+          <button className="sidebar-item" onClick={() => navigate('/change-password')} title="Change Password">
+            <span className="sidebar-icon">🔒</span>
+            {!collapsed && <span className="sidebar-label">Change Password</span>}
+          </button>
           <button className="sidebar-item" onClick={handleLogout} title="Log Out">
             <span className="sidebar-icon">🚪</span>
             {!collapsed && <span className="sidebar-label">Log Out</span>}

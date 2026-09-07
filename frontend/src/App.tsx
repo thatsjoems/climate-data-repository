@@ -7,6 +7,7 @@ import ForgotPassword from './pages/ForgotPassword'
 import InstitutionPortal from './pages/InstitutionPortal'
 import InternalPortal from './pages/InternalPortal'
 import AdminPanel from './pages/AdminPanel'
+import ChangePassword from './pages/ChangePassword'
 
 function HomeRouter() {
   const { user } = useAuth()
@@ -35,6 +36,14 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={['SYSTEM_ADMIN']}>
               <AdminPanel />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/change-password"
+          element={
+            <ProtectedRoute>
+              <ChangePassword />
             </ProtectedRoute>
           }
         />
