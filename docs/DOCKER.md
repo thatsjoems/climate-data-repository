@@ -52,5 +52,10 @@ start completely fresh next time.
   directly in `docker-compose.yml` (not from a `.env` file) — this is normal
   Docker practice and does not affect the manual setup's `.env` file at all.
 - Uploaded files persist in a named Docker volume (`cdr_uploads`) across restarts.
+- PostgreSQL inside Docker is reachable from your own computer on **port 5433**
+  (not 5432) — e.g. if you want to inspect it with pgAdmin. This avoids
+  conflicting with a locally-installed PostgreSQL (from the manual setup)
+  which normally uses port 5432. The backend container itself always talks to
+  the database container internally, so this only matters for external tools.
 - To point the frontend at a differently-hosted backend, rebuild with:
   `docker compose build --build-arg VITE_API_URL=https://your-backend-url/api frontend`
