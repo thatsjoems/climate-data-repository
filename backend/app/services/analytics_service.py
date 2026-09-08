@@ -2,6 +2,21 @@
 MODULE: Climate & Financial Analytics - KPI, trend, and exposure calculations.
 All figures here are descriptive statistics (totals, averages) computed directly
 from the data stored in the database - there is no invented "climate risk score".
+
+TENANT ISOLATION: every function accepts an optional `institution_id`. The API
+layer (app/api/analytics.py) is responsible for passing the caller's own
+institution_id when the caller is an INSTITUTION_USER, and None (no restriction)
+for SYSTEM_ADMIN/BOT_USER. This module never decides who is allowed to see what -
+it only applies whatever scope it is given - so the actual authorization
+decision lives in one place (the API layer) rather than being duplicated here.
+
+DOUBLE-COUNTING: every monetary/record aggregate excludes SubmissionRecord rows
+that failed row-level validation (is_valid == False) AND rows belonging to a
+Submission that is REJECTED or SUPERSEDED. A submission is marked SUPERSEDED
+automatically when the same institution uploads a newer submission for the same
+reporting_period (see app/api/submissions.py) - so only the latest attempt per
+institution+period ever contributes to analytics, preventing the same loan from
+being counted twice because of a resubmission or correction.
 """
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -10,26 +25,51 @@ from app.models.models import (
     Institution, Submission, SubmissionRecord, ClimateRecord, SubmissionStatus
 )
 
+# Submission statuses whose records must NEVER contribute to analytics totals.
+EXCLUDED_STATUSES = (SubmissionStatus.REJECTED, SubmissionStatus.SUPERSEDED)
 
-def get_kpi_summary(db: Session) -> dict:
-    total_institutions = db.query(Institution).filter(Institution.is_active == True).count()  # noqa: E712
-    total_submissions = db.query(Submission).count()
+
+def _active_records_query(db: Session, institution_id: str | None = None):
+    """
+    Base query: valid rows belonging to a non-rejected, non-superseded submission.
+    Always joins Submission so institution scoping and status exclusion are
+    enforced in exactly one place.
+    """
+    query = (
+        db.query(SubmissionRecord)
+        .join(Submission, Submission.id == SubmissionRecord.submission_id)
+        .filter(SubmissionRecord.is_valid == True)  # noqa: E712
+        .filter(Submission.status.notin_(EXCLUDED_STATUSES))
+    )
+    if institution_id:
+        query = query.filter(Submission.institution_id == institution_id)
+    return query
+
+
+def get_kpi_summary(db: Session, institution_id: str | None = None) -> dict:
+    if institution_id:
+        total_institutions = 1
+        submission_base = db.query(Submission).filter(Submission.institution_id == institution_id)
+    else:
+        total_institutions = db.query(Institution).filter(Institution.is_active == True).count()  # noqa: E712
+        submission_base = db.query(Submission)
+
+    total_submissions = submission_base.count()
 
     def count_status(status: SubmissionStatus) -> int:
-        return db.query(Submission).filter(Submission.status == status).count()
+        return submission_base.filter(Submission.status == status).count()
 
-    total_loan = db.query(func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0)).filter(
-        SubmissionRecord.is_valid == True  # noqa: E712
-    ).scalar()
-    total_collateral = db.query(func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0)).filter(
-        SubmissionRecord.is_valid == True  # noqa: E712
-    ).scalar()
+    records_query = _active_records_query(db, institution_id)
 
-    total_borrowers = db.query(func.count(func.distinct(SubmissionRecord.borrower_name))).filter(
-        SubmissionRecord.is_valid == True,  # noqa: E712
-        SubmissionRecord.borrower_name.isnot(None),
-        SubmissionRecord.borrower_name != "",
+    total_loan = records_query.with_entities(
+        func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0)
     ).scalar()
+    total_collateral = records_query.with_entities(
+        func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0)
+    ).scalar()
+    total_borrowers = records_query.filter(
+        SubmissionRecord.borrower_name.isnot(None), SubmissionRecord.borrower_name != ""
+    ).with_entities(func.count(func.distinct(SubmissionRecord.borrower_name))).scalar()
 
     return {
         "total_institutions": total_institutions,
@@ -46,6 +86,7 @@ def get_kpi_summary(db: Session) -> dict:
 
 
 def get_climate_trends(db: Session, region: str | None = None) -> list[dict]:
+    # Pure meteorological data - not institution-specific, so no tenant scoping applies.
     query = db.query(
         ClimateRecord.year,
         ClimateRecord.month,
@@ -68,19 +109,19 @@ def get_climate_trends(db: Session, region: str | None = None) -> list[dict]:
     ]
 
 
-def get_hazard_exposure(db: Session) -> list[dict]:
+def get_hazard_exposure(db: Session, institution_id: str | None = None) -> list[dict]:
     """
-    Joins SubmissionRecord (loan exposure) with region to show how much loan
-    value sits in areas with reported climate hazard exposure.
+    Shows how much loan value sits in areas with reported climate hazard exposure.
+    Scoped to a single institution's own data when institution_id is given.
     """
     results = (
-        db.query(
+        _active_records_query(db, institution_id)
+        .with_entities(
             SubmissionRecord.region,
             SubmissionRecord.climate_hazard_exposure,
             func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0).label("exposed_amount"),
             func.count(SubmissionRecord.id).label("record_count"),
         )
-        .filter(SubmissionRecord.is_valid == True)  # noqa: E712
         .group_by(SubmissionRecord.region, SubmissionRecord.climate_hazard_exposure)
         .all()
     )
@@ -95,14 +136,19 @@ def get_hazard_exposure(db: Session) -> list[dict]:
     ]
 
 
-def get_exposure_snapshot(db: Session, region: str | None = None, hazard_type: str | None = None) -> dict:
+def get_exposure_snapshot(
+    db: Session, region: str | None = None, hazard_type: str | None = None,
+    institution_id: str | None = None,
+) -> dict:
     """
     Real, queryable figures for a given region/hazard combination (or overall if
     both are omitted) - captured at the moment a Risk Advisory Note is authored,
     so the note stays defensible and auditable. Returns only actual data; never
-    fabricates or infers a figure.
+    fabricates or infers a figure. Risk Advisory Reports are a BOT_USER-only
+    feature, so institution_id is normally None (sector-wide view) here, but the
+    parameter exists for consistency and future institution-specific advisories.
     """
-    query = db.query(SubmissionRecord).filter(SubmissionRecord.is_valid == True)  # noqa: E712
+    query = _active_records_query(db, institution_id)
     if region:
         query = query.filter(SubmissionRecord.region == region)
     if hazard_type:
@@ -159,7 +205,7 @@ def _quarter_to_months(reporting_period: str) -> tuple[int, list[int]] | None:
     return year, [start_month, start_month + 1, start_month + 2]
 
 
-def get_combined_climate_financial_exposure(db: Session) -> list[dict]:
+def get_combined_climate_financial_exposure(db: Session, institution_id: str | None = None) -> list[dict]:
     """
     THE core ICN aim: combine financial sector data with climate/meteorological data
     so climate impact on financial stability can actually be assessed together,
@@ -172,15 +218,14 @@ def get_combined_climate_financial_exposure(db: Session) -> list[dict]:
     climate reading is honestly represented as null, not backfilled with a guess.
     """
     combos = (
-        db.query(
+        _active_records_query(db, institution_id)
+        .with_entities(
             SubmissionRecord.region,
             Submission.reporting_period,
             func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0).label("total_loan"),
             func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0).label("total_collateral"),
             func.count(SubmissionRecord.id).label("record_count"),
         )
-        .join(Submission, Submission.id == SubmissionRecord.submission_id)
-        .filter(SubmissionRecord.is_valid == True)  # noqa: E712
         .group_by(SubmissionRecord.region, Submission.reporting_period)
         .all()
     )

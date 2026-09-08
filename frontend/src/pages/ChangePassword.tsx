@@ -16,7 +16,7 @@ const RULES: Rule[] = [
 ]
 
 export default function ChangePassword() {
-  const { user } = useAuth()
+  const { user, refreshUser } = useAuth()
   const navigate = useNavigate()
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -25,6 +25,7 @@ export default function ChangePassword() {
   const [success, setSuccess] = useState(false)
   const [loading, setLoading] = useState(false)
 
+  const isForced = !!user?.must_change_password
   const allRulesMet = RULES.every((r) => r.test(newPassword))
   const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword
 
@@ -47,10 +48,14 @@ export default function ChangePassword() {
         current_password: currentPassword,
         new_password: newPassword,
       })
+      await refreshUser()
       setSuccess(true)
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
+      if (isForced) {
+        setTimeout(() => navigate('/'), 1500)
+      }
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'Failed to change your password.')
     } finally {
@@ -61,15 +66,22 @@ export default function ChangePassword() {
   return (
     <div className="page" style={{ maxWidth: 520 }}>
       <h1>🔒 Change Password</h1>
-      <p className="note">
-        Signed in as <strong>{user?.username}</strong>. Set your own password so you don't
-        need to rely on a temporary one for future logins.
-      </p>
+      {isForced ? (
+        <div className="alert-error" style={{ marginBottom: '1rem' }}>
+          You are using a temporary password. You must set your own password before you can
+          continue to your dashboard.
+        </div>
+      ) : (
+        <p className="note">
+          Signed in as <strong>{user?.username}</strong>. Set your own password so you don't
+          need to rely on a temporary one for future logins.
+        </p>
+      )}
 
       <section className="card">
         {success && (
           <div className="alert-info">
-            Your password has been changed successfully. Use your new password next time you log in.
+            Your password has been changed successfully.{isForced ? ' Redirecting you to your dashboard...' : ' Use your new password next time you log in.'}
           </div>
         )}
         {error && <div className="alert-error">{error}</div>}
@@ -123,9 +135,11 @@ export default function ChangePassword() {
         </form>
       </section>
 
-      <button onClick={() => navigate(-1)} style={{ background: 'transparent', color: 'var(--color-primary)', border: 'none', padding: 0, cursor: 'pointer', fontSize: '0.85rem' }}>
-        ← Back to Dashboard
-      </button>
+      {!isForced && (
+        <button onClick={() => navigate(-1)} style={{ background: 'transparent', color: 'var(--color-primary)', border: 'none', padding: 0, cursor: 'pointer', fontSize: '0.85rem' }}>
+          ← Back to Dashboard
+        </button>
+      )}
     </div>
   )
 }

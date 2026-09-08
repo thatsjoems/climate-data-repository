@@ -7,20 +7,30 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import require_roles, get_current_user
 from app.models.models import Institution, User, RoleEnum
-from app.schemas.schemas import InstitutionCreate, InstitutionOut
+from app.schemas.schemas import InstitutionCreate, InstitutionOut, InstitutionPublicOut
 from app.services.audit_service import record_audit
 from app.services.notification_service import notify_roles
 
 router = APIRouter(prefix="/institutions", tags=["Institutions"])
 
 
-@router.get("", response_model=list[InstitutionOut])
+@router.get("")
 def list_institutions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Any authenticated user can view the list of institutions (needed for dropdowns, etc.)
-    return db.query(Institution).order_by(Institution.name).all()
+    """
+    Least privilege: INSTITUTION_USER gets a reduced view (no other
+    institutions' contact emails/phones) - full detail is reserved for
+    SYSTEM_ADMIN and BOT_USER, who need it for supervisory purposes.
+    No response_model here (deliberately) - the two shapes are already
+    correctly constructed below, so we return them as-is rather than
+    risking Pydantic's Union matching silently coercing one into the other.
+    """
+    institutions = db.query(Institution).order_by(Institution.name).all()
+    if current_user.role == RoleEnum.INSTITUTION_USER:
+        return [InstitutionPublicOut.model_validate(i) for i in institutions]
+    return [InstitutionOut.model_validate(i) for i in institutions]
 
 
 @router.post("", response_model=InstitutionOut, status_code=201)

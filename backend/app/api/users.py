@@ -46,6 +46,7 @@ def create_user(
         hashed_password=hash_password(payload.password),
         role=payload.role,
         institution_id=payload.institution_id,
+        must_change_password=True,
     )
     db.add(user)
     db.commit()

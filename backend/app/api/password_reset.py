@@ -7,8 +7,6 @@ request/review flow rather than an emailed reset link, since no SMTP
 integration was available in this training environment - the same pattern
 already used for institution access requests.
 """
-import random
-import string
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,6 +16,7 @@ from sqlalchemy import or_
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.core.security import hash_password
+from app.core.password_policy import generate_secure_temp_password
 from app.models.models import PasswordResetRequest, AccessRequestStatus, User, RoleEnum
 from app.schemas.schemas import (
     PasswordResetRequestCreate, PasswordResetRequestOut, PasswordResetApprovalOut,
@@ -28,11 +27,6 @@ from app.services.notification_service import notify_roles, notify_user
 from app.services.email_service import send_email
 
 router = APIRouter(prefix="/password-reset-requests", tags=["Password Recovery"])
-
-
-def _generate_temp_password() -> str:
-    alphabet = string.ascii_letters + string.digits
-    return "".join(random.choice(alphabet) for _ in range(10)) + "!1"
 
 
 def _to_out(req: PasswordResetRequest, user: User) -> PasswordResetRequestOut:
@@ -105,8 +99,9 @@ def approve_password_reset(
     if not user:
         raise HTTPException(status_code=404, detail="The associated user no longer exists")
 
-    temp_password = _generate_temp_password()
+    temp_password = generate_secure_temp_password()
     user.hashed_password = hash_password(temp_password)
+    user.must_change_password = True
 
     req.status = AccessRequestStatus.APPROVED
     req.review_notes = payload.notes

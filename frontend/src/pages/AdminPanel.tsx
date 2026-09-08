@@ -42,6 +42,16 @@ interface PasswordResetItem {
   created_at: string
 }
 
+interface AuditLogItem {
+  id: string
+  user_id: string | null
+  action: string
+  entity_type: string | null
+  entity_id: string | null
+  details: string | null
+  created_at: string
+}
+
 export default function AdminPanel() {
   const navigate = useNavigate()
   const [users, setUsers] = useState<UserItem[]>([])
@@ -56,6 +66,11 @@ export default function AdminPanel() {
   const [generatedCredential, setGeneratedCredential] = useState<{ username: string; password: string; emailSent: boolean } | null>(null)
   const [passwordResets, setPasswordResets] = useState<PasswordResetItem[]>([])
   const [generatedResetPassword, setGeneratedResetPassword] = useState<{ username: string; password: string; emailSent: boolean } | null>(null)
+  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([])
+  const [auditTotal, setAuditTotal] = useState(0)
+  const [auditOffset, setAuditOffset] = useState(0)
+  const [auditActionFilter, setAuditActionFilter] = useState('')
+  const AUDIT_PAGE_SIZE = 25
 
   async function loadAll() {
     const [usersRes, instRes, reqRes, resetRes] = await Promise.all([
@@ -68,6 +83,16 @@ export default function AdminPanel() {
     setInstitutions(instRes.data)
     setAccessRequests(reqRes.data)
     setPasswordResets(resetRes.data)
+    loadAuditLogs(0)
+  }
+
+  async function loadAuditLogs(offset: number) {
+    const params = new URLSearchParams({ limit: String(AUDIT_PAGE_SIZE), offset: String(offset) })
+    if (auditActionFilter) params.set('action', auditActionFilter)
+    const res = await apiClient.get(`/audit-logs?${params.toString()}`)
+    setAuditLogs(offset === 0 ? res.data.items : [...auditLogs, ...res.data.items])
+    setAuditTotal(res.data.total)
+    setAuditOffset(offset)
   }
 
   async function handleApprovePasswordReset(id: string) {
@@ -367,6 +392,39 @@ export default function AdminPanel() {
             ))}
           </tbody>
         </table>
+      </section>
+
+      <section className="card">
+        <h2>🧾 Audit Log</h2>
+        <p className="note">System-wide record of important actions, for accountability and oversight.</p>
+        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+          <input
+            placeholder="Filter by action (e.g. LOGIN)"
+            value={auditActionFilter}
+            onChange={(e) => setAuditActionFilter(e.target.value)}
+            style={{ maxWidth: 260 }}
+          />
+          <button onClick={() => loadAuditLogs(0)}>Apply Filter</button>
+        </div>
+        <table>
+          <thead><tr><th>When</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead>
+          <tbody>
+            {auditLogs.map((log) => (
+              <tr key={log.id}>
+                <td>{new Date(log.created_at).toLocaleString()}</td>
+                <td>{log.action}</td>
+                <td>{log.entity_type || '-'}</td>
+                <td>{log.details || '-'}</td>
+              </tr>
+            ))}
+            {auditLogs.length === 0 && <tr><td colSpan={4}>No audit entries yet.</td></tr>}
+          </tbody>
+        </table>
+        {auditOffset + AUDIT_PAGE_SIZE < auditTotal && (
+          <button onClick={() => loadAuditLogs(auditOffset + AUDIT_PAGE_SIZE)} style={{ marginTop: '0.75rem' }}>
+            Load More ({auditLogs.length} of {auditTotal})
+          </button>
+        )}
       </section>
     </PortalShell>
   )

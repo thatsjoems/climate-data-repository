@@ -25,6 +25,16 @@ Source: "Concept Note on the Proposed Enhancement of the Climate Data Repository
 
 ## Summary
 
+**See `docs/SECURITY_HARDENING.md`** for a detailed record of a subsequent
+security/data-integrity hardening pass: multi-tenant analytics isolation,
+duplicate/superseded-submission handling, invalid-can't-be-approved and
+maker-checker workflow rules, upload limits, district-region validation,
+brute-force login protection, forced password change on temporary
+credentials, reduced institution info disclosure, and a paginated audit log
+viewer. That document also lists what was deliberately left out as outside
+the ICN's scope (e.g. database migrations, JWT/cookie rearchitecture).
+
+
 - The entire **MUST HAVE** workflow (login \u2192 template \u2192 upload \u2192 validation \u2192 storage \u2192 internal review \u2192 dashboard) has been **built and fully functional**.
 - **SHOULD HAVE** items (export, advanced filters, password recovery) - the underlying foundation exists (APIs already return correct data), but the additional UI/endpoints have not yet been added.
 - **FUTURE WORK** (live RTIS/BSIS/QGIS/ArcGIS integration, real TMA/PMO data) - not possible without real access/credentials from BOT - these are clearly documented as gaps, not hidden.

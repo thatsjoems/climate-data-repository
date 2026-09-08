@@ -6,6 +6,8 @@ Not applied to admin-generated temporary passwords (access requests, password
 resets), which are always random and already meet these rules by construction.
 """
 import re
+import secrets
+import string
 
 
 MIN_LENGTH = 8
@@ -23,3 +25,20 @@ def validate_password_strength(password: str) -> list[str]:
     if not re.search(r"[^A-Za-z0-9]", password):
         problems.append("include at least one special character (e.g. ! @ # $ % &)")
     return problems
+
+
+def generate_secure_temp_password(length: int = 12) -> str:
+    """
+    Cryptographically secure random password (uses `secrets`, never `random`),
+    guaranteed to satisfy validate_password_strength(): at least one letter,
+    one digit, and one special character.
+    """
+    letters = string.ascii_letters
+    digits = string.digits
+    special = "!@#$%&*"
+    alphabet = letters + digits + special
+
+    while True:
+        candidate = "".join(secrets.choice(alphabet) for _ in range(length))
+        if not validate_password_strength(candidate):
+            return candidate

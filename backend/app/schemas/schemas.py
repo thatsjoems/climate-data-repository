@@ -46,6 +46,20 @@ class InstitutionOut(BaseModel):
     created_at: datetime
 
 
+class InstitutionPublicOut(BaseModel):
+    """
+    Reduced view for INSTITUTION_USER: enough to populate dropdowns and identify
+    institutions by name, without exposing other institutions' contact details
+    (least-privilege - Module: institution information disclosure).
+    """
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    code: str
+    name: str
+    type: InstitutionType
+    is_active: bool
+
+
 # ---------- USER ----------
 class UserCreate(BaseModel):
     full_name: str
@@ -65,6 +79,7 @@ class UserOut(BaseModel):
     role: RoleEnum
     institution_id: Optional[str] = None
     is_active: bool
+    must_change_password: bool = False
     created_at: datetime
 
 
@@ -251,3 +266,10 @@ class AuditLogOut(BaseModel):
     entity_id: Optional[str] = None
     details: Optional[str] = None
     created_at: datetime
+
+
+class AuditLogPage(BaseModel):
+    items: list[AuditLogOut]
+    total: int
+    limit: int
+    offset: int

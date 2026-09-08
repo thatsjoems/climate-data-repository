@@ -8,12 +8,14 @@ export interface CurrentUser {
   email: string
   role: 'SYSTEM_ADMIN' | 'BOT_USER' | 'INSTITUTION_USER'
   institution_id: string | null
+  must_change_password: boolean
 }
 
 interface AuthContextType {
   user: CurrentUser | null
   login: (username: string, password: string) => Promise<void>
   logout: () => void
+  refreshUser: () => Promise<void>
   isLoading: boolean
   error: string | null
 }
@@ -51,8 +53,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }
 
+  async function refreshUser() {
+    const res = await apiClient.get('/auth/me')
+    localStorage.setItem('cdr_user', JSON.stringify(res.data))
+    setUser(res.data)
+  }
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, isLoading, error }}>
+    <AuthContext.Provider value={{ user, login, logout, refreshUser, isLoading, error }}>
       {children}
     </AuthContext.Provider>
   )

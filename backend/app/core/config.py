@@ -17,6 +17,19 @@ class Settings(BaseSettings):
 
     UPLOAD_DIR: str = "uploads"
 
+    # File upload hardening (Module F: Data Quality & Validation) - prevents a
+    # single oversized/malformed file from exhausting server memory or CPU.
+    MAX_UPLOAD_SIZE_MB: int = 20
+    MAX_UPLOAD_ROWS: int = 100000
+
+    # Login brute-force protection (Module A: secure authentication).
+    MAX_FAILED_LOGIN_ATTEMPTS: int = 5
+    LOGIN_LOCKOUT_MINUTES: int = 15
+
+    # Set to "production" to make the app refuse to start with an insecure
+    # default SECRET_KEY - see main.py startup check.
+    ENVIRONMENT: str = "development"
+
     # Optional SMTP configuration for automatically emailing approved credentials.
     # If SMTP_HOST is left empty, the system falls back to showing the credentials
     # once to the approving Admin, who relays them manually (no crash, no silent data loss).

@@ -4,13 +4,25 @@ Backend entry point (FastAPI application).
 
 Run: uvicorn app.main:app --reload
 """
+import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.core.config import settings
-from app.core.database import Base, engine
+from app.core.database import Base, engine, SessionLocal
 from app.models import models  # noqa: F401 - ensures all tables are registered on Base
 from app.api import auth, users, institutions, templates, submissions, analytics, audit, notifications, access_requests, password_reset, risk_advisories
+
+# ---- Secret management: refuse to start in production with the default secret ----
+# (Module: secure authentication). Development/training use is unaffected - this
+# only fires when ENVIRONMENT=production is explicitly set, e.g. in a real deployment.
+if settings.ENVIRONMENT == "production" and settings.SECRET_KEY == "change-me":
+    sys.exit(
+        "FATAL: SECRET_KEY is still the insecure default ('change-me') while "
+        "ENVIRONMENT=production. Set a long, unique SECRET_KEY in your environment "
+        "before starting the server. Refusing to start."
+    )
 
 # Create database tables if they do not already exist (quick-start for SQLite/dev).
 # For real production use, use migrations instead of this.
@@ -54,4 +66,19 @@ def root():
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok"}
+    """
+    Reports 'ok' only if the database is actually reachable - a bare 200 with
+    no dependency check would be misleading during an outage.
+    """
+    try:
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+            db_status = "ok"
+        finally:
+            db.close()
+    except Exception as exc:
+        db_status = f"unreachable: {exc}"
+
+    overall = "ok" if db_status == "ok" else "degraded"
+    return {"status": overall, "database": db_status}

@@ -6,7 +6,9 @@ Returns: (list of parsed records, list of validation issues found).
 import io
 import re
 import pandas as pd
-from app.services.template_generator import REQUIRED_COLUMNS, TANZANIA_REGIONS, HAZARD_OPTIONS
+from app.services.template_generator import REQUIRED_COLUMNS, TANZANIA_REGIONS, HAZARD_OPTIONS, REGION_DISTRICTS
+
+REPORTING_PERIOD_PATTERN = re.compile(r"^\d{4}-Q[1-4]$")
 
 
 class ValidationIssue:
@@ -17,7 +19,18 @@ class ValidationIssue:
         self.severity = severity
 
 
-def validate_excel_file(file_bytes: bytes, filename: str):
+def validate_excel_file(
+    file_bytes: bytes,
+    filename: str,
+    form_reporting_period: str | None = None,
+    max_rows: int = 100000,
+):
+    """
+    form_reporting_period: the Reporting Period the user typed into the upload form.
+    When provided, every row's own reporting_period column must match it exactly -
+    a mismatch rejects the whole submission rather than silently keeping ambiguous
+    data (Data Quality & Validation: reporting-period consistency).
+    """
     issues: list[ValidationIssue] = []
     records: list[dict] = []
 
@@ -45,9 +58,37 @@ def validate_excel_file(file_bytes: bytes, filename: str):
         ))
         return records, issues
 
+    # ---- 3. Row-count limit (prevents an oversized file exhausting server resources) ----
+    if len(df) > max_rows:
+        issues.append(ValidationIssue(
+            None, None,
+            f"This file has {len(df)} data rows, which exceeds the maximum of {max_rows} allowed "
+            f"per submission. Please split it into smaller files."
+        ))
+        return records, issues
+
+    # ---- 4. Reporting-period consistency (form value vs each row's own column) ----
+    if form_reporting_period:
+        mismatched_rows = []
+        for idx, row in df.iterrows():
+            row_period = str(row.get("reporting_period", "")).strip()
+            if row_period != form_reporting_period.strip():
+                mismatched_rows.append((idx + 2, row_period or "(blank)"))
+        if mismatched_rows:
+            sample = ", ".join(f"row {r} has '{p}'" for r, p in mismatched_rows[:5])
+            more = f" and {len(mismatched_rows) - 5} more row(s)" if len(mismatched_rows) > 5 else ""
+            issues.append(ValidationIssue(
+                None, "reporting_period",
+                f"The reporting period you entered on the upload form ('{form_reporting_period}') does not "
+                f"match the reporting_period column inside the file for {len(mismatched_rows)} row(s): "
+                f"{sample}{more}. Please correct the file or the form value and resubmit - the whole "
+                f"submission is rejected to avoid saving misleading data."
+            ))
+            return records, issues
+
     seen_loan_ids = set()
 
-    # ---- 3. Row-level data validation ----
+    # ---- 5. Row-level data validation ----
     for idx, row in df.iterrows():
         row_number = idx + 2  # +2 because row 1 is the header, and pandas is 0-indexed
         row_is_valid = True
@@ -89,11 +130,21 @@ def validate_excel_file(file_bytes: bytes, filename: str):
             row_is_valid = False
         record["region"] = region
 
-        record["district"] = str(row.get("district", "")).strip()
+        district = str(row.get("district", "")).strip()
+        if not district or district.lower() == "nan":
+            issues.append(ValidationIssue(row_number, "district", "district is missing (mandatory field)"))
+            row_is_valid = False
+        elif region in REGION_DISTRICTS and district not in REGION_DISTRICTS[region]:
+            issues.append(ValidationIssue(
+                row_number, "district",
+                f"'{district}' is not a valid district within the region '{region}'"
+            ))
+            row_is_valid = False
+        record["district"] = district
         record["collateral_type"] = str(row.get("collateral_type", "")).strip()
 
         reporting_period = str(row.get("reporting_period", "")).strip()
-        if not re.match(r"^\d{4}-Q[1-4]$", reporting_period):
+        if not REPORTING_PERIOD_PATTERN.match(reporting_period):
             issues.append(ValidationIssue(
                 row_number, "reporting_period",
                 f"'{reporting_period}' is not a valid format - use YYYY-Qn (e.g. 2026-Q3)"

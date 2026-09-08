@@ -461,6 +461,7 @@ export default function InternalPortal() {
           <option value="INVALID">Invalid</option>
           <option value="APPROVED">Approved</option>
           <option value="REJECTED">Rejected</option>
+          <option value="SUPERSEDED">Superseded</option>
         </select>
 
         <table>

@@ -83,6 +83,17 @@ Use one of the demo accounts printed by `init_db.py`:
 
 ---
 
+## Running Tests
+
+```bash
+cd backend
+venv\Scripts\activate
+pytest -v
+```
+
+Tests use an isolated in-memory database and never touch your real `cdr.db` or
+demo data. See `docs/SECURITY_HARDENING.md` for what's covered.
+
 ## Alternative: Running with Docker
 
 Instead of the manual steps above, the whole stack (PostgreSQL + backend + frontend)

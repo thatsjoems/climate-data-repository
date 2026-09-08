@@ -6,8 +6,6 @@ submits a request describing who they are; no login is created at this point.
 Only a SYSTEM_ADMIN, after verifying the institution out-of-band, may approve the
 request - which is the single point where an Institution + User account get created.
 """
-import random
-import string
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.core.security import hash_password
+from app.core.password_policy import generate_secure_temp_password
 from app.models.models import (
     InstitutionAccessRequest, AccessRequestStatus, Institution, User, RoleEnum,
 )
@@ -37,11 +36,6 @@ def _generate_username(base: str, db: Session) -> str:
         suffix += 1
         candidate = f"{slug}{suffix}"
     return candidate
-
-
-def _generate_temp_password() -> str:
-    alphabet = string.ascii_letters + string.digits
-    return "".join(random.choice(alphabet) for _ in range(10)) + "!1"
 
 
 @router.post("", response_model=AccessRequestOut, status_code=201)
@@ -100,7 +94,7 @@ def approve_access_request(
         db.flush()
 
     username = _generate_username(req.contact_email.split("@")[0], db)
-    temp_password = _generate_temp_password()
+    temp_password = generate_secure_temp_password()
 
     user = User(
         full_name=req.contact_full_name,
@@ -109,6 +103,7 @@ def approve_access_request(
         hashed_password=hash_password(temp_password),
         role=RoleEnum.INSTITUTION_USER,
         institution_id=institution.id,
+        must_change_password=True,
     )
     db.add(user)
     db.flush()

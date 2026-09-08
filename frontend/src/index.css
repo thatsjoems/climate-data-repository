@@ -315,6 +315,7 @@ tbody tr:hover { background: #FAF8F2; }
 .badge-invalid { background: var(--color-danger); }
 .badge-approved { background: #1E7A3A; }
 .badge-rejected { background: #8B1E1E; }
+.badge-superseded { background: #7A7568; }
 
 /* ---------------- GRID LAYOUTS ---------------- */
 .two-col-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; align-items: start; }

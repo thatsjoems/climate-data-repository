@@ -39,6 +39,8 @@ class SubmissionStatus(str, enum.Enum):
     INVALID = "INVALID"                # Validation found errors - awaiting correction
     APPROVED = "APPROVED"              # Reviewed and approved by a BOT_USER
     REJECTED = "REJECTED"              # Reviewed and rejected by a BOT_USER
+    SUPERSEDED = "SUPERSEDED"          # Replaced by a newer submission for the same
+                                        # institution + reporting_period; excluded from analytics
 
 
 class InstitutionType(str, enum.Enum):
@@ -81,6 +83,13 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, nullable=True)
+
+    # Auth hardening (Module A / Solution 2 - "secure user authentication"):
+    # brute-force lockout tracking and a flag forcing a password change the next
+    # time someone logs in with a temporary/admin-issued password.
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime, nullable=True)
+    must_change_password = Column(Boolean, default=False, nullable=False)
 
     institution = relationship("Institution", back_populates="users")
 

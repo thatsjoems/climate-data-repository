@@ -28,6 +28,7 @@ const STATUS_LABELS: Record<string, string> = {
   INVALID: 'Has Errors',
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
+  SUPERSEDED: 'Superseded',
 }
 
 function scrollTo(id: string) {
