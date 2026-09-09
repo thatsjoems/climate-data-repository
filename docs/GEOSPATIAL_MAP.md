@@ -45,15 +45,59 @@ change, only the data feeding it.
 
 ## Relationship to RTIS/BSIS/QGIS/ArcGIS (still not integrated)
 
-This map is intentionally **independent** of those systems. Real GIS
-platforms like QGIS Server or ArcGIS would be useful later for overlaying
-official hazard-vulnerability zone polygons (e.g. from PMO's Tanzania
-Climate Vulnerability Map, `tcvmp.pmo.go.tz` — confirmed to be a real public
-platform, GCA/PMO-run) underneath our own institution markers. That
-integration was explicitly **not** pursued here in favor of keeping the
-system self-sufficient; RTIS/BSIS/QGIS/ArcGIS remain listed as
-"Not Connected" in the sidebar, honestly, since no credentials or API access
-exist for them.
+This map remains **independent** of RTIS, BSIS, QGIS Server, and ArcGIS -
+none of those are connected, and no credentials or API access exist for
+them; they remain listed as "Not Connected" in the sidebar, honestly.
+
+**PMO's Tanzania Climate Vulnerability Map is the one exception**, added
+per explicit request - see the "Update" section immediately below for what
+was added and why. It is a separate, independent government platform (not
+QGIS/ArcGIS/RTIS/BSIS), and the integration is a thin, optional tile-overlay
+layer, not a data-sharing pipeline of the kind envisioned for RTIS/BSIS.
+
+## Update: PMO hazard layer overlay (added after direct request)
+
+Per explicit direction, an optional overlay tile layer from PMO's own
+**Tanzania Climate Vulnerability Maps** platform (`tcvmp.pmo.go.tz`, run
+jointly with the Global Center on Adaptation) was added underneath our
+institution-exposure circles, matching the visual style shown in the
+original ICN Figure 3 mockup (a hazard heatmap + location markers together).
+
+**How the endpoint was found:** `tcvmp.pmo.go.tz` runs on
+[g3w-suite](https://github.com/g3w-suite) (an open-source, QGIS-Server-based
+web GIS platform). Its built-in layer "Information" tool failed to load a
+legend for the layers it exposed by default, so the actual tile URL pattern
+was found by inspecting the browser's Network tab while using the live
+public map:
+
+```
+https://tcvmp.pmo.go.tz/tiles/singleband/climatology/{indicator}/{scenario}/{period}/{z}/{x}/{y}.png?colormap={colormap}
+```
+
+This is a standard XYZ tile scheme, directly compatible with Leaflet's
+`TileLayer`. `flood` was confirmed working; `drought` is used by the same
+pattern based on the platform's own indicator list, on the reasonable
+assumption of a consistent naming convention, but has not been individually
+re-verified tile-by-tile.
+
+**Important caveats, stated plainly:**
+- This is a **discovered public endpoint**, not a documented API and not the
+  result of a data-sharing agreement with PMO. PMO could change, rate-limit,
+  or retire it without notice.
+- The layer is **optional and fails gracefully**: a `tileerror` handler
+  ensures a broken/unreachable tile never breaks the map or hides this
+  system's own institution-exposure circles, which come entirely from our
+  own data and remain functional with or without the PMO layer.
+- Per the project's honesty principle, the map clearly labels the PMO layer
+  as an independent external data source, distinct from institution
+  submissions, right under the map (not just in this doc).
+- This reintroduces one external, unofficial runtime dependency for this
+  visual layer only - a deliberate, explicit trade-off against the
+  "self-sufficient system" preference stated earlier in the project, made
+  because the visual match to the ICN mockup was judged worth it for this
+  specific element. Nothing else in the system depends on PMO's endpoint.
+
+
 
 ## API
 

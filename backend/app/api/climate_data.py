@@ -4,6 +4,11 @@ MODULE: Climate Data Ingestion & Data Quality (Sections 8 & 19).
 Exclusive to BOT_USER (Analyst) - climate data is analytical/data content,
 consistent with the rest of this project's strict role separation. Not
 available to SYSTEM_ADMIN or INSTITUTION_USER.
+
+NOTE: the /ingest endpoint is an INTERIM MANUAL BRIDGE, not the intended
+final architecture - see docs/TMA_INGESTION.md. Once TMA agrees on a real
+feed mechanism, this manual step is meant to disappear; only the underlying
+validation logic in climate_ingestion_service.py is expected to persist.
 """
 import os
 import uuid

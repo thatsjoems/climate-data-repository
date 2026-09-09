@@ -1,13 +1,26 @@
 # TMA Climate Data Ingestion Pipeline
 
-## Status: architecture ready, no real TMA connection exists yet
+## Status: interim manual bridge, not the target end-state
 
-This document describes how climate observations get into the CDR, and
-exactly what is needed to switch from synthetic demo data to real TMA data.
-**No TMA API, file format, or delivery mechanism has been invented or
-assumed** — TMA has not yet agreed on one. What exists is a validation
-pipeline that any future real feed (API, CSV, XLSX, SFTP, database export)
-can plug into without a redesign.
+**This file-upload adapter is a temporary bridge, not the intended final
+architecture.** The ICN's actual vision — and the realistic target once TMA
+agrees on a mechanism — is a direct/automated feed (API, scheduled file
+transfer, or database link) requiring no manual step by a BOT Analyst at
+all. The manual upload form described below exists only because that real
+connection does not exist yet; if it disappeared the day real TMA
+integration went live, that would be success, not a regression.
+
+What is NOT temporary is the **validation logic** itself
+(`climate_ingestion_service.py`): schema checks, region/district validation,
+duplicate detection, and provenance recording are exactly what a fully
+automated feed would also need to run before data becomes canonical. That
+logic was written as a pure, source-agnostic function precisely so it can be
+called from a scheduled job or webhook later with zero changes — only the
+"how the bytes arrived" step changes, not the validation itself.
+
+No TMA API, file format, or delivery mechanism has been invented or
+assumed — TMA has not yet agreed on one.
+
 
 ## Pipeline
 

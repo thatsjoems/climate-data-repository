@@ -425,11 +425,14 @@ export default function InternalPortal() {
           </p>
         )}
 
-        <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.4rem' }}>Ingest Climate Observations</h3>
+        <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.4rem' }}>Ingest Climate Observations (Interim Bridge)</h3>
         <p className="note">
           Upload a .csv or .xlsx of climate observations (region, year, month, rainfall_mm,
-          avg_temperature_c, etc.). This is the file-upload adapter of the TMA ingestion
-          pipeline - see docs/TMA_INGESTION.md for the expected column layout.
+          avg_temperature_c, etc.). <strong>This is a temporary manual bridge, not the official
+          TMA integration</strong> — it exists only because no real TMA API/feed access is
+          available yet. The validation rules it runs are the same ones a future direct/automated
+          TMA feed would use; once that exists, this manual step is no longer needed. See
+          docs/TMA_INGESTION.md.
         </p>
         <form onSubmit={handleClimateUpload} style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <select value={climateSource} onChange={(e) => setClimateSource(e.target.value)}>
