@@ -38,12 +38,12 @@ def test_institution_user_cannot_create_user(client, db_session):
     assert res.status_code == 403
 
 
-def test_bot_user_cannot_approve_access_requests(client, db_session):
-    """Only SYSTEM_ADMIN handles access requests - BOT_USER is a data reviewer, not IT/security."""
+def test_bot_user_cannot_view_password_reset_requests(client, db_session):
+    """Only SYSTEM_ADMIN handles account/administration matters - BOT_USER is a data reviewer, not IT/security."""
     make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
     token = login(client, "analyst1").json()["access_token"]
 
-    res = client.get("/api/access-requests", headers=auth_header(token))
+    res = client.get("/api/password-reset-requests", headers=auth_header(token))
     assert res.status_code == 403
 
 
@@ -187,3 +187,34 @@ def test_institution_id_in_request_body_is_ignored_for_uploads(client, db_sessio
     )
     assert res.status_code == 201
     assert res.json()["institution_id"] == inst_a.id
+
+
+def test_access_request_feature_no_longer_exists(client, db_session):
+    """Request Access was removed entirely per updated onboarding process - no route should exist."""
+    make_user(db_session, role=RoleEnum.SYSTEM_ADMIN, username="admin1")
+    token = login(client, "admin1").json()["access_token"]
+    res = client.get("/api/access-requests", headers=auth_header(token))
+    assert res.status_code == 404
+
+
+def test_bot_user_can_generate_summary_report(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    res = client.get("/api/reports/summary.pdf", headers=auth_header(token))
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/pdf"
+
+
+def test_institution_user_cannot_generate_summary_report(client, db_session):
+    inst = make_institution(db_session)
+    make_user(db_session, role=RoleEnum.INSTITUTION_USER, institution=inst, username="inst_user")
+    token = login(client, "inst_user").json()["access_token"]
+    res = client.get("/api/reports/summary.pdf", headers=auth_header(token))
+    assert res.status_code == 403
+
+
+def test_system_admin_cannot_generate_summary_report(client, db_session):
+    make_user(db_session, role=RoleEnum.SYSTEM_ADMIN, username="admin1")
+    token = login(client, "admin1").json()["access_token"]
+    res = client.get("/api/reports/summary.pdf", headers=auth_header(token))
+    assert res.status_code == 403

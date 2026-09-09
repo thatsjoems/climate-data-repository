@@ -20,19 +20,6 @@ interface InstitutionItem {
   is_active: boolean
 }
 
-interface AccessRequestItem {
-  id: string
-  institution_name: string
-  institution_code: string | null
-  institution_type: string
-  contact_full_name: string
-  contact_email: string
-  contact_phone: string | null
-  message: string | null
-  status: string
-  created_at: string
-}
-
 interface PasswordResetItem {
   id: string
   username: string
@@ -60,8 +47,6 @@ export default function AdminPanel() {
     full_name: '', username: '', email: '', password: '', role: 'INSTITUTION_USER', institution_id: '',
   })
   const [newInstitution, setNewInstitution] = useState({ code: '', name: '', type: 'BANK' })
-  const [accessRequests, setAccessRequests] = useState<AccessRequestItem[]>([])
-  const [generatedCredential, setGeneratedCredential] = useState<{ username: string; password: string; emailSent: boolean } | null>(null)
   const [passwordResets, setPasswordResets] = useState<PasswordResetItem[]>([])
   const [generatedResetPassword, setGeneratedResetPassword] = useState<{ username: string; password: string; emailSent: boolean } | null>(null)
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([])
@@ -71,15 +56,13 @@ export default function AdminPanel() {
   const AUDIT_PAGE_SIZE = 25
 
   async function loadAll() {
-    const [usersRes, instRes, reqRes, resetRes] = await Promise.all([
+    const [usersRes, instRes, resetRes] = await Promise.all([
       apiClient.get('/users'),
       apiClient.get('/institutions'),
-      apiClient.get('/access-requests'),
       apiClient.get('/password-reset-requests'),
     ])
     setUsers(usersRes.data)
     setInstitutions(instRes.data)
-    setAccessRequests(reqRes.data)
     setPasswordResets(resetRes.data)
     loadAuditLogs(0)
   }
@@ -112,31 +95,6 @@ export default function AdminPanel() {
     const notes = window.prompt('Reason for rejecting this reset request (optional):') || ''
     try {
       await apiClient.post(`/password-reset-requests/${id}/reject`, { notes })
-      loadAll()
-    } catch (err: any) {
-      setMessage(err?.response?.data?.detail || 'Failed to reject the request.')
-    }
-  }
-
-  async function handleApproveRequest(id: string) {
-    setMessage(null)
-    try {
-      const res = await apiClient.post(`/access-requests/${id}/approve`, {})
-      setGeneratedCredential({
-        username: res.data.generated_username,
-        password: res.data.generated_temporary_password,
-        emailSent: res.data.email_sent,
-      })
-      loadAll()
-    } catch (err: any) {
-      setMessage(err?.response?.data?.detail || 'Failed to approve the request.')
-    }
-  }
-
-  async function handleRejectRequest(id: string) {
-    const notes = window.prompt('Reason for rejecting this request (optional):') || ''
-    try {
-      await apiClient.post(`/access-requests/${id}/reject`, { notes })
       loadAll()
     } catch (err: any) {
       setMessage(err?.response?.data?.detail || 'Failed to reject the request.')
@@ -194,8 +152,7 @@ export default function AdminPanel() {
   ]
 
   const sidebarItems: SidebarItem[] = [
-    { key: 'requests', icon: '📨', label: 'Access Requests', active: true, onClick: () => scrollTo('access-requests-card') },
-    { key: 'resets', icon: '🔑', label: 'Password Resets', onClick: () => scrollTo('password-resets-card') },
+    { key: 'resets', icon: '🔑', label: 'Password Resets', active: true, onClick: () => scrollTo('password-resets-card') },
     { key: 'institutions', icon: '🏢', label: 'Institutions', onClick: () => scrollTo('institutions-card') },
     { key: 'users', icon: '👥', label: 'Users', onClick: () => scrollTo('users-card') },
   ]
@@ -211,56 +168,6 @@ export default function AdminPanel() {
       platforms={platforms}
     >
       {message && <div className="alert-info">{message}</div>}
-
-      {generatedCredential && (
-        <section className="card" style={{ borderLeft: '3px solid var(--color-accent)' }}>
-          <h2>✅ Account Created</h2>
-          {generatedCredential.emailSent ? (
-            <p>An email with these credentials was sent automatically to the institution's contact address.</p>
-          ) : (
-            <p>
-              Email delivery is not configured in this environment — share these credentials
-              with the institution through a verified channel (phone/official email) yourself.
-            </p>
-          )}
-          <p>
-            <strong>Username:</strong> <code>{generatedCredential.username}</code><br />
-            <strong>Temporary Password:</strong> <code>{generatedCredential.password}</code>
-          </p>
-          <button onClick={() => setGeneratedCredential(null)}>Dismiss</button>
-        </section>
-      )}
-
-      <section className="card">
-        <h2 id="access-requests-card">📨 Pending Access Requests</h2>
-        <p className="note">
-          Institutions that used the public "Request Access" form. Approving a request
-          creates the Institution (if new) and a user account with a temporary password.
-        </p>
-        <table>
-          <thead>
-            <tr><th>Institution</th><th>Contact</th><th>Email / Phone</th><th>Message</th><th>Status</th><th></th></tr>
-          </thead>
-          <tbody>
-            {accessRequests.filter((r) => r.status === 'PENDING').map((r) => (
-              <tr key={r.id}>
-                <td>{r.institution_name}{r.institution_code ? ` (${r.institution_code})` : ''}</td>
-                <td>{r.contact_full_name}</td>
-                <td>{r.contact_email}{r.contact_phone ? ` / ${r.contact_phone}` : ''}</td>
-                <td>{r.message || '-'}</td>
-                <td><span className="badge badge-pending">Pending</span></td>
-                <td>
-                  <button onClick={() => handleApproveRequest(r.id)}>Approve</button>
-                  <button onClick={() => handleRejectRequest(r.id)}>Reject</button>
-                </td>
-              </tr>
-            ))}
-            {accessRequests.filter((r) => r.status === 'PENDING').length === 0 && (
-              <tr><td colSpan={6}>No pending requests.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </section>
 
       {generatedResetPassword && (
         <section className="card" style={{ borderLeft: '3px solid var(--color-accent)' }}>

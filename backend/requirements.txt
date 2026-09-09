@@ -13,6 +13,9 @@ pandas==2.2.2
 python-dotenv==1.0.1
 psycopg2-binary==2.9.9
 
+# Report generation (Module: automated reporting)
+reportlab==4.2.5
+
 # Testing (Module: automated testing - see tests/)
 pytest==8.3.3
 httpx==0.27.2

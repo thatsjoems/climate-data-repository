@@ -50,10 +50,6 @@ export default function Login() {
           {isLoading ? 'Signing in...' : 'Log In'}
         </button>
 
-        <p style={{ textAlign: 'center', fontSize: '0.82rem', color: 'var(--color-muted)', marginTop: '1rem' }}>
-          New reporting institution? <Link to="/request-access">Request Access</Link>
-        </p>
-
         <div className="demo-hint">
           <strong>DEMO accounts (after running init_db.py):</strong>
           <ul>

@@ -2,7 +2,6 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
-import RequestAccess from './pages/RequestAccess'
 import ForgotPassword from './pages/ForgotPassword'
 import InstitutionPortal from './pages/InstitutionPortal'
 import InternalPortal from './pages/InternalPortal'
@@ -24,7 +23,6 @@ export default function App() {
     <div className="app-shell">
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/request-access" element={<RequestAccess />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route
           path="/"

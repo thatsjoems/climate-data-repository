@@ -229,44 +229,13 @@ class RiskAdvisoryNote(Base):
 
 
 # ---------------------------------------------------------------------------
-# INSTITUTION ACCESS REQUESTS ("Request Access" — not self-registration)
+# SHARED STATUS ENUM (used by Password Reset Requests below)
 # ---------------------------------------------------------------------------
 
 class AccessRequestStatus(str, enum.Enum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
-
-
-class InstitutionAccessRequest(Base):
-    """
-    A request from a prospective reporting institution asking to be onboarded.
-    This is NOT self-registration: submitting a request never creates a login.
-    Only a SYSTEM_ADMIN reviewing and approving the request creates an
-    Institution + User account, after out-of-band verification.
-    """
-    __tablename__ = "institution_access_requests"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
-
-    institution_name = Column(String(255), nullable=False)
-    institution_code = Column(String(20), nullable=True)
-    institution_type = Column(SAEnum(InstitutionType), default=InstitutionType.BANK, nullable=False)
-
-    contact_full_name = Column(String(255), nullable=False)
-    contact_email = Column(String(255), nullable=False)
-    contact_phone = Column(String(50), nullable=True)
-    message = Column(Text, nullable=True)
-
-    status = Column(SAEnum(AccessRequestStatus), default=AccessRequestStatus.PENDING, nullable=False)
-    reviewed_by_user_id = Column(String, ForeignKey("users.id"), nullable=True)
-    review_notes = Column(Text, nullable=True)
-    reviewed_at = Column(DateTime, nullable=True)
-
-    created_institution_id = Column(String, ForeignKey("institutions.id"), nullable=True)
-    created_user_id = Column(String, ForeignKey("users.id"), nullable=True)
-
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 # ---------------------------------------------------------------------------

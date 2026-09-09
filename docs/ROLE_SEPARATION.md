@@ -28,8 +28,8 @@ significant permission overlap. That overlap has been removed.
 | Manage institutions (create/deactivate) | ❌ | ❌ | ✅ |
 | Manage users (create/activate/deactivate) | ❌ | ❌ | ✅ |
 | View user list | ❌ | ❌ | ✅ |
-| Approve/reject Access Requests | ❌ | ❌ | ✅ |
 | Approve/reject Password Reset Requests | ❌ | ❌ | ✅ |
+| Generate automated PDF summary report | ❌ | ✅ | ❌ |
 | Audit log (login activity, account/institution changes) | ❌ | ❌ | ✅ |
 | Change own password / forced password change | ✅ | ✅ | ✅ |
 
@@ -39,7 +39,6 @@ significant permission overlap. That overlap has been removed.
 |---|---|
 | Submission uploaded / superseded | BOT_USER only |
 | Submission approved/rejected | the submitting institution user only |
-| Access request submitted/approved/rejected | SYSTEM_ADMIN only |
 | Password reset requested/approved/rejected | SYSTEM_ADMIN only |
 | Institution created/deactivated | SYSTEM_ADMIN only |
 | User account created/activated/deactivated | the affected user (+ SYSTEM_ADMIN peers for deactivation) |
@@ -84,3 +83,20 @@ gap noted earlier in this project's own review: previously there was no
 capability reserved exclusively for the Analyst that the Admin didn't also
 have - Admin was a strict superset of Analyst's permissions. That is no
 longer true; each role now has a genuinely distinct, non-overlapping mandate.
+
+## Later update: Request Access removed; Automated Reports added
+
+Per explicit direction from BOT, the public self-service "Request Access"
+feature (`RequestAccess.tsx`, `POST /api/access-requests`, and the
+corresponding "Pending Access Requests" section in the Administration page)
+was **removed entirely**. Institutional onboarding is now purely
+Admin-driven: a SYSTEM_ADMIN creates the Institution and User directly via
+the existing "Add New Institution" / "Add New User" forms - there is no
+public request or approval step anymore. The `AccessRequestStatus` enum and
+`AccessRequestDecision` schema were kept (Password Reset Requests reuse them),
+but `InstitutionAccessRequest` itself and its API/UI were deleted.
+
+Separately, `GET /api/reports/summary.pdf` (BOT_USER only) was added,
+directly implementing BOT's recommendation to "automate the system for
+generating their reports" - see `docs/ICN_REQUIREMENTS_TRACEABILITY_MATRIX.md`
+item 10.

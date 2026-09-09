@@ -203,41 +203,9 @@ class RiskAdvisoryOut(BaseModel):
     created_at: datetime
 
 
-# ---------- INSTITUTION ACCESS REQUESTS ----------
-class AccessRequestCreate(BaseModel):
-    institution_name: str
-    institution_code: Optional[str] = None
-    institution_type: InstitutionType = InstitutionType.BANK
-    contact_full_name: str
-    contact_email: EmailStr
-    contact_phone: Optional[str] = None
-    message: Optional[str] = None
-
-
-class AccessRequestOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: str
-    institution_name: str
-    institution_code: Optional[str] = None
-    institution_type: InstitutionType
-    contact_full_name: str
-    contact_email: str
-    contact_phone: Optional[str] = None
-    message: Optional[str] = None
-    status: str
-    review_notes: Optional[str] = None
-    created_at: datetime
-
-
+# ---------- SHARED DECISION SCHEMA (used by Password Reset) ----------
 class AccessRequestDecision(BaseModel):
     notes: Optional[str] = None
-
-
-class AccessRequestApprovalOut(BaseModel):
-    request: AccessRequestOut
-    generated_username: str
-    generated_temporary_password: str
-    email_sent: bool = False
 
 
 # ---------- PASSWORD RESET ----------

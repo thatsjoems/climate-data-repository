@@ -111,7 +111,8 @@ export default function InternalPortal() {
   const [combinedExposure, setCombinedExposure] = useState<CombinedExposure[]>([])
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [notesById, setNotesById] = useState<Record<string, string>>({})
-  const [showExportNotice, setShowExportNotice] = useState(false)
+  const [reportGenerating, setReportGenerating] = useState(false)
+  const [reportMessage, setReportMessage] = useState<string | null>(null)
   const [riskAdvisories, setRiskAdvisories] = useState<RiskAdvisory[]>([])
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
   const [advisoryForm, setAdvisoryForm] = useState({
@@ -160,6 +161,26 @@ export default function InternalPortal() {
     loadAll()
   }, [])
 
+  async function handleGenerateReport() {
+    setReportGenerating(true)
+    setReportMessage(null)
+    try {
+      const res = await apiClient.get('/reports/summary.pdf', { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `CDR_Summary_Report_${new Date().toISOString().slice(0, 10)}.pdf`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setReportMessage('Report generated and downloaded.')
+    } catch (err: any) {
+      setReportMessage('Failed to generate the report.')
+    } finally {
+      setReportGenerating(false)
+    }
+  }
+
   async function handleReview(submissionId: string, decision: 'APPROVE' | 'REJECT') {
     await apiClient.post(`/submissions/${submissionId}/review`, {
       decision,
@@ -204,7 +225,7 @@ export default function InternalPortal() {
     { key: 'risk', icon: '🧭', label: 'Risk Advisory Reports', onClick: () => scrollTo('risk-advisory-section') },
     { key: 'submissions', icon: '📄', label: 'Submission Status', onClick: () => scrollTo('monitoring-section') },
     { key: 'map', icon: '🗺️', label: 'Geospatial Map', onClick: () => scrollTo('map-section') },
-    { key: 'export', icon: '⬇️', label: 'Download / Export', onClick: () => setShowExportNotice(true) },
+    { key: 'export', icon: '⬇️', label: 'Download / Export', onClick: () => scrollTo('reports-section') },
   ]
 
   return (
@@ -219,13 +240,18 @@ export default function InternalPortal() {
     >
       <div id="top-anchor" />
 
-      {showExportNotice && (
-        <div className="alert-info">
-          Export functionality (PDF / Excel / CSV) is planned for a future release — see the
-          Requirements Traceability Matrix.
-          <button style={{ marginLeft: '0.75rem' }} onClick={() => setShowExportNotice(false)}>Dismiss</button>
-        </div>
-      )}
+      <section className="card" id="reports-section">
+        <h2>⬇️ Automated Reports</h2>
+        <p className="note">
+          Compiles the current KPI summary, climate hazard exposure, combined climate-financial
+          exposure, and recent Risk Advisory Reports into a single PDF — the same figures shown
+          on this dashboard, ready to file or share instead of copying numbers manually.
+        </p>
+        <button className="btn-accent" onClick={handleGenerateReport} disabled={reportGenerating}>
+          {reportGenerating ? 'Generating...' : 'Generate Summary Report (PDF)'}
+        </button>
+        {reportMessage && <div className="alert-info">{reportMessage}</div>}
+      </section>
 
       {kpi && (
         <section className="kpi-grid-v2" id="kpi-section">
