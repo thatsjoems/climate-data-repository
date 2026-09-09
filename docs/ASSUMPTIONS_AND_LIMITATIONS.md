@@ -1,5 +1,23 @@
 # Assumptions, Sample Data, and Limitations
 
+## Real-World Alignment (added after reviewing an actual BOT publication)
+
+The Bank of Tanzania's own **"Report on Climate Risk Analysis in the Banking Sector"**
+(March 2026, publicly downloadable from bot.go.tz/Publications/Filter/4) confirms BOT
+already operates a real Climate Data Repository built on the same pattern used here:
+banks submit spreadsheets (CSV/xlsx) → validation → processing pipeline → repository,
+combined with TMA environmental data for climate-risk assessment (see the report's
+Figure 4). Two concrete details from that report were adopted here:
+
+- `collateral_type` in the submission template is now a controlled dropdown (Mortgage,
+  Landed Property, Financial Assets, Cash, Equipment, Land, Others) instead of free text -
+  these are the exact categories used in BOT's own repository (see the report's Charts 5-8),
+  not invented.
+- The report's own "Way Forward" recommendations (section 6.2, point iii) explicitly call for
+  institutions to submit geographical coordinates for loans/collateral going forward -
+  independently confirming the plan already agreed for this project: add lat/long fields once
+  BOT provides its own official data template, rather than guessing a structure now.
+
 ## Data Used
 
 | Data Type | Status | Notes |

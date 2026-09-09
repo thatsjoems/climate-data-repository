@@ -60,6 +60,11 @@ TANZANIA_REGIONS = list(REGION_DISTRICTS.keys())
 
 HAZARD_OPTIONS = ["None", "Drought", "Flood", "Cyclone", "Landslide"]
 
+# Source: Bank of Tanzania "Report on Climate Risk Analysis in the Banking Sector"
+# (March 2026), Chart 5/6/7/8 - the real collateral categories used in BOT's own
+# Climate Data Repository. Not invented - taken directly from that published report.
+COLLATERAL_TYPES = ["Mortgage", "Landed Property", "Financial Assets", "Cash", "Equipment", "Land", "Others"]
+
 
 def generate_loan_collateral_template() -> bytes:
     """Generates an Excel (.xlsx) file with the standardized loan/collateral data layout."""
@@ -82,7 +87,7 @@ def generate_loan_collateral_template() -> bytes:
         "loan_id": "LN-2026-0001",
         "borrower_name": "Example Company Ltd",
         "loan_amount_tzs": 50000000,
-        "collateral_type": "Land Title",
+        "collateral_type": "Landed Property",
         "collateral_value_tzs": 80000000,
         "region": "Dodoma",
         "district": "Chamwino District",
@@ -134,6 +139,12 @@ def generate_loan_collateral_template() -> bytes:
     dv_hazard.add(f"{ws.cell(row=2, column=ALL_COLUMNS.index('climate_hazard_exposure')+1).column_letter}2:"
                   f"{ws.cell(row=2, column=ALL_COLUMNS.index('climate_hazard_exposure')+1).column_letter}1000")
 
+    collateral_type_list = ",".join(COLLATERAL_TYPES)
+    dv_collateral_type = DataValidation(type="list", formula1=f'"{collateral_type_list}"', allow_blank=False)
+    ws.add_data_validation(dv_collateral_type)
+    dv_collateral_type.add(f"{ws.cell(row=2, column=ALL_COLUMNS.index('collateral_type')+1).column_letter}2:"
+                            f"{ws.cell(row=2, column=ALL_COLUMNS.index('collateral_type')+1).column_letter}1000")
+
     # Instructions sheet
     ws2 = wb.create_sheet("Instructions")
     instructions = [
@@ -147,6 +158,9 @@ def generate_loan_collateral_template() -> bytes:
         ["6. region must be chosen from the dropdown (all 31 official Tanzanian regions)."],
         ["7. district must be chosen from the dropdown - it automatically narrows to match the"],
         ["   region you selected in that row. Select the Region first, then the District."],
+        ["8. collateral_type must be chosen from the dropdown (Mortgage, Landed Property,"],
+        ["   Financial Assets, Cash, Equipment, Land, Others) - matching the categories used"],
+        ["   in BOT's own Climate Data Repository (Report on Climate Risk Analysis, March 2026)."],
         [""],
         ["Required columns: " + ", ".join(REQUIRED_COLUMNS)],
         ["Optional columns: " + ", ".join(OPTIONAL_COLUMNS)],

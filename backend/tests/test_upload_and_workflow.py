@@ -49,7 +49,7 @@ def _upload(client, token, rows, reporting_period="2026-Q1", filename="data.xlsx
 
 VALID_ROW = {
     "loan_id": "LN-1", "borrower_name": "Acme Ltd", "loan_amount_tzs": 5_000_000,
-    "collateral_type": "Land Title", "collateral_value_tzs": 8_000_000,
+    "collateral_type": "Landed Property", "collateral_value_tzs": 8_000_000,
     "region": "Dodoma", "district": "Chamwino District", "reporting_period": "2026-Q1",
     "climate_hazard_exposure": "None",
 }

@@ -6,7 +6,7 @@ Returns: (list of parsed records, list of validation issues found).
 import io
 import re
 import pandas as pd
-from app.services.template_generator import REQUIRED_COLUMNS, TANZANIA_REGIONS, HAZARD_OPTIONS, REGION_DISTRICTS
+from app.services.template_generator import REQUIRED_COLUMNS, TANZANIA_REGIONS, HAZARD_OPTIONS, REGION_DISTRICTS, COLLATERAL_TYPES
 
 REPORTING_PERIOD_PATTERN = re.compile(r"^\d{4}-Q[1-4]$")
 
@@ -141,7 +141,18 @@ def validate_excel_file(
             ))
             row_is_valid = False
         record["district"] = district
-        record["collateral_type"] = str(row.get("collateral_type", "")).strip()
+        collateral_type = str(row.get("collateral_type", "")).strip()
+        # Matches the real collateral categories used in BOT's own Climate Data Repository
+        # (Report on Climate Risk Analysis in the Banking Sector, March 2026) - controlled
+        # so "Land Title", "Real Estate", "House" etc. don't fragment into separate categories.
+        if collateral_type not in COLLATERAL_TYPES:
+            issues.append(ValidationIssue(
+                row_number, "collateral_type",
+                f"'{collateral_type}' is not a recognized collateral type - choose from the "
+                f"template dropdown ({', '.join(COLLATERAL_TYPES)})"
+            ))
+            row_is_valid = False
+        record["collateral_type"] = collateral_type
 
         reporting_period = str(row.get("reporting_period", "")).strip()
         if not REPORTING_PERIOD_PATTERN.match(reporting_period):
