@@ -68,8 +68,7 @@ export default function HazardMap({ points }: { points: RegionMapPoint[] }) {
 
       <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid var(--color-border)' }}>
         <MapContainer
-          center={[-6.37, 34.89]}
-          zoom={5.4}
+          bounds={[[-11.8, 29.2], [-0.85, 40.6]]}
           style={{ height: '420px', width: '100%' }}
           scrollWheelZoom={true}
         >
