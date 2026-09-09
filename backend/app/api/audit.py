@@ -16,7 +16,7 @@ router = APIRouter(prefix="/audit-logs", tags=["Audit Log"])
 @router.get("", response_model=AuditLogPage)
 def list_audit_logs(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(RoleEnum.SYSTEM_ADMIN, RoleEnum.BOT_USER)),
+    current_user: User = Depends(require_roles(RoleEnum.SYSTEM_ADMIN)),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     action: str | None = Query(default=None, description="Exact action name, e.g. LOGIN"),

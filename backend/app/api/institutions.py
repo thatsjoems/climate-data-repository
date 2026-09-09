@@ -47,7 +47,7 @@ def create_institution(
     db.refresh(inst)
     record_audit(db, current_user.id, "INSTITUTION_CREATED", "Institution", inst.id, inst.name)
     notify_roles(
-        db, [RoleEnum.SYSTEM_ADMIN, RoleEnum.BOT_USER],
+        db, [RoleEnum.SYSTEM_ADMIN],
         message=f"{current_user.full_name} added a new institution: {inst.name}.",
         notif_type="INSTITUTION_CREATED",
         related_entity_type="Institution",
@@ -71,7 +71,7 @@ def deactivate_institution(
     db.refresh(inst)
     record_audit(db, current_user.id, "INSTITUTION_DEACTIVATED", "Institution", inst.id)
     notify_roles(
-        db, [RoleEnum.SYSTEM_ADMIN, RoleEnum.BOT_USER],
+        db, [RoleEnum.SYSTEM_ADMIN],
         message=f"{current_user.full_name} deactivated institution: {inst.name}.",
         notif_type="INSTITUTION_DEACTIVATED",
         related_entity_type="Institution",

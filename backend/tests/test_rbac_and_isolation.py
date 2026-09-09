@@ -117,20 +117,46 @@ def test_institution_user_kpi_summary_scoped_to_own_institution_only(client, db_
     assert body["total_submissions"] == 1                  # not the sector-wide count of 2
 
 
-def test_admin_sees_sector_wide_kpi_totals(client, db_session):
-    """SYSTEM_ADMIN / BOT_USER retain full supervisory visibility across all institutions."""
+def test_bot_user_sees_sector_wide_kpi_totals(client, db_session):
+    """BOT_USER (Analyst) retains full supervisory visibility across all institutions."""
     inst_a = make_institution(db_session, code="BANK-A", name="Bank A")
     inst_b = make_institution(db_session, code="BANK-B", name="Bank B")
     _seed_submission_for(db_session, inst_a, amount=1_000_000.0)
     _seed_submission_for(db_session, inst_b, amount=9_000_000.0)
 
-    make_user(db_session, role=RoleEnum.SYSTEM_ADMIN, username="admin1")
-    token = login(client, "admin1").json()["access_token"]
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
 
     res = client.get("/api/analytics/kpi-summary", headers=auth_header(token))
     assert res.status_code == 200
     assert res.json()["total_loan_exposure_tzs"] == 10_000_000.0
     assert res.json()["total_submissions"] == 2
+
+
+def test_system_admin_cannot_access_climate_or_submission_data(client, db_session):
+    """
+    Acceptance criterion for this project's RBAC design: SYSTEM_ADMIN's dashboard
+    is strictly administration-only. Climate/financial data and submissions are
+    exclusively the Analyst's (BOT_USER) and reporting institutions' domain.
+    """
+    make_user(db_session, role=RoleEnum.SYSTEM_ADMIN, username="admin1")
+    token = login(client, "admin1").json()["access_token"]
+
+    assert client.get("/api/analytics/kpi-summary", headers=auth_header(token)).status_code == 403
+    assert client.get("/api/analytics/hazard-exposure", headers=auth_header(token)).status_code == 403
+    assert client.get("/api/analytics/combined-climate-financial-exposure", headers=auth_header(token)).status_code == 403
+    assert client.get("/api/submissions", headers=auth_header(token)).status_code == 403
+    assert client.get("/api/risk-advisories", headers=auth_header(token)).status_code == 403
+
+
+def test_bot_user_cannot_access_administration_endpoints(client, db_session):
+    """The reverse: BOT_USER (Analyst) has no visibility into administration matters."""
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+
+    assert client.get("/api/audit-logs", headers=auth_header(token)).status_code == 403
+    assert client.get("/api/users", headers=auth_header(token)).status_code == 403
+    assert client.get("/api/password-reset-requests", headers=auth_header(token)).status_code == 403
 
 
 def test_institution_id_in_request_body_is_ignored_for_uploads(client, db_session):

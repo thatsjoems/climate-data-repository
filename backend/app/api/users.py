@@ -19,7 +19,7 @@ router = APIRouter(prefix="/users", tags=["User Management"])
 @router.get("", response_model=list[UserOut])
 def list_users(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(RoleEnum.SYSTEM_ADMIN, RoleEnum.BOT_USER)),
+    current_user: User = Depends(require_roles(RoleEnum.SYSTEM_ADMIN)),
 ):
     return db.query(User).order_by(User.created_at.desc()).all()
 

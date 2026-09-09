@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
@@ -13,6 +13,9 @@ function HomeRouter() {
   const { user } = useAuth()
   if (!user) return null
   if (user.role === 'INSTITUTION_USER') return <InstitutionPortal />
+  // SYSTEM_ADMIN has its own dedicated home (administration only - no climate/
+  // submissions data). BOT_USER is the only role that lands on the data dashboard.
+  if (user.role === 'SYSTEM_ADMIN') return <Navigate to="/admin" replace />
   return <InternalPortal />
 }
 

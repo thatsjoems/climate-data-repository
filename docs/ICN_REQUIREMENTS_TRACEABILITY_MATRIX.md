@@ -34,6 +34,17 @@ credentials, reduced institution info disclosure, and a paginated audit log
 viewer. That document also lists what was deliberately left out as outside
 the ICN's scope (e.g. database migrations, JWT/cookie rearchitecture).
 
+**A further role-separation refinement** was then applied on top of that:
+SYSTEM_ADMIN's dashboard is now strictly administration-only (users,
+institutions, access requests, password resets, audit log) with zero
+visibility into climate data, submissions, or analytics; BOT_USER (the
+Analyst) is conversely the only internal role with access to any data/climate
+content, and has no visibility into administration matters (audit log, user
+list, access/password-reset requests). Institution users additionally gained
+the ability to review the actual rows they submitted (not just validation
+errors) and re-download their original uploaded file. See
+`docs/ROLE_SEPARATION.md` for the full before/after permission matrix.
+
 
 - The entire **MUST HAVE** workflow (login \u2192 template \u2192 upload \u2192 validation \u2192 storage \u2192 internal review \u2192 dashboard) has been **built and fully functional**.
 - **SHOULD HAVE** items (export, advanced filters, password recovery) - the underlying foundation exists (APIs already return correct data), but the additional UI/endpoints have not yet been added.

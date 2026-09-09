@@ -22,6 +22,19 @@ interface ValidationErrorItem {
   severity: string
 }
 
+interface SubmissionRecordItem {
+  row_number: number
+  loan_id: string | null
+  borrower_name: string | null
+  loan_amount_tzs: number | null
+  collateral_type: string | null
+  collateral_value_tzs: number | null
+  region: string | null
+  district: string | null
+  climate_hazard_exposure: string | null
+  is_valid: boolean
+}
+
 const STATUS_LABELS: Record<string, string> = {
   PENDING: 'Pending',
   VALID: 'Valid',
@@ -42,7 +55,7 @@ export default function InstitutionPortal() {
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadMessage, setUploadMessage] = useState<string | null>(null)
-  const [selected, setSelected] = useState<{ submission: Submission; errors: ValidationErrorItem[] } | null>(null)
+  const [selected, setSelected] = useState<{ submission: Submission; errors: ValidationErrorItem[]; records: SubmissionRecordItem[] } | null>(null)
 
   async function loadSubmissions() {
     const res = await apiClient.get('/submissions')
@@ -59,6 +72,17 @@ export default function InstitutionPortal() {
     const link = document.createElement('a')
     link.href = url
     link.setAttribute('download', 'CDR_Loan_Collateral_Template.xlsx')
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  async function handleDownloadSubmission(submissionId: string, fileName: string) {
+    const res = await apiClient.get(`/submissions/${submissionId}/download`, { responseType: 'blob' })
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', fileName)
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -95,7 +119,7 @@ export default function InstitutionPortal() {
 
   async function viewDetails(submissionId: string) {
     const res = await apiClient.get(`/submissions/${submissionId}`)
-    setSelected({ submission: res.data, errors: res.data.errors })
+    setSelected({ submission: res.data, errors: res.data.errors, records: res.data.records })
   }
 
   const totalSubmissions = submissions.length
@@ -199,7 +223,10 @@ export default function InstitutionPortal() {
                 <td><span className={`badge badge-${s.status.toLowerCase()}`}>{STATUS_LABELS[s.status]}</span></td>
                 <td>{s.valid_records}/{s.total_records}</td>
                 <td>{new Date(s.created_at).toLocaleString()}</td>
-                <td><button onClick={() => viewDetails(s.id)}>View</button></td>
+                <td>
+                  <button onClick={() => viewDetails(s.id)}>Review</button>{' '}
+                  <button onClick={() => handleDownloadSubmission(s.id, s.file_name)}>Download</button>
+                </td>
               </tr>
             ))}
             {submissions.length === 0 && (
@@ -215,6 +242,37 @@ export default function InstitutionPortal() {
           {selected.submission.review_notes && (
             <p><strong>BOT Reviewer Notes:</strong> {selected.submission.review_notes}</p>
           )}
+
+          <h3 style={{ fontSize: '0.88rem', marginBottom: '0.3rem' }}>Your Submitted Records</h3>
+          {selected.records.length === 0 ? (
+            <p className="note">No records were found in this submission.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Row</th><th>Loan ID</th><th>Borrower</th><th>Loan Amount</th>
+                  <th>Collateral</th><th>Region</th><th>District</th><th>Hazard</th><th>Valid?</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selected.records.map((r) => (
+                  <tr key={r.row_number}>
+                    <td>{r.row_number}</td>
+                    <td>{r.loan_id ?? '-'}</td>
+                    <td>{r.borrower_name ?? '-'}</td>
+                    <td>{r.loan_amount_tzs?.toLocaleString() ?? '-'}</td>
+                    <td>{r.collateral_value_tzs?.toLocaleString() ?? '-'}</td>
+                    <td>{r.region ?? '-'}</td>
+                    <td>{r.district ?? '-'}</td>
+                    <td>{r.climate_hazard_exposure ?? '-'}</td>
+                    <td>{r.is_valid ? '✅' : '❌'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.3rem' }}>Validation Errors</h3>
           {selected.errors.length === 0 ? (
             <p>No errors were found.</p>
           ) : (
@@ -234,7 +292,12 @@ export default function InstitutionPortal() {
               </tbody>
             </table>
           )}
-          <button onClick={() => setSelected(null)}>Close</button>
+          <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
+            <button onClick={() => handleDownloadSubmission(selected.submission.id, selected.submission.file_name)}>
+              Download This File
+            </button>
+            <button onClick={() => setSelected(null)}>Close</button>
+          </div>
         </section>
       )}
     </PortalShell>

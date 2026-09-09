@@ -1,5 +1,4 @@
 import { useEffect, useState, FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import PortalShell, { SidebarItem, PlatformStatus } from '../components/PortalShell'
 
@@ -53,7 +52,6 @@ interface AuditLogItem {
 }
 
 export default function AdminPanel() {
-  const navigate = useNavigate()
   const [users, setUsers] = useState<UserItem[]>([])
   const [institutions, setInstitutions] = useState<InstitutionItem[]>([])
   const [message, setMessage] = useState<string | null>(null)
@@ -196,7 +194,6 @@ export default function AdminPanel() {
   ]
 
   const sidebarItems: SidebarItem[] = [
-    { key: 'dashboard', icon: '📊', label: 'Back to Dashboard', onClick: () => navigate('/') },
     { key: 'requests', icon: '📨', label: 'Access Requests', active: true, onClick: () => scrollTo('access-requests-card') },
     { key: 'resets', icon: '🔑', label: 'Password Resets', onClick: () => scrollTo('password-resets-card') },
     { key: 'institutions', icon: '🏢', label: 'Institutions', onClick: () => scrollTo('institutions-card') },

@@ -1,5 +1,4 @@
 import { useEffect, useState, FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import PortalShell, { SidebarItem, PlatformStatus } from '../components/PortalShell'
@@ -56,13 +55,10 @@ interface RiskAdvisory {
   recommendation: string | null
   data_snapshot: string | null
   created_by_user_id: string
+  created_by_name: string
   created_at: string
 }
 
-interface SimpleUser {
-  id: string
-  full_name: string
-}
 
 function formatTZS(n: number) {
   return new Intl.NumberFormat('en-TZ', { maximumFractionDigits: 0 }).format(n) + ' TZS'
@@ -109,7 +105,6 @@ function PieChart({ segments }: { segments: { label: string; value: number; colo
 
 export default function InternalPortal() {
   const { user } = useAuth()
-  const navigate = useNavigate()
   const [kpi, setKpi] = useState<KPI | null>(null)
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [hazardExposure, setHazardExposure] = useState<HazardExposure[]>([])
@@ -118,7 +113,6 @@ export default function InternalPortal() {
   const [notesById, setNotesById] = useState<Record<string, string>>({})
   const [showExportNotice, setShowExportNotice] = useState(false)
   const [riskAdvisories, setRiskAdvisories] = useState<RiskAdvisory[]>([])
-  const [userMap, setUserMap] = useState<Record<string, string>>({})
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
   const [advisoryForm, setAdvisoryForm] = useState({
     title: '', region: '', hazard_type: '', risk_level: 'MEDIUM', narrative: '', recommendation: '',
@@ -127,22 +121,18 @@ export default function InternalPortal() {
   const [submittingAdvisory, setSubmittingAdvisory] = useState(false)
 
   async function loadAll() {
-    const [kpiRes, subsRes, hazardRes, combinedRes, advisoryRes, usersRes] = await Promise.all([
+    const [kpiRes, subsRes, hazardRes, combinedRes, advisoryRes] = await Promise.all([
       apiClient.get('/analytics/kpi-summary'),
       apiClient.get('/submissions'),
       apiClient.get('/analytics/hazard-exposure'),
       apiClient.get('/analytics/combined-climate-financial-exposure'),
       apiClient.get('/risk-advisories'),
-      apiClient.get('/users'),
     ])
     setKpi(kpiRes.data)
     setSubmissions(subsRes.data)
     setHazardExposure(hazardRes.data)
     setCombinedExposure(combinedRes.data)
     setRiskAdvisories(advisoryRes.data)
-    const map: Record<string, string> = {}
-    ;(usersRes.data as SimpleUser[]).forEach((u) => { map[u.id] = u.full_name })
-    setUserMap(map)
   }
 
   async function handleCreateAdvisory(e: FormEvent) {
@@ -215,9 +205,6 @@ export default function InternalPortal() {
     { key: 'submissions', icon: '📄', label: 'Submission Status', onClick: () => scrollTo('monitoring-section') },
     { key: 'map', icon: '🗺️', label: 'Geospatial Map', onClick: () => scrollTo('map-section') },
     { key: 'export', icon: '⬇️', label: 'Download / Export', onClick: () => setShowExportNotice(true) },
-    ...(user?.role === 'SYSTEM_ADMIN'
-      ? [{ key: 'admin', icon: '⚙️', label: 'Administration', onClick: () => navigate('/admin') } as SidebarItem]
-      : []),
   ]
 
   return (
@@ -412,7 +399,7 @@ export default function InternalPortal() {
                   <div>
                     <h4>{note.title}</h4>
                     <div className="advisory-meta">
-                      {note.region || 'All regions'} · {note.hazard_type || 'General'} · by {userMap[note.created_by_user_id] || 'Analyst'} · {new Date(note.created_at).toLocaleDateString()}
+                      {note.region || 'All regions'} · {note.hazard_type || 'General'} · by {note.created_by_name} · {new Date(note.created_at).toLocaleDateString()}
                     </div>
                   </div>
                   <span className={`badge badge-${note.risk_level.toLowerCase()}`}>{note.risk_level}</span>

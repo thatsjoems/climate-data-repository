@@ -128,7 +128,7 @@ def approve_access_request(
         notif_type="ACCOUNT_CREATED",
     )
     notify_roles(
-        db, [RoleEnum.SYSTEM_ADMIN, RoleEnum.BOT_USER],
+        db, [RoleEnum.SYSTEM_ADMIN],
         message=f"Access request from '{req.institution_name}' was approved by {current_user.full_name}.",
         notif_type="ACCESS_REQUEST_APPROVED",
         related_entity_type="InstitutionAccessRequest",
@@ -180,7 +180,7 @@ def reject_access_request(
 
     record_audit(db, current_user.id, "ACCESS_REQUEST_REJECTED", "InstitutionAccessRequest", req.id, payload.notes or "")
     notify_roles(
-        db, [RoleEnum.SYSTEM_ADMIN, RoleEnum.BOT_USER],
+        db, [RoleEnum.SYSTEM_ADMIN],
         message=f"Access request from '{req.institution_name}' was rejected by {current_user.full_name}.",
         notif_type="ACCESS_REQUEST_REJECTED",
         related_entity_type="InstitutionAccessRequest",

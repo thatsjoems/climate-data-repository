@@ -95,6 +95,24 @@ class ValidationErrorOut(BaseModel):
     severity: str
 
 
+class SubmissionRecordOut(BaseModel):
+    """
+    A single submitted row (e.g. one loan), so an institution can review the
+    actual data it sent - not just the validation error list.
+    """
+    model_config = ConfigDict(from_attributes=True)
+    row_number: int
+    loan_id: Optional[str] = None
+    borrower_name: Optional[str] = None
+    loan_amount_tzs: Optional[float] = None
+    collateral_type: Optional[str] = None
+    collateral_value_tzs: Optional[float] = None
+    region: Optional[str] = None
+    district: Optional[str] = None
+    climate_hazard_exposure: Optional[str] = None
+    is_valid: bool
+
+
 class SubmissionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
@@ -113,6 +131,7 @@ class SubmissionOut(BaseModel):
 
 class SubmissionDetailOut(SubmissionOut):
     errors: list[ValidationErrorOut] = []
+    records: list[SubmissionRecordOut] = []
 
 
 class ReviewRequest(BaseModel):
@@ -180,6 +199,7 @@ class RiskAdvisoryOut(BaseModel):
     recommendation: Optional[str] = None
     data_snapshot: Optional[str] = None
     created_by_user_id: str
+    created_by_name: str = "Analyst"
     created_at: datetime
 
 

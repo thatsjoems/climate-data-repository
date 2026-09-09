@@ -55,8 +55,8 @@ VALID_ROW = {
 }
 
 
-def _setup_institution_user(db_session, username="inst_user"):
-    inst = make_institution(db_session)
+def _setup_institution_user(db_session, username="inst_user", institution_code="BANK-A"):
+    inst = make_institution(db_session, code=institution_code, name=f"{institution_code} Ltd")
     make_user(db_session, role=RoleEnum.INSTITUTION_USER, institution=inst, username=username)
     return inst
 
@@ -158,17 +158,30 @@ def test_invalid_submission_cannot_be_approved(client, db_session):
 
 
 def test_reviewer_cannot_approve_own_upload(client, db_session):
-    """Maker-checker: the same person can never both submit and review."""
-    inst = make_institution(db_session)
-    # A SYSTEM_ADMIN is allowed to upload (for testing/support), then must not review it themselves
-    make_user(db_session, role=RoleEnum.SYSTEM_ADMIN, institution=inst, username="admin_uploader")
-    admin_token = login(client, "admin_uploader").json()["access_token"]
-    submission_id = _upload(client, admin_token, [VALID_ROW]).json()["id"]
+    """
+    Maker-checker defense-in-depth: even though normal role separation (only
+    INSTITUTION_USER uploads, only BOT_USER reviews) already makes "the same
+    account did both" structurally impossible via the API, the server-side
+    guard is tested directly here by constructing that exact data state.
+    """
+    inst = _setup_institution_user(db_session)
+    inst_token = login(client, "inst_user").json()["access_token"]
+    submission_id = _upload(client, inst_token, [VALID_ROW]).json()["id"]
+
+    reviewer = make_user(db_session, role=RoleEnum.BOT_USER, username="reviewer1")
+    reviewer_token = login(client, "reviewer1").json()["access_token"]
+
+    # Force the data into the "this reviewer is also the submitter" state directly,
+    # since that can no longer happen through the API's own role rules.
+    from app.models.models import Submission
+    submission = db_session.query(Submission).filter(Submission.id == submission_id).first()
+    submission.submitted_by_user_id = reviewer.id
+    db_session.commit()
 
     res = client.post(
         f"/api/submissions/{submission_id}/review",
         json={"decision": "APPROVE"},
-        headers=auth_header(admin_token),
+        headers=auth_header(reviewer_token),
     )
     assert res.status_code == 403
 
@@ -230,3 +243,47 @@ def test_new_upload_supersedes_previous_submission_same_period(client, db_sessio
     assert kpi.json()["total_loan_exposure_tzs"] == VALID_ROW["loan_amount_tzs"]
     assert kpi.json()["total_submissions"] == 2  # both rows exist...
     assert kpi.json()["valid_submissions"] == 1  # ...but only one counts as currently valid/active
+
+
+def test_system_admin_cannot_upload_submissions(client, db_session):
+    """Submissions are exclusively an INSTITUTION_USER action now - not even SYSTEM_ADMIN may upload."""
+    inst = make_institution(db_session)
+    make_user(db_session, role=RoleEnum.SYSTEM_ADMIN, institution=inst, username="admin1")
+    token = login(client, "admin1").json()["access_token"]
+    res = _upload(client, token, [VALID_ROW])
+    assert res.status_code == 403
+
+
+def test_institution_can_download_their_own_submission_file(client, db_session):
+    _setup_institution_user(db_session)
+    token = login(client, "inst_user").json()["access_token"]
+    submission_id = _upload(client, token, [VALID_ROW]).json()["id"]
+
+    res = client.get(f"/api/submissions/{submission_id}/download", headers=auth_header(token))
+    assert res.status_code == 200
+
+
+def test_institution_cannot_download_another_institutions_submission_file(client, db_session):
+    _setup_institution_user(db_session, username="inst_a_user", institution_code="BANK-A")
+    token_a = login(client, "inst_a_user").json()["access_token"]
+    submission_id = _upload(client, token_a, [VALID_ROW]).json()["id"]
+
+    _setup_institution_user(db_session, username="inst_b_user", institution_code="BANK-B")
+    token_b = login(client, "inst_b_user").json()["access_token"]
+
+    res = client.get(f"/api/submissions/{submission_id}/download", headers=auth_header(token_b))
+    assert res.status_code == 403
+
+
+def test_submission_detail_includes_submitted_records_for_institution_review(client, db_session):
+    """Institutions can review the actual data they submitted, not just the error list."""
+    _setup_institution_user(db_session)
+    token = login(client, "inst_user").json()["access_token"]
+    submission_id = _upload(client, token, [VALID_ROW]).json()["id"]
+
+    res = client.get(f"/api/submissions/{submission_id}", headers=auth_header(token))
+    assert res.status_code == 200
+    records = res.json()["records"]
+    assert len(records) == 1
+    assert records[0]["loan_id"] == VALID_ROW["loan_id"]
+    assert records[0]["is_valid"] is True

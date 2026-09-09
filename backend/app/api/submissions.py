@@ -46,7 +46,7 @@ def upload_submission(
     reporting_period: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.SYSTEM_ADMIN)),
+    current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER)),
 ):
     if not current_user.institution_id:
         raise HTTPException(status_code=400, detail="This user is not linked to any institution")
@@ -177,7 +177,7 @@ def upload_submission(
         )
         if was_approved:
             notify_roles(
-                db, [RoleEnum.BOT_USER, RoleEnum.SYSTEM_ADMIN],
+                db, [RoleEnum.BOT_USER],
                 message=f"An approved submission for {reporting_period} was superseded by a new upload "
                         f"and needs re-review.",
                 notif_type="SUBMISSION_SUPERSEDED",
@@ -195,7 +195,7 @@ def upload_submission(
 
     institution_name = current_user.institution.name if current_user.institution else "An institution"
     notify_roles(
-        db, [RoleEnum.BOT_USER, RoleEnum.SYSTEM_ADMIN],
+        db, [RoleEnum.BOT_USER],
         message=f"{institution_name} submitted '{file.filename}' for {reporting_period} "
                  f"({overall_status.value.title()} - {valid_count}/{total} valid records).",
         notif_type="SUBMISSION_UPLOADED",
@@ -208,7 +208,7 @@ def upload_submission(
 @router.get("", response_model=list[SubmissionOut])
 def list_submissions(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
 ):
     query = db.query(Submission)
     # Data isolation: an institution user only sees submissions belonging to their own institution.
@@ -222,7 +222,7 @@ def list_submissions(
 def get_submission(
     submission_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
 ):
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
     if not submission:
@@ -232,12 +232,40 @@ def get_submission(
     return submission
 
 
+@router.get("/{submission_id}/download")
+def download_submission_file(
+    submission_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
+):
+    """
+    Lets an institution re-download the exact file they originally uploaded
+    (for their own records), and lets a BOT Analyst pull the original file
+    while reviewing. Not available to SYSTEM_ADMIN - submission data is a
+    BOT Analyst / institution concern, not an administration one.
+    """
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if current_user.role == RoleEnum.INSTITUTION_USER and submission.institution_id != current_user.institution_id:
+        raise HTTPException(status_code=403, detail="You do not have permission to download this submission")
+    if not os.path.exists(submission.file_path):
+        raise HTTPException(status_code=404, detail="The original file is no longer available on the server")
+
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        submission.file_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=submission.file_name,
+    )
+
+
 @router.post("/{submission_id}/review", response_model=SubmissionDetailOut)
 def review_submission(
     submission_id: str,
     payload: ReviewRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(RoleEnum.BOT_USER, RoleEnum.SYSTEM_ADMIN)),
+    current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
     if not submission:

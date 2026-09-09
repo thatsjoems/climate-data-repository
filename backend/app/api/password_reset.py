@@ -118,7 +118,7 @@ def approve_password_reset(
         notif_type="PASSWORD_RESET_APPROVED",
     )
     notify_roles(
-        db, [RoleEnum.SYSTEM_ADMIN, RoleEnum.BOT_USER],
+        db, [RoleEnum.SYSTEM_ADMIN],
         message=f"{current_user.full_name} reset the password for {user.full_name} ({user.username}).",
         notif_type="PASSWORD_RESET_APPROVED",
         related_entity_type="User",
@@ -169,7 +169,7 @@ def reject_password_reset(
     record_audit(db, current_user.id, "PASSWORD_RESET_REJECTED", "User", req.user_id, payload.notes or "")
     if user:
         notify_roles(
-            db, [RoleEnum.SYSTEM_ADMIN, RoleEnum.BOT_USER],
+            db, [RoleEnum.SYSTEM_ADMIN],
             message=f"{current_user.full_name} rejected a password reset request for {user.full_name}.",
             notif_type="PASSWORD_RESET_REJECTED",
             related_entity_type="User",
