@@ -178,6 +178,15 @@ class CombinedExposurePoint(BaseModel):
     record_count: int
 
 
+class RegionMapPoint(BaseModel):
+    region: str
+    latitude: float
+    longitude: float
+    total_exposure_tzs: float
+    record_count: int
+    dominant_hazard: str
+
+
 # ---------- RISK ADVISORY REPORTS ----------
 class RiskAdvisoryCreate(BaseModel):
     title: str

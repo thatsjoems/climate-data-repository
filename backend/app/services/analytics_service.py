@@ -136,6 +136,61 @@ def get_hazard_exposure(db: Session, institution_id: str | None = None) -> list[
     ]
 
 
+def get_region_map_points(db: Session, institution_id: str | None = None) -> list[dict]:
+    """
+    Region-level map points for the Geospatial Overview: real hazard-exposure
+    figures (from get_hazard_exposure) attached to real region centroid
+    coordinates (from geo_reference.py). This is region-level, not exact
+    per-loan location - no per-loan coordinates are collected yet.
+
+    A region is only included if we actually have a known centroid for it,
+    so an unrecognized/misspelled region name is silently excluded rather
+    than plotted at a wrong or default location.
+    """
+    from app.services.geo_reference import get_region_coordinates
+
+    exposure_rows = get_hazard_exposure(db, institution_id)
+
+    # Collapse per-hazard rows into one point per region (a region may have
+    # several hazard types recorded across its submissions).
+    by_region: dict[str, dict] = {}
+    for row in exposure_rows:
+        region = row["region"]
+        if region not in by_region:
+            coords = get_region_coordinates(region)
+            if not coords:
+                continue  # unknown region name - do not guess a location
+            by_region[region] = {
+                "region": region,
+                "latitude": coords[0],
+                "longitude": coords[1],
+                "total_exposure_tzs": 0.0,
+                "record_count": 0,
+                "hazards": {},
+            }
+        entry = by_region.get(region)
+        if entry is None:
+            continue
+        entry["total_exposure_tzs"] += row["exposed_loan_amount_tzs"]
+        entry["record_count"] += row["record_count"]
+        hazard_label = row["hazard_type"] or "None"
+        entry["hazards"][hazard_label] = entry["hazards"].get(hazard_label, 0.0) + row["exposed_loan_amount_tzs"]
+
+    points = []
+    for entry in by_region.values():
+        # The single hazard type with the largest exposure in this region, for marker coloring.
+        dominant_hazard = max(entry["hazards"], key=entry["hazards"].get) if entry["hazards"] else "None"
+        points.append({
+            "region": entry["region"],
+            "latitude": entry["latitude"],
+            "longitude": entry["longitude"],
+            "total_exposure_tzs": entry["total_exposure_tzs"],
+            "record_count": entry["record_count"],
+            "dominant_hazard": dominant_hazard,
+        })
+    return points
+
+
 def get_exposure_snapshot(
     db: Session, region: str | None = None, hazard_type: str | None = None,
     institution_id: str | None = None,

@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent } from 'react'
 import apiClient from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import PortalShell, { SidebarItem, PlatformStatus } from '../components/PortalShell'
+import HazardMap, { RegionMapPoint } from '../components/HazardMap'
 
 interface KPI {
   total_institutions: number
@@ -109,6 +110,7 @@ export default function InternalPortal() {
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [hazardExposure, setHazardExposure] = useState<HazardExposure[]>([])
   const [combinedExposure, setCombinedExposure] = useState<CombinedExposure[]>([])
+  const [mapPoints, setMapPoints] = useState<RegionMapPoint[]>([])
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [notesById, setNotesById] = useState<Record<string, string>>({})
   const [reportGenerating, setReportGenerating] = useState(false)
@@ -122,18 +124,20 @@ export default function InternalPortal() {
   const [submittingAdvisory, setSubmittingAdvisory] = useState(false)
 
   async function loadAll() {
-    const [kpiRes, subsRes, hazardRes, combinedRes, advisoryRes] = await Promise.all([
+    const [kpiRes, subsRes, hazardRes, combinedRes, advisoryRes, mapRes] = await Promise.all([
       apiClient.get('/analytics/kpi-summary'),
       apiClient.get('/submissions'),
       apiClient.get('/analytics/hazard-exposure'),
       apiClient.get('/analytics/combined-climate-financial-exposure'),
       apiClient.get('/risk-advisories'),
+      apiClient.get('/analytics/map-points'),
     ])
     setKpi(kpiRes.data)
     setSubmissions(subsRes.data)
     setHazardExposure(hazardRes.data)
     setCombinedExposure(combinedRes.data)
     setRiskAdvisories(advisoryRes.data)
+    setMapPoints(mapRes.data)
   }
 
   async function handleCreateAdvisory(e: FormEvent) {
@@ -288,11 +292,21 @@ export default function InternalPortal() {
 
       <section className="card" id="map-section">
         <h2>🗺️ Geospatial Overview — Hazard Exposure & Portfolio</h2>
-        <div className="placeholder-panel">
-          <span className="placeholder-icon">🗺️</span>
-          <strong>Geospatial visualization requires QGIS / ArcGIS integration</strong>
-          <span>Not available in this training environment — see Assumptions &amp; Limitations. The tabular hazard exposure below uses real submission data.</span>
-        </div>
+        <p className="note">
+          Region-level view: circle size shows total loan exposure, color shows the dominant reported
+          climate hazard for that region. Coordinates are region centroids (not exact loan locations) —
+          precise per-loan mapping will follow once BOT's data template includes coordinates. Click a
+          circle for details.
+        </p>
+        {mapPoints.length > 0 ? (
+          <HazardMap points={mapPoints} />
+        ) : (
+          <div className="placeholder-panel">
+            <span className="placeholder-icon">🗺️</span>
+            <strong>No geolocated exposure data yet</strong>
+            <span>Once institutions submit valid data with recognized regions, this map populates automatically.</span>
+          </div>
+        )}
       </section>
 
       <section className="card" id="hazard-section">

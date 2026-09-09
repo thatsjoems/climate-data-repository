@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.models.models import User, RoleEnum
-from app.schemas.schemas import KPISummary, ClimateTrendPoint, HazardExposurePoint, CombinedExposurePoint
+from app.schemas.schemas import KPISummary, ClimateTrendPoint, HazardExposurePoint, CombinedExposurePoint, RegionMapPoint
 from app.services import analytics_service
 
 router = APIRouter(prefix="/analytics", tags=["Analytics & Dashboard"])
@@ -66,3 +66,16 @@ def combined_climate_financial_exposure(
     region and reporting period - see analytics_service docstring for method.
     """
     return analytics_service.get_combined_climate_financial_exposure(db, institution_id=_scope_for(current_user))
+
+
+@router.get("/map-points", response_model=list[RegionMapPoint])
+def region_map_points(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
+):
+    """
+    Region-level points for the Geospatial Overview map: real hazard exposure
+    from submitted data, attached to real region centroid coordinates. See
+    analytics_service.get_region_map_points() for how this is built.
+    """
+    return analytics_service.get_region_map_points(db, institution_id=_scope_for(current_user))

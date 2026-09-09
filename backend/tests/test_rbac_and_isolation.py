@@ -218,3 +218,22 @@ def test_system_admin_cannot_generate_summary_report(client, db_session):
     token = login(client, "admin1").json()["access_token"]
     res = client.get("/api/reports/summary.pdf", headers=auth_header(token))
     assert res.status_code == 403
+
+
+def test_region_map_points_uses_real_data_and_known_coordinates(client, db_session):
+    """Map points must come from real submitted exposure, attached to real region coordinates."""
+    inst = make_institution(db_session)
+    _seed_submission_for(db_session, inst, region="Dodoma", district="Chamwino District", amount=2_000_000.0)
+
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+
+    res = client.get("/api/analytics/map-points", headers=auth_header(token))
+    assert res.status_code == 200
+    points = res.json()
+    assert len(points) == 1
+    assert points[0]["region"] == "Dodoma"
+    assert points[0]["total_exposure_tzs"] == 2_000_000.0
+    # Known Dodoma centroid - not fabricated, sourced from Wikipedia
+    assert abs(points[0]["latitude"] - (-6.163)) < 0.01
+    assert abs(points[0]["longitude"] - 35.7516) < 0.01
