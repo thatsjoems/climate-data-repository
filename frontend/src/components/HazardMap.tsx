@@ -80,7 +80,7 @@ export default function HazardMap({ points }: { points: RegionMapPoint[] }) {
           {showPmoLayer && (
             <TileLayer
               key={pmoIndicator}
-              attribution='Hazard layer: <a href="https://tcvmp.pmo.go.tz" target="_blank" rel="noreferrer">Prime Minister\'s Office / GCA - Tanzania Climate Vulnerability Maps</a>'
+              attribution={'Hazard layer: <a href="https://tcvmp.pmo.go.tz" target="_blank" rel="noreferrer">Prime Minister\'s Office / GCA - Tanzania Climate Vulnerability Maps</a>'}
               url={pmoTileUrl(PMO_INDICATORS[pmoIndicator])}
               opacity={0.55}
               // If PMO's endpoint is unreachable or the indicator slug is wrong, tiles
