@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, String, Integer, Float, Boolean, DateTime, ForeignKey, Text, Enum as SAEnum
+    Column, String, Integer, Float, Boolean, DateTime, Date, ForeignKey, Text, Enum as SAEnum
 )
 from sqlalchemy.orm import relationship
 
@@ -167,13 +167,28 @@ class ValidationError(Base):
 
 class ClimateRecord(Base):
     """
-    Climate / environmental hazard data.
-    IMPORTANT: The records loaded via the seed script are SYNTHETIC (sample)
-    data used to demonstrate how the analytics will work - NOT real TMA/PMO data.
+    Climate / environmental observation record.
+
+    IMPORTANT: Records loaded via the seed script are SYNTHETIC (sample) data
+    used to demonstrate how the analytics will work - NOT real TMA/PMO data.
+    `source` and `quality_flag` make this explicit on every row so it can
+    never be silently displayed as authoritative.
+
+    Extended with provenance/quality-control fields (Module: Climate Data
+    Model Improvement) so the same table can later receive real TMA
+    observations through an ingestion adapter without a schema redesign.
+    Units are fixed for this system: rainfall in millimetres (mm),
+    temperature in degrees Celsius (°C) - not stored per-row since they never
+    vary here.
+
+    Backward compatible: every new field is nullable, so existing rows and
+    existing code that only sets the original fields keep working unchanged.
     """
     __tablename__ = "climate_records"
 
     id = Column(String, primary_key=True, default=gen_uuid)
+
+    # ---- Core observation (original fields - unchanged) ----
     region = Column(String(100), nullable=False)
     district = Column(String(100), nullable=True)
     year = Column(Integer, nullable=False)
@@ -183,6 +198,30 @@ class ClimateRecord(Base):
     hazard_type = Column(String(100), nullable=True)   # Drought, Flood, Cyclone, None
     hazard_severity = Column(String(20), nullable=True)  # LOW, MEDIUM, HIGH
     source = Column(String(100), default="SYNTHETIC_SAMPLE")
+
+    # ---- Additional observation detail ----
+    temperature_min_c = Column(Float, nullable=True)
+    temperature_max_c = Column(Float, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    observation_date = Column(Date, nullable=True)  # exact date, when known at daily granularity
+
+    # ---- Temporal integration (explicit, not silently assumed) ----
+    reporting_period = Column(String(20), nullable=True)   # e.g. "2026-Q3" - aligns with financial reporting_period
+    period_type = Column(String(20), nullable=True)        # DAILY, MONTHLY, QUARTERLY, ANNUAL
+
+    # ---- Provenance / traceability ----
+    dataset_name = Column(String(255), nullable=True)
+    dataset_version = Column(String(50), nullable=True)
+    station_id = Column(String(100), nullable=True)
+    station_name = Column(String(255), nullable=True)
+    source_record_id = Column(String(255), nullable=True)  # source system's own ID, for dedup on re-ingestion
+    source_reference = Column(Text, nullable=True)         # citation/URL/document this came from
+
+    # ---- Quality control / ingestion metadata ----
+    quality_flag = Column(String(30), default="UNVALIDATED")  # UNVALIDATED, VALIDATED, FLAGGED, SYNTHETIC
+    processing_method = Column(String(100), nullable=True)    # e.g. SYNTHETIC_SEED, TMA_INGESTION, MANUAL_ENTRY
+    ingestion_timestamp = Column(DateTime, default=datetime.utcnow)
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +324,51 @@ class Notification(Base):
 
 # ---------------------------------------------------------------------------
 # AUDIT LOG
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# CLIMATE DATA INGESTION (Module: TMA ingestion adapter/pipeline)
+# ---------------------------------------------------------------------------
+
+class ClimateIngestionBatch(Base):
+    """
+    Records one ingestion run (whether the current file-upload adapter, or a
+    future TMA API/CSV/SFTP feed) so an analyst can always answer: where did
+    this data come from, when, and what happened to it. This is the
+    provenance/audit trail for climate data specifically, distinct from the
+    general AuditLog (which logs the ingestion *event* but not per-row detail).
+    """
+    __tablename__ = "climate_ingestion_batches"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    source = Column(String(100), nullable=False)          # e.g. "MANUAL_UPLOAD", "TMA_FILE" - never invented as "TMA_API" unless real
+    dataset_name = Column(String(255), nullable=True)
+    dataset_version = Column(String(50), nullable=True)
+    file_name = Column(String(500), nullable=True)
+    uploaded_by_user_id = Column(String, ForeignKey("users.id"), nullable=True)
+
+    records_received = Column(Integer, default=0, nullable=False)
+    records_accepted = Column(Integer, default=0, nullable=False)
+    records_rejected = Column(Integer, default=0, nullable=False)
+    records_duplicate = Column(Integer, default=0, nullable=False)
+
+    status = Column(String(30), default="COMPLETED", nullable=False)  # COMPLETED, FAILED
+    error_summary = Column(Text, nullable=True)  # human-readable summary of rejected-row reasons (not every row - see ClimateIngestionError for that)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ClimateIngestionError(Base):
+    """One rejected row from a ClimateIngestionBatch, with the specific reason - so a rejected observation is traceable, not just a count."""
+    __tablename__ = "climate_ingestion_errors"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    batch_id = Column(String, ForeignKey("climate_ingestion_batches.id"), nullable=False)
+    row_number = Column(Integer, nullable=True)
+    column_name = Column(String(100), nullable=True)
+    error_description = Column(Text, nullable=False)
+
+
 # ---------------------------------------------------------------------------
 
 class AuditLog(Base):

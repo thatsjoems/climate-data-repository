@@ -12,7 +12,7 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
 from app.models import models  # noqa: F401 - ensures all tables are registered on Base
-from app.api import auth, users, institutions, templates, submissions, analytics, audit, notifications, password_reset, risk_advisories, reports
+from app.api import auth, users, institutions, templates, submissions, analytics, audit, notifications, password_reset, risk_advisories, reports, climate_data
 
 # ---- Secret management: refuse to start in production with the default secret ----
 # (Module: secure authentication). Development/training use is unaffected - this
@@ -42,6 +42,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def security_headers_middleware(request, call_next):
+    """
+    Baseline security headers (Section 14/17). Kept minimal and safe for an
+    API-only backend behind a separate frontend origin - no CSP is set here
+    since this backend serves JSON, not HTML, and a wrong CSP could break the
+    Swagger UI at /docs.
+    """
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if settings.ENVIRONMENT == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+    return response
+
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
 app.include_router(users.router, prefix=settings.API_V1_PREFIX)
 app.include_router(institutions.router, prefix=settings.API_V1_PREFIX)
@@ -53,6 +70,7 @@ app.include_router(notifications.router, prefix=settings.API_V1_PREFIX)
 app.include_router(password_reset.router, prefix=settings.API_V1_PREFIX)
 app.include_router(risk_advisories.router, prefix=settings.API_V1_PREFIX)
 app.include_router(reports.router, prefix=settings.API_V1_PREFIX)
+app.include_router(climate_data.router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/")

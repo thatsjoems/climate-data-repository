@@ -35,8 +35,20 @@ credentials, reduced institution info disclosure, and a paginated audit log
 viewer. That document also lists what was deliberately left out as outside
 the ICN's scope (e.g. database migrations, JWT/cookie rearchitecture).
 
-**A further role-separation refinement** was then applied on top of that:
-SYSTEM_ADMIN's dashboard is now strictly administration-only (users,
+**Later still, a full audit-and-harden pass** extended the climate data
+architecture: `ClimateRecord` gained provenance/quality-control fields
+(station, dataset, quality_flag, ingestion_timestamp, etc.), a real TMA
+file-ingestion adapter was built (`POST /api/climate-data/ingest`) with
+validation, duplicate detection, and per-batch provenance tracking, and a
+Data Quality dashboard was added for the Analyst. See
+`docs/TMA_INGESTION.md` for the full architecture and exactly what remains
+to connect real TMA data. CSV export was also added for Combined
+Climate-Financial Exposure, and misleading "Real meteorological readings"
+wording was corrected to dynamically warn when the underlying data is
+synthetic.
+
+**A further role-separation refinement** was applied on top of the security
+hardening pass: SYSTEM_ADMIN's dashboard is now strictly administration-only (users,
 institutions, access requests, password resets, audit log) with zero
 visibility into climate data, submissions, or analytics; BOT_USER (the
 Analyst) is conversely the only internal role with access to any data/climate

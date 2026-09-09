@@ -184,6 +184,48 @@ class RegionMapPoint(BaseModel):
     longitude: float
     total_exposure_tzs: float
     record_count: int
+
+
+# ---------- CLIMATE DATA INGESTION ----------
+class ClimateIngestionErrorOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    row_number: Optional[int] = None
+    column_name: Optional[str] = None
+    error_description: str
+
+
+class ClimateIngestionBatchOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    source: str
+    dataset_name: Optional[str] = None
+    dataset_version: Optional[str] = None
+    file_name: Optional[str] = None
+    uploaded_by_user_id: Optional[str] = None
+    records_received: int
+    records_accepted: int
+    records_rejected: int
+    records_duplicate: int
+    status: str
+    created_at: datetime
+
+
+class ClimateIngestionDetailOut(ClimateIngestionBatchOut):
+    errors: list[ClimateIngestionErrorOut] = []
+
+
+class DataQualitySummary(BaseModel):
+    total_observations: int
+    synthetic_observations: int
+    validated_observations: int
+    unvalidated_observations: int
+    flagged_observations: int
+    regions_with_data: int
+    regions_missing_data: list[str]
+    latest_ingestion_at: Optional[datetime] = None
+    total_ingestion_batches: int
+    total_records_rejected_all_time: int
+    total_records_duplicate_all_time: int
     dominant_hazard: str
 
 

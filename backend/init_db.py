@@ -71,11 +71,15 @@ try:
         db.add_all(users)
 
         # ---- Climate records - SYNTHETIC SAMPLE DATA only ----
+        # quality_flag="SYNTHETIC" and source="SYNTHETIC_SAMPLE" make this unmistakable
+        # everywhere the record is displayed or exported - never presentable as real TMA data.
         regions = ["Dodoma", "Morogoro", "Mwanza", "Mbeya", "Dar es Salaam", "Singida"]
         hazards = [None, None, "Drought", "Flood", None, "Cyclone"]
         random.seed(42)  # fixed seed for reproducible demo output
+        seed_run_time = datetime.utcnow()
         for year in [2024, 2025, 2026]:
             for month in range(1, 13):
+                quarter = (month - 1) // 3 + 1
                 for region in regions:
                     db.add(ClimateRecord(
                         region=region,
@@ -87,6 +91,13 @@ try:
                         hazard_type=random.choice(hazards),
                         hazard_severity=random.choice(["LOW", "MEDIUM", "HIGH", None]),
                         source="SYNTHETIC_SAMPLE",
+                        reporting_period=f"{year}-Q{quarter}",
+                        period_type="MONTHLY",
+                        dataset_name="CDR Synthetic Demo Dataset",
+                        dataset_version="v1",
+                        quality_flag="SYNTHETIC",
+                        processing_method="SYNTHETIC_SEED",
+                        ingestion_timestamp=seed_run_time,
                     ))
 
         db.commit()

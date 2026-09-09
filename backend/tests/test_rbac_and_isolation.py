@@ -237,3 +237,20 @@ def test_region_map_points_uses_real_data_and_known_coordinates(client, db_sessi
     # Known Dodoma centroid - not fabricated, sourced from Wikipedia
     assert abs(points[0]["latitude"] - (-6.163)) < 0.01
     assert abs(points[0]["longitude"] - 35.7516) < 0.01
+
+
+def test_bot_user_can_download_combined_exposure_csv(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    res = client.get("/api/reports/combined-exposure.csv", headers=auth_header(token))
+    assert res.status_code == 200
+    assert "text/csv" in res.headers["content-type"]
+    assert "region,reporting_period" in res.text
+
+
+def test_institution_user_cannot_download_combined_exposure_csv(client, db_session):
+    inst = make_institution(db_session)
+    make_user(db_session, role=RoleEnum.INSTITUTION_USER, institution=inst, username="inst_user")
+    token = login(client, "inst_user").json()["access_token"]
+    res = client.get("/api/reports/combined-exposure.csv", headers=auth_header(token))
+    assert res.status_code == 403

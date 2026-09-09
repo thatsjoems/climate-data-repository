@@ -104,6 +104,33 @@ function PieChart({ segments }: { segments: { label: string; value: number; colo
   )
 }
 
+interface DataQuality {
+  total_observations: number
+  synthetic_observations: number
+  validated_observations: number
+  unvalidated_observations: number
+  flagged_observations: number
+  regions_with_data: number
+  regions_missing_data: string[]
+  latest_ingestion_at: string | null
+  total_ingestion_batches: number
+  total_records_rejected_all_time: number
+  total_records_duplicate_all_time: number
+}
+
+interface IngestionBatch {
+  id: string
+  source: string
+  dataset_name: string | null
+  file_name: string | null
+  records_received: number
+  records_accepted: number
+  records_rejected: number
+  records_duplicate: number
+  status: string
+  created_at: string
+}
+
 export default function InternalPortal() {
   const { user } = useAuth()
   const [kpi, setKpi] = useState<KPI | null>(null)
@@ -122,6 +149,51 @@ export default function InternalPortal() {
   })
   const [advisoryMessage, setAdvisoryMessage] = useState<string | null>(null)
   const [submittingAdvisory, setSubmittingAdvisory] = useState(false)
+  const [dataQuality, setDataQuality] = useState<DataQuality | null>(null)
+  const [ingestionBatches, setIngestionBatches] = useState<IngestionBatch[]>([])
+  const [climateFile, setClimateFile] = useState<File | null>(null)
+  const [climateSource, setClimateSource] = useState('MANUAL_UPLOAD')
+  const [climateDatasetName, setClimateDatasetName] = useState('')
+  const [climateUploading, setClimateUploading] = useState(false)
+  const [climateUploadMessage, setClimateUploadMessage] = useState<string | null>(null)
+
+  async function loadClimateQuality() {
+    const [qRes, batchesRes] = await Promise.all([
+      apiClient.get('/climate-data/quality-summary'),
+      apiClient.get('/climate-data/ingestions'),
+    ])
+    setDataQuality(qRes.data)
+    setIngestionBatches(batchesRes.data)
+  }
+
+  async function handleClimateUpload(e: FormEvent) {
+    e.preventDefault()
+    if (!climateFile) {
+      setClimateUploadMessage('Choose a .csv or .xlsx file first.')
+      return
+    }
+    setClimateUploading(true)
+    setClimateUploadMessage(null)
+    try {
+      const formData = new FormData()
+      formData.append('source', climateSource)
+      formData.append('dataset_name', climateDatasetName)
+      formData.append('file', climateFile)
+      const res = await apiClient.post('/climate-data/ingest', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setClimateUploadMessage(
+        `Ingested: ${res.data.records_accepted} accepted, ${res.data.records_rejected} rejected, ` +
+        `${res.data.records_duplicate} duplicate (of ${res.data.records_received} rows).`
+      )
+      setClimateFile(null)
+      loadClimateQuality()
+    } catch (err: any) {
+      setClimateUploadMessage(err?.response?.data?.detail || 'Failed to ingest the file.')
+    } finally {
+      setClimateUploading(false)
+    }
+  }
 
   async function loadAll() {
     const [kpiRes, subsRes, hazardRes, combinedRes, advisoryRes, mapRes] = await Promise.all([
@@ -163,6 +235,7 @@ export default function InternalPortal() {
 
   useEffect(() => {
     loadAll()
+    loadClimateQuality()
   }, [])
 
   async function handleGenerateReport() {
@@ -183,6 +256,17 @@ export default function InternalPortal() {
     } finally {
       setReportGenerating(false)
     }
+  }
+
+  async function handleDownloadCombinedCsv() {
+    const res = await apiClient.get('/reports/combined-exposure.csv', { responseType: 'blob' })
+    const url = window.URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `CDR_Combined_Exposure_${new Date().toISOString().slice(0, 10)}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
   }
 
   async function handleReview(submissionId: string, decision: 'APPROVE' | 'REJECT') {
@@ -225,6 +309,7 @@ export default function InternalPortal() {
     { key: 'loan', icon: '💰', label: 'Loan Data', onClick: () => scrollTo('kpi-section') },
     { key: 'collateral', icon: '🛡️', label: 'Collateral Data', onClick: () => scrollTo('kpi-section') },
     { key: 'climate', icon: '🌦️', label: 'Climate & Hazard Data', onClick: () => scrollTo('hazard-section') },
+    { key: 'quality', icon: '📋', label: 'Climate Data Quality', onClick: () => scrollTo('quality-section') },
     { key: 'combined', icon: '🔗', label: 'Combined Climate-Financial', onClick: () => scrollTo('combined-section') },
     { key: 'risk', icon: '🧭', label: 'Risk Advisory Reports', onClick: () => scrollTo('risk-advisory-section') },
     { key: 'submissions', icon: '📄', label: 'Submission Status', onClick: () => scrollTo('monitoring-section') },
@@ -253,7 +338,8 @@ export default function InternalPortal() {
         </p>
         <button className="btn-accent" onClick={handleGenerateReport} disabled={reportGenerating}>
           {reportGenerating ? 'Generating...' : 'Generate Summary Report (PDF)'}
-        </button>
+        </button>{' '}
+        <button onClick={handleDownloadCombinedCsv}>Download Combined Exposure (CSV)</button>
         {reportMessage && <div className="alert-info">{reportMessage}</div>}
       </section>
 
@@ -315,6 +401,78 @@ export default function InternalPortal() {
         <PieChart segments={hazardSegments.length ? hazardSegments : [{ label: 'No data yet', value: 1, color: '#EDEBE3' }]} />
       </section>
 
+      <section className="card" id="quality-section">
+        <h2>📋 Climate Data Quality</h2>
+        <p className="note">
+          Is the climate data complete and trustworthy? Every figure below is a direct count -
+          nothing estimated. <strong>SYNTHETIC</strong> observations are demo data only and are
+          never presented as official TMA readings.
+        </p>
+        {dataQuality && (
+          <div className="quality-grid">
+            <div className="quality-stat"><span className="quality-number">{dataQuality.total_observations}</span><span>Total Observations</span></div>
+            <div className="quality-stat"><span className="quality-number">{dataQuality.synthetic_observations}</span><span>Synthetic (Demo)</span></div>
+            <div className="quality-stat"><span className="quality-number">{dataQuality.validated_observations}</span><span>Validated</span></div>
+            <div className="quality-stat"><span className="quality-number">{dataQuality.unvalidated_observations}</span><span>Unvalidated</span></div>
+            <div className="quality-stat"><span className="quality-number">{dataQuality.flagged_observations}</span><span>Flagged</span></div>
+            <div className="quality-stat"><span className="quality-number">{dataQuality.regions_with_data}/31</span><span>Regions With Data</span></div>
+          </div>
+        )}
+        {dataQuality && dataQuality.regions_missing_data.length > 0 && (
+          <p className="note" style={{ marginTop: '0.5rem' }}>
+            <strong>No data available</strong> for: {dataQuality.regions_missing_data.join(', ')}
+            {' '}(shown as "No data available", never estimated or copied from another region).
+          </p>
+        )}
+
+        <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.4rem' }}>Ingest Climate Observations</h3>
+        <p className="note">
+          Upload a .csv or .xlsx of climate observations (region, year, month, rainfall_mm,
+          avg_temperature_c, etc.). This is the file-upload adapter of the TMA ingestion
+          pipeline - see docs/TMA_INGESTION.md for the expected column layout.
+        </p>
+        <form onSubmit={handleClimateUpload} style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <select value={climateSource} onChange={(e) => setClimateSource(e.target.value)}>
+            <option value="MANUAL_UPLOAD">Manual Upload</option>
+            <option value="TMA_FILE">TMA File</option>
+          </select>
+          <input
+            placeholder="Dataset name (optional)"
+            value={climateDatasetName}
+            onChange={(e) => setClimateDatasetName(e.target.value)}
+            style={{ maxWidth: 220 }}
+          />
+          <input
+            type="file"
+            accept=".csv,.xlsx,.xls"
+            onChange={(e) => setClimateFile(e.target.files?.[0] || null)}
+          />
+          <button type="submit" disabled={climateUploading}>
+            {climateUploading ? 'Ingesting...' : 'Ingest File'}
+          </button>
+        </form>
+        {climateUploadMessage && <div className="alert-info" style={{ marginTop: '0.5rem' }}>{climateUploadMessage}</div>}
+
+        <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.4rem' }}>Recent Ingestion Batches</h3>
+        <table>
+          <thead><tr><th>When</th><th>Source</th><th>File</th><th>Received</th><th>Accepted</th><th>Rejected</th><th>Duplicate</th></tr></thead>
+          <tbody>
+            {ingestionBatches.map((b) => (
+              <tr key={b.id}>
+                <td>{new Date(b.created_at).toLocaleString()}</td>
+                <td>{b.source}</td>
+                <td>{b.file_name || '-'}</td>
+                <td>{b.records_received}</td>
+                <td>{b.records_accepted}</td>
+                <td>{b.records_rejected}</td>
+                <td>{b.records_duplicate}</td>
+              </tr>
+            ))}
+            {ingestionBatches.length === 0 && <tr><td colSpan={7}>No ingestion batches yet.</td></tr>}
+          </tbody>
+        </table>
+      </section>
+
       <section className="card">
         <h2>📊 Submission Status Distribution</h2>
         <PieChart segments={statusSegments.length ? statusSegments : [{ label: 'No data yet', value: 1, color: '#EDEBE3' }]} />
@@ -323,12 +481,19 @@ export default function InternalPortal() {
       <section className="card" id="combined-section">
         <h2>🔗 Combined Climate-Financial Exposure</h2>
         <p className="note">
-          Real meteorological readings (rainfall, temperature, recorded hazards) joined with
-          real loan/collateral exposure for the same region and reporting period — this is
-          what directly links climate data to financial stability, rather than the two
-          datasets sitting in separate, unrelated tables. A blank climate column means no
-          meteorological reading exists for that region/period — it is never guessed or filled in.
+          Meteorological readings (rainfall, temperature, recorded hazards) joined with real
+          loan/collateral exposure for the same region and reporting period — this is what
+          directly links climate data to financial stability, rather than the two datasets
+          sitting in separate, unrelated tables. A blank climate column means no meteorological
+          reading exists for that region/period — it is never guessed or filled in.
         </p>
+        {dataQuality && dataQuality.synthetic_observations > 0 && (
+          <p className="alert-info" style={{ fontWeight: 600 }}>
+            ⚠️ SYNTHETIC / DEMO DATA — {dataQuality.synthetic_observations} of the climate
+            observations behind this table are demo data generated for this prototype, NOT
+            official TMA readings. See the Climate Data Quality section above.
+          </p>
+        )}
         <table>
           <thead>
             <tr>

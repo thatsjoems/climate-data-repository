@@ -57,6 +57,11 @@ export default function Login() {
             <li>BOT Analyst: <code>bot_analyst</code> / <code>Analyst@123</code></li>
             <li>Institution (Bank A): <code>bankA_user</code> / <code>BankA@123</code></li>
           </ul>
+          <p style={{ marginTop: '0.5rem', fontSize: '0.72rem' }}>
+            ⚠️ Climate observations in this environment are <strong>SYNTHETIC demo data</strong> —
+            not official TMA readings. See the "Climate Data Quality" section on the Analyst
+            dashboard for exactly which records are synthetic vs validated.
+          </p>
         </div>
       </form>
     </div>
