@@ -102,14 +102,14 @@ class Submission(Base):
     __tablename__ = "submissions"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    institution_id = Column(String, ForeignKey("institutions.id"), nullable=False)
+    institution_id = Column(String, ForeignKey("institutions.id"), nullable=False, index=True)
     submitted_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
 
     file_name = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
-    reporting_period = Column(String(20), nullable=False)  # e.g. "2026-Q2"
+    reporting_period = Column(String(20), nullable=False, index=True)  # e.g. "2026-Q2"
 
-    status = Column(SAEnum(SubmissionStatus), default=SubmissionStatus.PENDING, nullable=False)
+    status = Column(SAEnum(SubmissionStatus), default=SubmissionStatus.PENDING, nullable=False, index=True)
 
     total_records = Column(Integer, default=0)
     valid_records = Column(Integer, default=0)
@@ -135,12 +135,12 @@ class SubmissionRecord(Base):
     submission_id = Column(String, ForeignKey("submissions.id"), nullable=False)
     row_number = Column(Integer, nullable=False)
 
-    loan_id = Column(String(100), nullable=True)
+    loan_id = Column(String(100), nullable=True, index=True)
     borrower_name = Column(String(255), nullable=True)
     loan_amount_tzs = Column(Float, nullable=True)
     collateral_type = Column(String(100), nullable=True)
     collateral_value_tzs = Column(Float, nullable=True)
-    region = Column(String(100), nullable=True)
+    region = Column(String(100), nullable=True, index=True)
     district = Column(String(100), nullable=True)
     climate_hazard_exposure = Column(String(100), nullable=True)  # e.g. Drought, Flood, None
     is_valid = Column(Boolean, default=True)
@@ -189,7 +189,7 @@ class ClimateRecord(Base):
     id = Column(String, primary_key=True, default=gen_uuid)
 
     # ---- Core observation (original fields - unchanged) ----
-    region = Column(String(100), nullable=False)
+    region = Column(String(100), nullable=False, index=True)
     district = Column(String(100), nullable=True)
     year = Column(Integer, nullable=False)
     month = Column(Integer, nullable=True)
@@ -197,23 +197,23 @@ class ClimateRecord(Base):
     avg_temperature_c = Column(Float, nullable=True)
     hazard_type = Column(String(100), nullable=True)   # Drought, Flood, Cyclone, None
     hazard_severity = Column(String(20), nullable=True)  # LOW, MEDIUM, HIGH
-    source = Column(String(100), default="SYNTHETIC_SAMPLE")
+    source = Column(String(100), default="SYNTHETIC_SAMPLE", index=True)
 
     # ---- Additional observation detail ----
     temperature_min_c = Column(Float, nullable=True)
     temperature_max_c = Column(Float, nullable=True)
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
-    observation_date = Column(Date, nullable=True)  # exact date, when known at daily granularity
+    observation_date = Column(Date, nullable=True, index=True)  # exact date, when known at daily granularity
 
     # ---- Temporal integration (explicit, not silently assumed) ----
-    reporting_period = Column(String(20), nullable=True)   # e.g. "2026-Q3" - aligns with financial reporting_period
+    reporting_period = Column(String(20), nullable=True, index=True)   # e.g. "2026-Q3" - aligns with financial reporting_period
     period_type = Column(String(20), nullable=True)        # DAILY, MONTHLY, QUARTERLY, ANNUAL
 
     # ---- Provenance / traceability ----
     dataset_name = Column(String(255), nullable=True)
     dataset_version = Column(String(50), nullable=True)
-    station_id = Column(String(100), nullable=True)
+    station_id = Column(String(100), nullable=True, index=True)
     station_name = Column(String(255), nullable=True)
     source_record_id = Column(String(255), nullable=True)  # source system's own ID, for dedup on re-ingestion
     source_reference = Column(Text, nullable=True)         # citation/URL/document this came from

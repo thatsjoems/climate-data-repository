@@ -200,3 +200,26 @@ cd backend
 pip install -r requirements.txt
 pytest -v
 ```
+
+## Follow-up fixes (after the 30-point audit pass)
+
+Three additional gaps identified during that audit were fixed:
+
+1. **docker-compose.yml no longer hardcodes `postgres/postgres`** - credentials
+   and `SECRET_KEY` are now read from environment variables (with dev-only
+   fallbacks), overridable via a `.env` file (see `.env.docker.example`).
+2. **Database indexes added** on `Submission.institution_id`,
+   `Submission.reporting_period`, `Submission.status`,
+   `SubmissionRecord.region`, `SubmissionRecord.loan_id`,
+   `ClimateRecord.region`, `ClimateRecord.source`,
+   `ClimateRecord.observation_date`, `ClimateRecord.reporting_period`,
+   `ClimateRecord.station_id` - the columns most queried by institution,
+   period, region, and status filters throughout analytics and submissions.
+3. **Upload hardening**: content-type is now checked in addition to file
+   extension, and a file that fails validation is deleted from disk instead
+   of being left behind as orphaned debris.
+
+Still deliberately not done (unchanged from the reasoning above): Alembic
+migrations, cookie/CSRF session rearchitecture, rate limiting beyond login,
+and a structured application-logging framework beyond the existing audit
+log - all remain disproportionate for this training prototype's scope.

@@ -63,6 +63,15 @@ def upload_submission(
         )
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Only .xlsx or .xls files are accepted")
+    # Content-type check in addition to extension - a mismatched declared type
+    # (e.g. a renamed .exe claiming .xlsx) is rejected before it ever touches disk.
+    allowed_content_types = {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
+        "application/vnd.ms-excel",  # .xls
+        "application/octet-stream",  # some browsers/clients send this generically - extension check above still applies
+    }
+    if file.content_type and file.content_type not in allowed_content_types:
+        raise HTTPException(status_code=400, detail=f"Unexpected file content-type: {file.content_type}")
 
     # Persist the raw file to disk with a generated name (never trust the client's filename for the path)
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -79,6 +88,9 @@ def upload_submission(
         )
     except Exception as exc:
         # A corrupt/malformed file must never crash the request or take the server down with it.
+        # Clean up the orphaned file on disk - a failed upload must not leave permanent debris.
+        if os.path.exists(saved_path):
+            os.remove(saved_path)
         raise HTTPException(status_code=400, detail=f"This file could not be processed: {exc}")
 
     # ---- Cross-submission duplicate loan_id check (institution + reporting_period + loan_id) ----
