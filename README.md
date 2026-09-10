@@ -7,8 +7,8 @@ Proposed Enhancement of the Climate Data Repository."*
 
 The prototype demonstrates the complete core workflow described in the Concept Note: secure
 role-based login, standardized data template download, data upload, automated validation,
-centralized repository storage, internal review by Bank of Tanzania staff, and an analytics
-dashboard.
+centralized repository storage, internal review by Bank of Tanzania staff, climate data
+ingestion, geospatial visualization, and analytics dashboards.
 
 See `docs/ICN_REQUIREMENTS_TRACEABILITY_MATRIX.md` for a full mapping of Concept Note
 requirements to what has been implemented, and `docs/ASSUMPTIONS_AND_LIMITATIONS.md` for a
@@ -18,60 +18,49 @@ transparent account of sample data, assumptions, and known limitations.
 
 ## System Overview
 
-The system consists of two components that run together:
+The system consists of three components, all run together with Docker:
 
-1. **Backend** (Python / FastAPI) — handles the database, validation, and security.
-   Runs at: `http://localhost:8000`
-2. **Frontend** (React / TypeScript) — the web application end users interact with.
-   Runs at: `http://localhost:5173`
+1. **Database** (PostgreSQL 16) — the same class of database BOT's own Climate Data
+   Repository uses (see the Report on Climate Risk Analysis in the Banking Sector, March 2026).
+2. **Backend** (Python / FastAPI) — handles the database, validation, and security.
+   Reachable at: `http://localhost:8000` (API docs at `/docs`).
+3. **Frontend** (React / TypeScript) — the web application end users interact with.
+   Reachable at: `http://localhost:5173`.
 
-Both must be running at the same time, in two separate terminals, for the system to work.
+Docker is the **only** supported way to run this project — there is no separate manual/local
+Python+Node setup to maintain, which keeps the environment identical for every developer.
 
 ---
 
 ## Getting Started
 
-### 1. Start the Backend
+### Prerequisite
+
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running,
+with an internet connection (needed the first time, to download base images).
+
+### 1. Start everything
+
+From the project root (the folder containing `docker-compose.yml`):
 
 ```bash
-cd backend
-python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # macOS / Linux
-
-pip install -r requirements.txt
-
-copy .env.example .env       # Windows  (macOS/Linux: cp .env.example .env)
-
-python init_db.py            # Creates the database and loads demo accounts
-
-uvicorn app.main:app --reload
+docker compose up --build
 ```
 
-If `uvicorn app.main:app --reload` is blocked by a Windows security policy (e.g. Device
-Guard), run it via Python instead:
+This builds and starts three containers — `db` (PostgreSQL), `backend` (FastAPI), and
+`frontend` (the React app, served via nginx). The backend automatically waits for the
+database, creates tables, and loads demo accounts on first run.
 
-```bash
-python -m uvicorn app.main:app --reload
-```
+Once all three show as running, open:
 
-The backend will be available at `http://localhost:8000`, with interactive API
-documentation (Swagger UI) at `http://localhost:8000/docs`.
+- Frontend: **http://localhost:5173**
+- Backend API docs: **http://localhost:8000/docs**
 
-### 2. Start the Frontend (new terminal)
+See `docs/DOCKER.md` for more detail (stopping, resetting data, inspecting the database).
 
-```bash
-cd frontend
-npm install
-copy .env.example .env       # Windows (macOS/Linux: cp .env.example .env)
-npm run dev
-```
+### 2. Log In
 
-The frontend will be available at `http://localhost:5173`.
-
-### 3. Log In
-
-Use one of the demo accounts printed by `init_db.py`:
+Use one of the demo accounts printed in the `backend` container's log output:
 
 | Role | Username | Password |
 |---|---|---|
@@ -81,45 +70,37 @@ Use one of the demo accounts printed by `init_db.py`:
 
 **Change these passwords before any production use.**
 
+### 3. After pulling updates
+
+Whenever the backend's database models, or `docker-compose.yml` itself, have changed,
+reset the database volume so the new schema is created cleanly:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+`down -v` deletes the PostgreSQL data volume — use it whenever you are told a change
+requires a fresh database. A plain `docker compose down` (no `-v`) keeps existing data.
+
 ---
 
 ## Running Tests
 
 ```bash
-cd backend
-venv\Scripts\activate
-pytest -v
+docker compose exec backend pytest -v
 ```
 
-Tests use an isolated in-memory database and never touch your real `cdr.db` or
-demo data. See `docs/SECURITY_HARDENING.md` for what's covered.
-
-## Alternative: Running with Docker
-
-Instead of the manual steps above, the whole stack (PostgreSQL + backend + frontend)
-can also be started with a single command using Docker Desktop:
-
-```bash
-docker compose up --build
-```
-
-See `docs/DOCKER.md` for details. This is fully optional — the manual setup above
-remains the primary, zero-dependency way to run the project.
-
-## One-Click Startup (Windows)
-
-Instead of opening two terminals manually every time, double-click `start.bat`
-in the project's root folder — it starts both Backend and Frontend
-automatically in their own windows. (You still need to have completed the
-first-time setup above at least once.)
+(Run this while `docker compose up` is already running in another terminal.) Tests use an
+isolated in-memory database and never touch the real containerized database or demo data.
+See `docs/SECURITY_HARDENING.md` for what's covered.
 
 ## Sharing with Other Devices on Your Network
 
-By default, the system is only reachable from the computer running it. To let
-a colleague's laptop or your own phone open it over the same WiFi, see
-`docs/NETWORK_ACCESS.md`. For access from anywhere on the internet, the system
-needs to be deployed to a real hosting server — this is tracked as outstanding
-in `docs/ICN_REQUIREMENTS_TRACEABILITY_MATRIX.md`.
+Docker's port mapping already listens on all of your computer's network interfaces by
+default, so this typically works with no extra configuration — see `docs/NETWORK_ACCESS.md`.
+For access from anywhere on the internet, the system needs to be deployed to a real hosting
+server — this is tracked as outstanding in `docs/ICN_REQUIREMENTS_TRACEABILITY_MATRIX.md`.
 
 ---
 
@@ -132,6 +113,7 @@ climate-data-repository/
   database/   -> database schema documentation
   data/       -> sample / synthetic data
   docs/       -> Requirements Traceability Matrix, Assumptions & Limitations
+  docker-compose.yml -> the only way this project is run
 ```
 
 Further technical detail:

@@ -4,9 +4,8 @@
 #   docker compose up --build
 #   Then open http://localhost:5173
 #
-# This is an ALTERNATIVE to the manual setup in README.md - both work, they are
-# independent of each other. Manual setup uses SQLite (zero config); this Docker
-# setup uses PostgreSQL, closer to the production-recommended stack.
+# This is the ONLY supported way to run this project - see README.md.
+# Uses PostgreSQL 16, matching the production-recommended stack.
 #
 # SECURITY NOTE: the POSTGRES_PASSWORD/SECRET_KEY defaults below are for local
 # training/demo use ONLY. Before any real deployment, create a ".env" file next
