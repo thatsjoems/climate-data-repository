@@ -184,6 +184,7 @@ class RegionMapPoint(BaseModel):
     longitude: float
     total_exposure_tzs: float
     record_count: int
+    dominant_hazard: str
 
 
 # ---------- CLIMATE DATA INGESTION ----------
@@ -226,7 +227,6 @@ class DataQualitySummary(BaseModel):
     total_ingestion_batches: int
     total_records_rejected_all_time: int
     total_records_duplicate_all_time: int
-    dominant_hazard: str
 
 
 # ---------- RISK ADVISORY REPORTS ----------
