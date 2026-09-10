@@ -236,6 +236,7 @@ def test_region_map_points_uses_real_data_and_known_coordinates(client, db_sessi
     assert points[0]["total_exposure_tzs"] == 2_000_000.0
     # Known Dodoma centroid - not fabricated, sourced from Wikipedia
     assert abs(points[0]["latitude"] - (-6.163)) < 0.01
+    assert abs(points[0]["longitude"] - 35.7516) < 0.01
     # Regression test: dominant_hazard must actually reach the API response -
     # it was silently dropped once before because RegionMapPoint didn't declare
     # it as a schema field, so every map marker rendered as the default color.
@@ -259,7 +260,6 @@ def test_data_quality_summary_does_not_error_with_no_ingestion_batches(client, d
     assert body["total_ingestion_batches"] == 0
     assert body["latest_ingestion_at"] is None
     assert "dominant_hazard" not in body
-    assert abs(points[0]["longitude"] - 35.7516) < 0.01
 
 
 def test_bot_user_can_download_combined_exposure_csv(client, db_session):
