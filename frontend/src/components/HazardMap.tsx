@@ -33,6 +33,13 @@ function pmoTileUrl(indicatorSlug: string): string {
   return `https://tcvmp.pmo.go.tz/tiles/singleband/climatology/${indicatorSlug}/ssp245/20202039/{z}/{x}/{y}.png?colormap=ylorrd`
 }
 
+// Defined OUTSIDE the component so it is the same array reference on every
+// render. Leaflet's MapContainer re-fits the view whenever the `bounds` prop
+// object changes - an inline array literal is a NEW object every render,
+// which was fighting the user's own zoom/pan on every re-render (e.g. the
+// 20-second notification poll) and made the map feel unstable/"shaky".
+const TANZANIA_BOUNDS: [[number, number], [number, number]] = [[-11.8, 29.2], [-0.85, 40.6]]
+
 function formatTZS(n: number) {
   return new Intl.NumberFormat('en-TZ', { maximumFractionDigits: 0 }).format(n) + ' TZS'
 }
@@ -68,7 +75,7 @@ export default function HazardMap({ points }: { points: RegionMapPoint[] }) {
 
       <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid var(--color-border)' }}>
         <MapContainer
-          bounds={[[-11.8, 29.2], [-0.85, 40.6]]}
+          bounds={TANZANIA_BOUNDS}
           style={{ height: '420px', width: '100%' }}
           scrollWheelZoom={true}
         >

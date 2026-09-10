@@ -157,13 +157,24 @@ export default function InternalPortal() {
   const [climateUploading, setClimateUploading] = useState(false)
   const [climateUploadMessage, setClimateUploadMessage] = useState<string | null>(null)
 
+  const [climateQualityError, setClimateQualityError] = useState<string | null>(null)
+
   async function loadClimateQuality() {
-    const [qRes, batchesRes] = await Promise.all([
-      apiClient.get('/climate-data/quality-summary'),
-      apiClient.get('/climate-data/ingestions'),
-    ])
-    setDataQuality(qRes.data)
-    setIngestionBatches(batchesRes.data)
+    try {
+      const [qRes, batchesRes] = await Promise.all([
+        apiClient.get('/climate-data/quality-summary'),
+        apiClient.get('/climate-data/ingestions'),
+      ])
+      setDataQuality(qRes.data)
+      setIngestionBatches(batchesRes.data)
+      setClimateQualityError(null)
+    } catch (err: any) {
+      setClimateQualityError(
+        err?.response?.status
+          ? `Failed to load (HTTP ${err.response.status}): ${err.response.data?.detail || err.message}`
+          : `Failed to load: ${err.message}`
+      )
+    }
   }
 
   async function handleClimateUpload(e: FormEvent) {
@@ -429,6 +440,12 @@ export default function InternalPortal() {
           nothing estimated. <strong>SYNTHETIC</strong> observations are demo data only and are
           never presented as official TMA readings.
         </p>
+        {climateQualityError && (
+          <div className="alert-error">
+            ⚠️ {climateQualityError}
+            <button style={{ marginLeft: '0.75rem' }} onClick={loadClimateQuality}>Retry</button>
+          </div>
+        )}
         {dataQuality && (
           <div className="quality-grid">
             <div className="quality-stat"><span className="quality-number">{dataQuality.total_observations}</span><span>Total Observations</span></div>
