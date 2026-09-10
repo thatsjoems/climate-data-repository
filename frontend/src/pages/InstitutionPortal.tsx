@@ -77,6 +77,17 @@ export default function InstitutionPortal() {
     link.remove()
   }
 
+  async function handleExportHistory() {
+    const res = await apiClient.get('/submissions/export.csv', { responseType: 'blob' })
+    const url = window.URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `CDR_Submission_History_${new Date().toISOString().slice(0, 10)}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
   async function handleDownloadSubmission(submissionId: string, fileName: string) {
     const res = await apiClient.get(`/submissions/${submissionId}/download`, { responseType: 'blob' })
     const url = window.URL.createObjectURL(new Blob([res.data]))
@@ -204,6 +215,7 @@ export default function InstitutionPortal() {
 
       <section className="card" id="history-card">
         <h2>🗂️ Recent Submissions</h2>
+        <button onClick={handleExportHistory} style={{ marginBottom: '0.75rem' }}>Export Submission History (CSV)</button>
         <table>
           <thead>
             <tr>

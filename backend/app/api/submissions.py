@@ -230,6 +230,48 @@ def list_submissions(
     return query.order_by(Submission.created_at.desc()).all()
 
 
+@router.get("/export.csv")
+def export_submission_history_csv(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
+):
+    """
+    CSV export of submission history (Section 20: Reporting - Export
+    Dashboard). INSTITUTION_USER gets only their own institution's
+    submissions (same isolation rule as list_submissions); BOT_USER gets all.
+    Placed before /{submission_id} so "export.csv" is never matched as a
+    submission ID by the dynamic route below.
+    """
+    import csv
+    import io as _io
+    from fastapi.responses import StreamingResponse
+    from datetime import datetime as _dt
+
+    query = db.query(Submission)
+    if current_user.role == RoleEnum.INSTITUTION_USER:
+        query = query.filter(Submission.institution_id == current_user.institution_id)
+    rows = query.order_by(Submission.created_at.desc()).all()
+
+    buffer = _io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([
+        "file_name", "reporting_period", "status", "total_records",
+        "valid_records", "invalid_records", "review_notes", "created_at",
+    ])
+    for s in rows:
+        writer.writerow([
+            s.file_name, s.reporting_period, s.status.value, s.total_records,
+            s.valid_records, s.invalid_records, s.review_notes or "", s.created_at.isoformat(),
+        ])
+
+    filename = f"CDR_Submission_History_{_dt.utcnow().strftime('%Y%m%d_%H%M')}.csv"
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @router.get("/{submission_id}", response_model=SubmissionDetailOut)
 def get_submission(
     submission_id: str,

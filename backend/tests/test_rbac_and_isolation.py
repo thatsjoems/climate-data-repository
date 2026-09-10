@@ -254,3 +254,57 @@ def test_institution_user_cannot_download_combined_exposure_csv(client, db_sessi
     token = login(client, "inst_user").json()["access_token"]
     res = client.get("/api/reports/combined-exposure.csv", headers=auth_header(token))
     assert res.status_code == 403
+
+
+def test_bot_user_can_download_summary_excel(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    res = client.get("/api/reports/summary.xlsx", headers=auth_header(token))
+    assert res.status_code == 200
+    assert "spreadsheetml" in res.headers["content-type"]
+
+
+def test_institution_user_can_export_own_submission_history(client, db_session):
+    inst = make_institution(db_session, code="BANK-A")
+    make_user(db_session, role=RoleEnum.INSTITUTION_USER, institution=inst, username="inst_user")
+    token = login(client, "inst_user").json()["access_token"]
+    res = client.get("/api/submissions/export.csv", headers=auth_header(token))
+    assert res.status_code == 200
+    assert "text/csv" in res.headers["content-type"]
+    assert "file_name,reporting_period" in res.text
+
+
+def test_institution_export_only_contains_own_submissions(client, db_session):
+    inst_a = make_institution(db_session, code="BANK-A")
+    inst_b = make_institution(db_session, code="BANK-B")
+    _seed_submission_for(db_session, inst_a)
+    _seed_submission_for(db_session, inst_b)
+
+    make_user(db_session, role=RoleEnum.INSTITUTION_USER, institution=inst_a, username="viewer_a")
+    token = login(client, "viewer_a").json()["access_token"]
+    res = client.get("/api/submissions/export.csv", headers=auth_header(token))
+    # exactly one data row (+1 header row) - inst_b's submission must not appear
+    assert len([l for l in res.text.strip().split("\n") if l]) == 2
+
+
+def test_system_admin_cannot_export_submission_history(client, db_session):
+    make_user(db_session, role=RoleEnum.SYSTEM_ADMIN, username="admin1")
+    token = login(client, "admin1").json()["access_token"]
+    res = client.get("/api/submissions/export.csv", headers=auth_header(token))
+    assert res.status_code == 403
+
+
+def test_system_admin_can_export_audit_log_csv(client, db_session):
+    make_user(db_session, role=RoleEnum.SYSTEM_ADMIN, username="admin1")
+    token = login(client, "admin1").json()["access_token"]
+    res = client.get("/api/audit-logs/export.csv", headers=auth_header(token))
+    assert res.status_code == 200
+    assert "text/csv" in res.headers["content-type"]
+    assert "created_at,user_id,action" in res.text
+
+
+def test_bot_user_cannot_export_audit_log_csv(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    res = client.get("/api/audit-logs/export.csv", headers=auth_header(token))
+    assert res.status_code == 403

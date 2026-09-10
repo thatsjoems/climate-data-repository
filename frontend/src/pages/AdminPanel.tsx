@@ -76,6 +76,19 @@ export default function AdminPanel() {
     setAuditOffset(offset)
   }
 
+  async function handleExportAuditLog() {
+    const params = new URLSearchParams()
+    if (auditActionFilter) params.set('action', auditActionFilter)
+    const res = await apiClient.get(`/audit-logs/export.csv?${params.toString()}`, { responseType: 'blob' })
+    const url = window.URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `CDR_Audit_Log_${new Date().toISOString().slice(0, 10)}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
   async function handleApprovePasswordReset(id: string) {
     setMessage(null)
     try {
@@ -309,6 +322,7 @@ export default function AdminPanel() {
             style={{ maxWidth: 260 }}
           />
           <button onClick={() => loadAuditLogs(0)}>Apply Filter</button>
+          <button onClick={handleExportAuditLog}>Export All (CSV)</button>
         </div>
         <table>
           <thead><tr><th>When</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead>

@@ -15,7 +15,7 @@ from datetime import datetime
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.models.models import User, RoleEnum
-from app.services.report_service import generate_summary_report_pdf
+from app.services.report_service import generate_summary_report_pdf, generate_summary_report_excel
 from app.services import analytics_service
 from app.services.audit_service import record_audit
 
@@ -44,6 +44,31 @@ def download_summary_report(
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/summary.xlsx")
+def download_summary_report_excel(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
+):
+    """
+    Same figures as the PDF report (Section 20: Reporting - Excel export),
+    as a multi-sheet workbook for analysts who want to filter/pivot the
+    numbers themselves rather than read a formatted document.
+    """
+    excel_bytes = generate_summary_report_excel(db, current_user)
+
+    record_audit(
+        db, current_user.id, "REPORT_GENERATED", "Report", None,
+        "Automated summary report (Excel) generated"
+    )
+
+    filename = f"CDR_Summary_Report_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(excel_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 

@@ -269,6 +269,26 @@ export default function InternalPortal() {
     link.remove()
   }
 
+  async function handleGenerateReportExcel() {
+    setReportGenerating(true)
+    setReportMessage(null)
+    try {
+      const res = await apiClient.get('/reports/summary.xlsx', { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `CDR_Summary_Report_${new Date().toISOString().slice(0, 10)}.xlsx`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setReportMessage('Excel report generated and downloaded.')
+    } catch (err: any) {
+      setReportMessage('Failed to generate the Excel report.')
+    } finally {
+      setReportGenerating(false)
+    }
+  }
+
   async function handleReview(submissionId: string, decision: 'APPROVE' | 'REJECT') {
     await apiClient.post(`/submissions/${submissionId}/review`, {
       decision,
@@ -339,6 +359,7 @@ export default function InternalPortal() {
         <button className="btn-accent" onClick={handleGenerateReport} disabled={reportGenerating}>
           {reportGenerating ? 'Generating...' : 'Generate Summary Report (PDF)'}
         </button>{' '}
+        <button onClick={handleGenerateReportExcel} disabled={reportGenerating}>Generate Summary Report (Excel)</button>{' '}
         <button onClick={handleDownloadCombinedCsv}>Download Combined Exposure (CSV)</button>
         {reportMessage && <div className="alert-info">{reportMessage}</div>}
       </section>
