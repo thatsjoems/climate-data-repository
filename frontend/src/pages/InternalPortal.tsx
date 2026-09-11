@@ -69,7 +69,7 @@ function scrollTo(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-const PIE_COLORS = ['#012C17', '#0FA47F', '#E28413', '#C0362C', '#7F77DD', '#94A3B8']
+const PIE_COLORS = ['#0A0A0A', '#0FA47F', '#E28413', '#C0362C', '#7F77DD', '#94A3B8']
 
 function buildConicGradient(segments: { label: string; value: number; color: string }[]) {
   const total = segments.reduce((sum, s) => sum + s.value, 0)
@@ -315,7 +315,7 @@ export default function InternalPortal() {
     { label: 'Pending', value: kpi.pending_submissions, color: '#94A3B8' },
     { label: 'Valid', value: kpi.valid_submissions, color: '#0FA47F' },
     { label: 'Invalid', value: kpi.invalid_submissions, color: '#C0362C' },
-    { label: 'Approved', value: kpi.approved_submissions, color: '#012C17' },
+    { label: 'Approved', value: kpi.approved_submissions, color: '#0A0A0A' },
     { label: 'Rejected', value: kpi.rejected_submissions, color: '#7F2C2C' },
   ] : []
 
