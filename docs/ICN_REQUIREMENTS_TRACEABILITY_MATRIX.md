@@ -22,7 +22,7 @@ Source: "Concept Note on the Proposed Enhancement of the Climate Data Repository
 | 15 | Climate risk assessment for the banking sector (exposure analysis and supervisory reporting) | **IMPLEMENTED** | Descriptive exposure-by-region/hazard data (`analytics_service.get_hazard_exposure()`) feeds a dedicated **Risk Advisory Reports** module (`risk_advisories.py`, `RiskAdvisoryNote` model), where the BOT Analyst authors climate-risk assessments and recommendations for internal decision-making, grounded in a real, queried data snapshot captured at the time of writing. Consistent with the "no fabricated risk score" rule: the system never computes or infers the risk level itself — that judgement is always the analyst's own, attributed and timestamped |
 | 16 | **Core project AIM**: combine financial sector data with climate/meteorological data | **IMPLEMENTED** | `analytics_service.get_combined_climate_financial_exposure()` (`GET /api/analytics/combined-climate-financial-exposure`) joins real `ClimateRecord` readings (rainfall, temperature, hazard) with real `SubmissionRecord` loan/collateral exposure for the same region and reporting period. Previously these two datasets existed in isolation (climate_hazard_exposure was only self-reported by institutions); this view is the first place the two are actually queried together |
 | 16 | Meteorological data integration (TMA) | **SAMPLE/SYNTHETIC** | `ClimateRecord` table is populated with SAMPLE (synthetic) data tagged `source="SYNTHETIC_SAMPLE"` - NOT real TMA data |
-| 17 | Climate Vulnerability Maps (PMO) | **NOT YET IMPLEMENTED** | No data or access was provided - out of scope for this prototype |
+| 17 | Climate Vulnerability Maps (PMO) | **IMPLEMENTED (visual overlay)** | An optional PMO/GCA hazard tile layer (Flood/Drought, discovered public endpoint at `tcvmp.pmo.go.tz`) renders underneath our own institution-exposure markers on the Geospatial Map — see `docs/GEOSPATIAL_MAP.md` for exactly how this was found and its "unofficial endpoint" caveat. This is a visual overlay only, not a data-sharing pipeline; QGIS/ArcGIS themselves remain unconnected (item 12) |
 
 ## Summary
 
@@ -57,6 +57,16 @@ list, access/password-reset requests). Institution users additionally gained
 the ability to review the actual rows they submitted (not just validation
 errors) and re-download their original uploaded file. See
 `docs/ROLE_SEPARATION.md` for the full before/after permission matrix.
+
+**Session security upgrade**: access tokens were reduced from 8 hours to 15
+minutes, backed by a separate, revocable, rotated refresh token (see the
+"Session security upgrade" section of `docs/SECURITY_HARDENING.md`) — a
+stolen token is now only useful for a small window, and "Log Out" actually
+revokes the session server-side instead of only clearing local storage.
+
+**Visual identity**: the interface now uses Bank of Tanzania's actual
+branding — extracted directly from the ICN document's own mockup images
+(logo, dark/gold color scheme) — rather than a generic placeholder theme.
 
 
 - The entire **MUST HAVE** workflow (login \u2192 template \u2192 upload \u2192 validation \u2192 storage \u2192 internal review \u2192 dashboard) has been **built and fully functional**.
