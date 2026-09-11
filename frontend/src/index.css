@@ -491,6 +491,7 @@ button.btn-gold:hover { background: var(--color-gold-dark); color: white; }
 .sidebar-brand {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.65rem;
   padding: 1.2rem 1.1rem;
 }
