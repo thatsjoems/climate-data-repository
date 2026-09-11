@@ -31,3 +31,25 @@ def decode_access_token(token: str) -> dict | None:
         return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
     except JWTError:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Refresh tokens (Module: session security)
+# ---------------------------------------------------------------------------
+import hashlib
+import secrets
+
+
+def generate_refresh_token() -> str:
+    """A high-entropy opaque random string - not a JWT, never decoded, only looked up by its hash."""
+    return secrets.token_urlsafe(48)
+
+
+def hash_refresh_token(raw_token: str) -> str:
+    """
+    SHA-256 is appropriate here (unlike bcrypt for passwords): this input is
+    already a 48-byte cryptographically random secret, not a low-entropy
+    human-chosen password, so a fast hash is fine - the whole point is a
+    stable, unique lookup key that never stores the raw token in the database.
+    """
+    return hashlib.sha256(raw_token.encode()).hexdigest()

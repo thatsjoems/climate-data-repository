@@ -13,7 +13,12 @@ class Settings(BaseSettings):
 
     SECRET_KEY: str = "change-me"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
+    # Short-lived on purpose (Module: session security). A stolen access token
+    # is now only useful for a small window; long-lived sessions are handled
+    # by the refresh token below instead, which can be revoked server-side -
+    # something a stateless JWT alone can never support.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     UPLOAD_DIR: str = "uploads"
 

@@ -36,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await apiClient.post('/auth/login', { username, password })
       localStorage.setItem('cdr_token', res.data.access_token)
+      localStorage.setItem('cdr_refresh_token', res.data.refresh_token)
       localStorage.setItem('cdr_user', JSON.stringify(res.data.user))
       setUser(res.data.user)
     } catch (err: any) {
@@ -48,7 +49,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function logout() {
+    // Best-effort server-side revocation of the refresh token (Module: session
+    // security) - fire-and-forget so logout still feels instant even if the
+    // network is slow; local session state is cleared immediately either way.
+    const refreshToken = localStorage.getItem('cdr_refresh_token')
+    if (refreshToken) {
+      apiClient.post('/auth/logout', { refresh_token: refreshToken }).catch(() => { /* already logging out locally regardless */ })
+    }
     localStorage.removeItem('cdr_token')
+    localStorage.removeItem('cdr_refresh_token')
     localStorage.removeItem('cdr_user')
     setUser(null)
   }

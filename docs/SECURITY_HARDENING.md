@@ -223,3 +223,34 @@ Still deliberately not done (unchanged from the reasoning above): Alembic
 migrations, cookie/CSRF session rearchitecture, rate limiting beyond login,
 and a structured application-logging framework beyond the existing audit
 log - all remain disproportionate for this training prototype's scope.
+
+## Session security upgrade: refresh tokens (after direct review)
+
+Following a direct security review of `ACCESS_TOKEN_EXPIRE_MINUTES=480`, the
+JWT/session architecture was upgraded:
+
+- **Access tokens are now short-lived (15 minutes)** instead of 8 hours - a
+  stolen token (e.g. via XSS, since it's still in localStorage) is now only
+  useful for a small window.
+- **A new, separate refresh token** (opaque random string, stored only as a
+  SHA-256 hash in a new `refresh_tokens` table, 7-day expiry) is used to
+  silently obtain new access tokens - the user is never forced to re-login
+  during a normal session.
+- **Rotation**: every refresh consumes the presented refresh token and issues
+  a brand new one. A refresh token can only be used once - replaying an
+  already-used one (a strong signal of theft) is rejected.
+- **Real server-side revocation**: `POST /api/auth/logout` marks the refresh
+  token `revoked_at` in the database. This is what a stateless JWT alone can
+  never provide - previously "logout" only deleted the local copy while the
+  token itself remained valid until expiry.
+- **Frontend**: `api/client.ts` transparently retries a request that hits a
+  401 by refreshing once, using a single shared in-flight promise so several
+  simultaneous requests never trigger multiple refresh calls at once.
+
+This required a new database table (`refresh_tokens`) - see the updated
+`README.md`/`docs/DOCKER.md` for the `docker compose down -v` requirement
+after pulling this change.
+
+Not built: automatic cleanup of expired/revoked refresh token rows (they
+accumulate over time) - acceptable for this prototype's scale; a scheduled
+cleanup job would be a reasonable addition before any real production use.

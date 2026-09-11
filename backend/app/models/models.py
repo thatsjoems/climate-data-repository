@@ -95,6 +95,33 @@ class User(Base):
 
 
 # ---------------------------------------------------------------------------
+# REFRESH TOKENS (Module: session security)
+# ---------------------------------------------------------------------------
+
+class RefreshToken(Base):
+    """
+    A long-lived, revocable credential used only to obtain new short-lived
+    access tokens - never used to authorize an API request directly. Storing
+    it here (hashed, never the raw token) is what makes server-side
+    revocation possible: a stateless JWT alone cannot be invalidated before
+    its own expiry, but a DB row can be marked revoked at any time (logout,
+    admin-forced deactivation, suspected compromise).
+
+    Rotated on every use (Module: token rotation) - each refresh consumes
+    this row (revoked_at set) and issues a brand new one. If a refresh token
+    is ever reused after rotation, that is a strong signal of theft/replay.
+    """
+    __tablename__ = "refresh_tokens"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)  # SHA-256 hex digest
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+
+
+# ---------------------------------------------------------------------------
 # SUBMISSION MANAGEMENT
 # ---------------------------------------------------------------------------
 
