@@ -498,9 +498,9 @@ button.btn-gold:hover { background: var(--color-gold-dark); color: white; }
   width: 44px; height: 44px; object-fit: contain; flex-shrink: 0;
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25));
 }
-.sidebar-brand-text { display: flex; flex-direction: column; overflow: hidden; white-space: nowrap; }
-.sidebar-brand-text strong { font-size: 0.86rem; font-weight: 700; line-height: 1.2; }
-.sidebar-brand-text span { font-size: 0.66rem; opacity: 0.75; letter-spacing: 0.3px; }
+.sidebar-brand-text { display: flex; flex-direction: column; overflow: hidden; white-space: normal; }
+.sidebar-brand-text strong { font-size: 0.8rem; font-weight: 700; line-height: 1.2; }
+.sidebar-brand-text span { font-size: 0.62rem; opacity: 0.75; letter-spacing: 0.3px; line-height: 1.3; }
 
 .sidebar-toggle {
   background: transparent;
@@ -605,6 +605,8 @@ button.btn-gold:hover { background: var(--color-gold-dark); color: white; }
 .theme-institution .btn-accent { background: var(--color-gold); color: white; font-weight: 700; }
 .theme-institution .btn-accent:hover { background: var(--color-gold-dark); }
 .theme-institution .portal-footer { background: var(--color-primary-dark); color: rgba(255,255,255,0.8); }
+.theme-institution .topbar-user-text strong { color: white; }
+.theme-institution .topbar-user-text em { color: rgba(255,255,255,0.65); }
 
 /* ---- THEME: BOT (Bank of Tanzania dark green / gold, per ICN mockup) ---- */
 .theme-bot .portal-sidebar {
@@ -616,17 +618,14 @@ button.btn-gold:hover { background: var(--color-gold-dark); color: white; }
 .theme-bot .sidebar-item { color: rgba(255,255,255,0.75); }
 .theme-bot .sidebar-item:hover { background: rgba(255,255,255,0.06); color: white; }
 .theme-bot .sidebar-item.active { background: rgba(187, 123, 2, 0.22); border-left-color: var(--color-gold); color: var(--color-gold-light); }
-.theme-bot .portal-topbar {
-  background: white;
-  border-bottom: 3px solid transparent;
-  border-image: linear-gradient(90deg, var(--color-gold), var(--color-primary)) 1;
-}
-.theme-bot .portal-topbar-title h1 { color: var(--color-primary-light); }
-.theme-bot .portal-topbar { color: var(--color-text); }
-.theme-bot .portal-topbar-title span { color: var(--color-muted); }
-.theme-bot .bell-trigger { background: #F3F1EA; border-color: var(--color-border); color: var(--color-text); }
-.theme-bot .bell-trigger:hover { background: #E9E6DB; }
-.theme-bot .bell-badge { border-color: white; }
+.theme-bot .portal-topbar { background: var(--color-primary); color: white; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.theme-bot .portal-topbar-title h1 { color: white; }
+.theme-bot .portal-topbar-title span { color: rgba(255,255,255,0.75); }
+.theme-bot .topbar-user-text strong { color: white; }
+.theme-bot .topbar-user-text em { color: rgba(255,255,255,0.65); }
+.theme-bot .bell-trigger { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: white; }
+.theme-bot .bell-trigger:hover { background: rgba(255,255,255,0.18); }
+.theme-bot .bell-badge { border-color: var(--color-primary); }
 .theme-bot .portal-content { background: #FBFAF6; }
 .theme-bot .btn-accent { background: var(--color-gold); color: white; font-weight: 700; }
 .theme-bot .btn-accent:hover { background: var(--color-gold-dark); }
