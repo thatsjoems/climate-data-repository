@@ -39,7 +39,10 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-cdr_dev_only_change_me}@db:5432/climate_data_repository
       SECRET_KEY: ${SECRET_KEY:-change-this-to-a-long-unique-secret-before-production-use}
       ENVIRONMENT: ${ENVIRONMENT:-development}
-      ACCESS_TOKEN_EXPIRE_MINUTES: "480"
+      # Short-lived on purpose - see app/core/config.py. Override via .env only
+      # if you have a specific reason to change it; do not hardcode 480 here again.
+      ACCESS_TOKEN_EXPIRE_MINUTES: "${ACCESS_TOKEN_EXPIRE_MINUTES:-15}"
+      REFRESH_TOKEN_EXPIRE_DAYS: "${REFRESH_TOKEN_EXPIRE_DAYS:-7}"
       # Optional SMTP - leave blank to keep the manual credential-relay fallback (see docs/ASSUMPTIONS_AND_LIMITATIONS.md)
       SMTP_HOST: "${SMTP_HOST:-}"
       SMTP_FROM_EMAIL: "${SMTP_FROM_EMAIL:-}"
