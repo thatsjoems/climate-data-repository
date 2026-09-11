@@ -91,7 +91,7 @@ def download_combined_exposure_csv(
     writer = csv.writer(buffer)
     writer.writerow([
         "region", "reporting_period", "avg_rainfall_mm", "avg_temperature_c",
-        "hazard_types_recorded", "total_loan_exposure_tzs", "total_collateral_value_tzs", "record_count",
+        "hazard_types_recorded", "climate_data_quality", "total_loan_exposure_tzs", "total_collateral_value_tzs", "record_count",
     ])
     for r in rows:
         writer.writerow([
@@ -99,6 +99,7 @@ def download_combined_exposure_csv(
             r["avg_rainfall_mm"] if r["avg_rainfall_mm"] is not None else "",
             r["avg_temperature_c"] if r["avg_temperature_c"] is not None else "",
             "; ".join(r["hazard_types_recorded"]),
+            r["climate_data_quality"] or "",
             r["total_loan_exposure_tzs"], r["total_collateral_value_tzs"], r["record_count"],
         ])
 

@@ -184,6 +184,7 @@ class CombinedExposurePoint(BaseModel):
     avg_rainfall_mm: Optional[float] = None
     avg_temperature_c: Optional[float] = None
     hazard_types_recorded: list[str] = []
+    climate_data_quality: Optional[str] = None
     total_loan_exposure_tzs: float
     total_collateral_value_tzs: float
     record_count: int

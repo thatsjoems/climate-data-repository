@@ -41,6 +41,7 @@ interface CombinedExposure {
   avg_rainfall_mm: number | null
   avg_temperature_c: number | null
   hazard_types_recorded: string[]
+  climate_data_quality: string | null
   total_loan_exposure_tzs: number
   total_collateral_value_tzs: number
   record_count: number
@@ -526,7 +527,10 @@ export default function InternalPortal() {
           loan/collateral exposure for the same region and reporting period — this is what
           directly links climate data to financial stability, rather than the two datasets
           sitting in separate, unrelated tables. A blank climate column means no meteorological
-          reading exists for that region/period — it is never guessed or filled in.
+          reading exists for that region/period — it is never guessed or filled in. The
+          "Climate Quality" column states plainly whether the figure is fully VALIDATED or a
+          mix that includes unvalidated/synthetic readings — never a single blended number
+          pretending to be uniformly reliable.
         </p>
         {dataQuality && dataQuality.synthetic_observations > 0 && (
           <p className="alert-info" style={{ fontWeight: 600 }}>
@@ -539,7 +543,7 @@ export default function InternalPortal() {
           <thead>
             <tr>
               <th>Region</th><th>Period</th><th>Avg Rainfall</th><th>Avg Temp</th>
-              <th>Hazards Recorded</th><th>Loan Exposure</th><th>Collateral</th><th>Records</th>
+              <th>Hazards Recorded</th><th>Climate Quality</th><th>Loan Exposure</th><th>Collateral</th><th>Records</th>
             </tr>
           </thead>
           <tbody>
@@ -550,12 +554,17 @@ export default function InternalPortal() {
                 <td>{c.avg_rainfall_mm !== null ? `${c.avg_rainfall_mm} mm` : '—'}</td>
                 <td>{c.avg_temperature_c !== null ? `${c.avg_temperature_c} °C` : '—'}</td>
                 <td>{c.hazard_types_recorded.length ? c.hazard_types_recorded.join(', ') : '—'}</td>
+                <td>
+                  {c.climate_data_quality === 'VALIDATED' && <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>✓ VALIDATED</span>}
+                  {c.climate_data_quality && c.climate_data_quality !== 'VALIDATED' && <span style={{ color: 'var(--color-warning)', fontWeight: 600 }}>⚠️ {c.climate_data_quality}</span>}
+                  {!c.climate_data_quality && '—'}
+                </td>
                 <td>{formatTZS(c.total_loan_exposure_tzs)}</td>
                 <td>{formatTZS(c.total_collateral_value_tzs)}</td>
                 <td>{c.record_count}</td>
               </tr>
             ))}
-            {combinedExposure.length === 0 && <tr><td colSpan={8}>No matching data yet.</td></tr>}
+            {combinedExposure.length === 0 && <tr><td colSpan={9}>No matching data yet.</td></tr>}
           </tbody>
         </table>
       </section>

@@ -137,15 +137,16 @@ def generate_summary_report_pdf(db: Session, generated_by: User) -> bytes:
         styles["BodyNote"],
     ))
     story.append(_table(
-        ["Region", "Period", "Rainfall", "Temp", "Hazards", "Loan Exposure"],
+        ["Region", "Period", "Rainfall", "Temp", "Hazards", "Quality", "Loan Exposure"],
         [[
             c["region"], c["reporting_period"],
             f"{c['avg_rainfall_mm']} mm" if c["avg_rainfall_mm"] is not None else "—",
             f"{c['avg_temperature_c']}°C" if c["avg_temperature_c"] is not None else "—",
             ", ".join(c["hazard_types_recorded"]) or "—",
+            c["climate_data_quality"] or "—",
             _fmt_tzs(c["total_loan_exposure_tzs"]),
         ] for c in combined_rows],
-        col_widths=[3 * cm, 2.3 * cm, 2.2 * cm, 2 * cm, 3.5 * cm, 3.5 * cm],
+        col_widths=[2.6 * cm, 2 * cm, 1.9 * cm, 1.7 * cm, 2.8 * cm, 3.2 * cm, 3.3 * cm],
     ))
 
     # ---- Recent Risk Advisory Reports ----
@@ -239,12 +240,13 @@ def generate_summary_report_excel(db: Session, generated_by: User) -> bytes:
     # ---- Combined Climate-Financial Exposure ----
     ws3 = wb.create_sheet("Combined Exposure")
     combined_rows = analytics_service.get_combined_climate_financial_exposure(db, institution_id=None)
-    write_sheet(ws3, ["Region", "Period", "Avg Rainfall (mm)", "Avg Temp (C)", "Hazards", "Loan Exposure (TZS)", "Collateral Value (TZS)", "Records"], [
+    write_sheet(ws3, ["Region", "Period", "Avg Rainfall (mm)", "Avg Temp (C)", "Hazards", "Climate Data Quality", "Loan Exposure (TZS)", "Collateral Value (TZS)", "Records"], [
         [
             c["region"], c["reporting_period"],
             c["avg_rainfall_mm"] if c["avg_rainfall_mm"] is not None else None,
             c["avg_temperature_c"] if c["avg_temperature_c"] is not None else None,
             ", ".join(c["hazard_types_recorded"]),
+            c["climate_data_quality"] or "",
             c["total_loan_exposure_tzs"], c["total_collateral_value_tzs"], c["record_count"],
         ] for c in combined_rows
     ])

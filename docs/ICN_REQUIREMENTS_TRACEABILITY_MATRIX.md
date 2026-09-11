@@ -72,3 +72,28 @@ branding — extracted directly from the ICN document's own mockup images
 - The entire **MUST HAVE** workflow (login \u2192 template \u2192 upload \u2192 validation \u2192 storage \u2192 internal review \u2192 dashboard) has been **built and fully functional**.
 - **SHOULD HAVE** items (export, advanced filters, password recovery) - the underlying foundation exists (APIs already return correct data), but the additional UI/endpoints have not yet been added.
 - **FUTURE WORK** (live RTIS/BSIS/QGIS/ArcGIS integration, real TMA/PMO data) - not possible without real access/credentials from BOT - these are clearly documented as gaps, not hidden.
+
+## Data-integrity fix (after external review): Combined Climate-Financial Exposure honesty
+
+An external review correctly identified two real weaknesses in
+`get_combined_climate_financial_exposure()` — verified against the actual
+code, not just accepted on claim:
+
+1. **No `quality_flag` filtering**: SYNTHETIC, UNVALIDATED, VALIDATED, and
+   FLAGGED climate readings were all silently blended into one average with
+   no indication of composition.
+2. **Weak period matching**: climate records were matched only by
+   reconstructing year/months from the quarter, never by the record's own
+   `reporting_period` field (even though that field exists and is populated
+   by the ingestion pipeline).
+
+**Fixed**: FLAGGED readings (explicitly analyst-rejected) are now excluded
+outright from any average. Matching now prefers an exact
+`reporting_period` match, falling back to year/month reconstruction only
+for legacy records with no `reporting_period` set. Every combined-exposure
+row now carries a `climate_data_quality` field — `"VALIDATED"` only when
+every contributing reading is validated, otherwise `"MIXED (...)"` naming
+exactly which quality flags contributed — surfaced in the dashboard table,
+the PDF/Excel reports, and the CSV export. See
+`tests/test_combined_exposure_quality.py` for the regression tests locking
+this in.

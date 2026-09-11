@@ -291,26 +291,52 @@ def get_combined_climate_financial_exposure(db: Session, institution_id: str | N
         avg_rainfall = None
         avg_temp = None
         hazard_types_present: list[str] = []
+        climate_data_quality = None
 
+        # Match climate observations two ways, unioned: (a) records that explicitly
+        # carry this exact reporting_period (the reliable path, once TMA data is
+        # tagged that way), and (b) older/legacy records with no reporting_period
+        # set, matched by reconstructing the year/months the quarter covers - a
+        # fallback, not the primary path, so this never silently misses data that
+        # IS properly tagged.
+        filters = [ClimateRecord.region == combo.region]
+        period_filter = ClimateRecord.reporting_period == combo.reporting_period
         if parsed:
             year, months = parsed
-            climate_rows = (
-                db.query(ClimateRecord)
-                .filter(
-                    ClimateRecord.region == combo.region,
-                    ClimateRecord.year == year,
-                    ClimateRecord.month.in_(months),
-                )
-                .all()
+            legacy_filter = (
+                (ClimateRecord.reporting_period.is_(None))
+                & (ClimateRecord.year == year)
+                & (ClimateRecord.month.in_(months))
             )
-            if climate_rows:
-                rainfall_values = [c.rainfall_mm for c in climate_rows if c.rainfall_mm is not None]
-                temp_values = [c.avg_temperature_c for c in climate_rows if c.avg_temperature_c is not None]
-                avg_rainfall = round(sum(rainfall_values) / len(rainfall_values), 1) if rainfall_values else None
-                avg_temp = round(sum(temp_values) / len(temp_values), 1) if temp_values else None
-                hazard_types_present = sorted({
-                    c.hazard_type for c in climate_rows if c.hazard_type and c.hazard_type != "None"
-                })
+            filters.append(period_filter | legacy_filter)
+        else:
+            filters.append(period_filter)
+
+        climate_rows = (
+            db.query(ClimateRecord)
+            .filter(*filters)
+            # FLAGGED means an analyst has already judged this specific reading
+            # unreliable - it must never be blended into a figure presented as
+            # informing financial-stability decisions, regardless of source.
+            .filter(ClimateRecord.quality_flag != "FLAGGED")
+            .all()
+        )
+        if climate_rows:
+            rainfall_values = [c.rainfall_mm for c in climate_rows if c.rainfall_mm is not None]
+            temp_values = [c.avg_temperature_c for c in climate_rows if c.avg_temperature_c is not None]
+            avg_rainfall = round(sum(rainfall_values) / len(rainfall_values), 1) if rainfall_values else None
+            avg_temp = round(sum(temp_values) / len(temp_values), 1) if temp_values else None
+            hazard_types_present = sorted({
+                c.hazard_type for c in climate_rows if c.hazard_type and c.hazard_type != "None"
+            })
+            # Honesty rule: never let a blend of SYNTHETIC/UNVALIDATED/VALIDATED
+            # readings present itself as one uniform, trustworthy figure - the
+            # composition actually used must always be visible alongside it.
+            flags_present = sorted({c.quality_flag or "UNVALIDATED" for c in climate_rows})
+            if flags_present == ["VALIDATED"]:
+                climate_data_quality = "VALIDATED"
+            else:
+                climate_data_quality = "MIXED (" + ", ".join(flags_present) + ")"
 
         results.append({
             "region": combo.region,
@@ -318,6 +344,7 @@ def get_combined_climate_financial_exposure(db: Session, institution_id: str | N
             "avg_rainfall_mm": avg_rainfall,
             "avg_temperature_c": avg_temp,
             "hazard_types_recorded": hazard_types_present,
+            "climate_data_quality": climate_data_quality,
             "total_loan_exposure_tzs": float(combo.total_loan or 0.0),
             "total_collateral_value_tzs": float(combo.total_collateral or 0.0),
             "record_count": combo.record_count,
