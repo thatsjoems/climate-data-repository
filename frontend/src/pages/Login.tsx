@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import botLogo from '../assets/bot_logo.png'
 
 export default function Login() {
   const [username, setUsername] = useState('')
@@ -21,8 +22,11 @@ export default function Login() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={handleSubmit}>
-        <h1>Climate Data Repository</h1>
-        <p className="login-subtitle">Bank of Tanzania - Financial Stability Department</p>
+        <div className="login-brand">
+          <img src={botLogo} alt="Bank of Tanzania" className="login-logo" />
+          <h1>Climate Data Repository</h1>
+          <p className="login-subtitle">Bank of Tanzania</p>
+        </div>
 
         {error && <div className="alert-error">{error}</div>}
 
@@ -46,9 +50,15 @@ export default function Login() {
           <Link to="/forgot-password" style={{ fontSize: '0.78rem', color: 'var(--color-muted)' }}>Forgot password?</Link>
         </p>
 
-        <button type="submit" disabled={isLoading}>
+        <button type="submit" disabled={isLoading} className="login-submit">
           {isLoading ? 'Signing in...' : 'Log In'}
         </button>
+
+        <div className="login-notice">
+          <strong>🛡️ Authorized Access Only</strong>
+          <p>This portal is for authorized users of Bank of Tanzania and reporting financial
+             institutions only. All activities are monitored and recorded.</p>
+        </div>
 
         <div className="demo-hint">
           <strong>DEMO accounts (after running init_db.py):</strong>
@@ -63,6 +73,8 @@ export default function Login() {
             dashboard for exactly which records are synthetic vs validated.
           </p>
         </div>
+
+        <p className="login-footer">© 2026 Bank of Tanzania. All rights reserved.</p>
       </form>
     </div>
   )

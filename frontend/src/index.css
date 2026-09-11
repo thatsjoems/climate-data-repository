@@ -1,10 +1,12 @@
 :root {
-  --color-primary: #0B1F3A;
-  --color-primary-dark: #06121F;
-  --color-primary-light: #1C3A63;
-  --color-gold: #C9971F;
-  --color-gold-dark: #9C7414;
-  --color-gold-light: #E8C766;
+  /* Colors extracted directly from the Bank of Tanzania's own ICN mockup images
+     (Concept Note on the Proposed Enhancement of the Climate Data Repository) */
+  --color-primary: #012C17;
+  --color-primary-dark: #001A0D;
+  --color-primary-light: #244634;
+  --color-gold: #BB7B02;
+  --color-gold-dark: #8F5E02;
+  --color-gold-light: #E0A83D;
   --color-success: #1E7A3A;
   --color-bg: #F3F1EA;
   --color-card: #ffffff;
@@ -418,10 +420,10 @@ button.btn-gold:hover { background: var(--color-gold-dark); color: white; }
 .login-page {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
   position: relative; overflow: hidden;
-  background: radial-gradient(circle at 20% 20%, #16305A 0%, transparent 45%),
-              radial-gradient(circle at 85% 15%, #9C7414 0%, transparent 35%),
-              radial-gradient(circle at 75% 85%, #0B1F3A 0%, transparent 50%),
-              linear-gradient(140deg, #06121F 0%, #0B1F3A 55%, #142F52 100%);
+  background: radial-gradient(circle at 20% 20%, #0A3A22 0%, transparent 45%),
+              radial-gradient(circle at 85% 15%, #8F5E02 0%, transparent 35%),
+              radial-gradient(circle at 75% 85%, #012C17 0%, transparent 50%),
+              linear-gradient(140deg, #001A0D 0%, #012C17 55%, #0C3B24 100%);
 }
 .login-page::before, .login-page::after { content: ""; position: absolute; border-radius: 50%; filter: blur(2px); opacity: 0.1; background: var(--color-gold-light); }
 .login-page::before { width: 420px; height: 420px; top: -120px; left: -140px; }
@@ -436,8 +438,10 @@ button.btn-gold:hover { background: var(--color-gold-dark); color: white; }
   box-shadow: 0 25px 60px rgba(0,0,0,0.4);
   border-top: 3px solid var(--color-gold);
 }
-.login-card h1 { margin: 0 0 0.15rem; font-size: 1.4rem; font-weight: 800; color: var(--color-primary-dark); letter-spacing: -0.3px; }
-.login-subtitle { color: var(--color-muted); font-size: 0.82rem; margin-bottom: 1.5rem; }
+.login-brand { text-align: center; margin-bottom: 0.5rem; }
+.login-logo { width: 84px; height: auto; margin-bottom: 0.6rem; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15)); }
+.login-card h1 { margin: 0 0 0.15rem; font-size: 1.25rem; font-weight: 800; color: var(--color-primary); letter-spacing: -0.3px; }
+.login-subtitle { color: var(--color-gold-dark); font-size: 0.82rem; font-weight: 700; margin-bottom: 1.5rem; letter-spacing: 0.4px; }
 .login-card label { font-size: 0.82rem; margin-top: 0.85rem; color: var(--color-muted); font-weight: 500; }
 .login-card input, .login-card select {
   padding: 0.65rem 0.75rem; border: 1px solid var(--color-border); border-radius: 8px;
@@ -445,15 +449,24 @@ button.btn-gold:hover { background: var(--color-gold-dark); color: white; }
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .login-card input:focus, .login-card select:focus {
-  outline: none; border-color: var(--color-gold); box-shadow: 0 0 0 3px rgba(201, 151, 31, 0.15);
+  outline: none; border-color: var(--color-gold); box-shadow: 0 0 0 3px rgba(187, 123, 2, 0.15);
 }
-.login-card button {
+.login-submit {
   margin-top: 1.5rem; padding: 0.75rem; font-size: 0.9rem;
   background: linear-gradient(120deg, var(--color-gold) 0%, var(--color-gold-dark) 100%);
-  color: var(--color-primary-dark);
-  box-shadow: 0 4px 14px rgba(201, 151, 31, 0.35);
+  color: white; font-weight: 700;
+  box-shadow: 0 4px 14px rgba(187, 123, 2, 0.35);
 }
-.login-card button:hover { background: linear-gradient(120deg, var(--color-gold-dark) 0%, var(--color-gold) 100%); color: white; }
+.login-submit:hover { background: linear-gradient(120deg, var(--color-gold-dark) 0%, var(--color-gold) 100%); }
+
+.login-notice {
+  margin-top: 1.3rem; padding: 0.75rem 0.9rem; border-radius: 8px;
+  background: rgba(1, 44, 23, 0.06); border: 1px solid rgba(1, 44, 23, 0.15);
+}
+.login-notice strong { display: block; font-size: 0.8rem; color: var(--color-primary); margin-bottom: 0.25rem; }
+.login-notice p { margin: 0; font-size: 0.72rem; color: var(--color-muted); line-height: 1.4; }
+
+.login-footer { text-align: center; font-size: 0.68rem; color: var(--color-muted); margin: 1.2rem 0 0; }
 
 .alert-error { background: #FDECEA; color: var(--color-danger); padding: 0.65rem 0.85rem; border-radius: 8px; font-size: 0.85rem; margin-bottom: 0.5rem; border: 1px solid #F5C6C0; }
 .alert-info { background: #FBF3DE; color: var(--color-gold-dark); padding: 0.65rem 0.85rem; border-radius: 8px; font-size: 0.85rem; margin: 0.85rem 0; border: 1px solid #EEDFB0; }
@@ -481,11 +494,9 @@ button.btn-gold:hover { background: var(--color-gold-dark); color: white; }
   gap: 0.65rem;
   padding: 1.2rem 1.1rem;
 }
-.sidebar-brand-emblem {
-  width: 38px; height: 38px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 800; font-size: 0.68rem; flex-shrink: 0;
-  letter-spacing: 0.3px;
+.sidebar-brand-logo {
+  width: 44px; height: 44px; object-fit: contain; flex-shrink: 0;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25));
 }
 .sidebar-brand-text { display: flex; flex-direction: column; overflow: hidden; white-space: nowrap; }
 .sidebar-brand-text strong { font-size: 0.86rem; font-weight: 700; line-height: 1.2; }
@@ -575,49 +586,51 @@ button.btn-gold:hover { background: var(--color-gold-dark); color: white; }
 }
 .portal-footer span { display: flex; align-items: center; gap: 0.4rem; }
 
-/* ---- THEME: Institution (dark navy / gold) ---- */
+/* ---- THEME: Institution (Bank of Tanzania dark green / gold, per ICN mockup) ---- */
 .theme-institution .portal-sidebar {
-  background: linear-gradient(180deg, #0C2338 0%, #081A2B 100%);
+  background: linear-gradient(180deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
   color: rgba(255,255,255,0.92);
 }
-.theme-institution .sidebar-brand-emblem { background: linear-gradient(135deg, #E2A63B, #B8791C); color: #241902; }
 .theme-institution .sidebar-toggle { color: white; }
 .theme-institution .sidebar-toggle:hover { background: rgba(255,255,255,0.1); }
 .theme-institution .sidebar-item { color: rgba(255,255,255,0.75); }
 .theme-institution .sidebar-item:hover { background: rgba(255,255,255,0.06); color: white; }
 .theme-institution .sidebar-item.active {
-  background: rgba(226, 166, 59, 0.14);
-  border-left-color: #E2A63B;
-  color: #F0C878;
+  background: rgba(187, 123, 2, 0.22);
+  border-left-color: var(--color-gold);
+  color: var(--color-gold-light);
 }
-.theme-institution .portal-topbar { background: #0E2A44; color: white; border-bottom: 1px solid rgba(255,255,255,0.08); }
-.theme-institution .portal-content { background: #F3F5F8; }
-.theme-institution .btn-accent { background: #E2A63B; color: #241902; font-weight: 700; }
-.theme-institution .btn-accent:hover { background: #F0B94E; }
-.theme-institution .portal-footer { background: #0A1D30; color: rgba(255,255,255,0.8); }
+.theme-institution .portal-topbar { background: var(--color-primary); color: white; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.theme-institution .portal-content { background: var(--color-bg); }
+.theme-institution .btn-accent { background: var(--color-gold); color: white; font-weight: 700; }
+.theme-institution .btn-accent:hover { background: var(--color-gold-dark); }
+.theme-institution .portal-footer { background: var(--color-primary-dark); color: rgba(255,255,255,0.8); }
 
-/* ---- THEME: BOT (cream / orange) ---- */
-.theme-bot .portal-sidebar { background: #FFFFFF; border-right: 1px solid var(--color-border); color: var(--color-text); }
-.theme-bot .sidebar-brand-emblem { background: linear-gradient(135deg, #E28413, #B85F0A); color: #2A1400; }
-.theme-bot .sidebar-toggle { color: var(--color-text); }
-.theme-bot .sidebar-toggle:hover { background: #F3F1EA; }
-.theme-bot .sidebar-item { color: #4A4438; }
-.theme-bot .sidebar-item:hover { background: #FBF6EC; }
-.theme-bot .sidebar-item.active { background: #FDF0DC; border-left-color: #E28413; color: #A85A0A; }
+/* ---- THEME: BOT (Bank of Tanzania dark green / gold, per ICN mockup) ---- */
+.theme-bot .portal-sidebar {
+  background: linear-gradient(180deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+  color: rgba(255,255,255,0.92);
+}
+.theme-bot .sidebar-toggle { color: white; }
+.theme-bot .sidebar-toggle:hover { background: rgba(255,255,255,0.1); }
+.theme-bot .sidebar-item { color: rgba(255,255,255,0.75); }
+.theme-bot .sidebar-item:hover { background: rgba(255,255,255,0.06); color: white; }
+.theme-bot .sidebar-item.active { background: rgba(187, 123, 2, 0.22); border-left-color: var(--color-gold); color: var(--color-gold-light); }
 .theme-bot .portal-topbar {
   background: white;
   border-bottom: 3px solid transparent;
-  border-image: linear-gradient(90deg, #E28413, #12395B) 1;
+  border-image: linear-gradient(90deg, var(--color-gold), var(--color-primary)) 1;
 }
-.theme-bot .portal-topbar-title h1 { color: #1B2A1E; }
+.theme-bot .portal-topbar-title h1 { color: var(--color-primary-light); }
 .theme-bot .portal-topbar { color: var(--color-text); }
 .theme-bot .portal-topbar-title span { color: var(--color-muted); }
 .theme-bot .bell-trigger { background: #F3F1EA; border-color: var(--color-border); color: var(--color-text); }
 .theme-bot .bell-trigger:hover { background: #E9E6DB; }
 .theme-bot .bell-badge { border-color: white; }
 .theme-bot .portal-content { background: #FBFAF6; }
-.theme-bot .btn-accent { background: #E28413; color: white; font-weight: 700; }
-.theme-bot .btn-accent:hover { background: #C1700F; }
+.theme-bot .btn-accent { background: var(--color-gold); color: white; font-weight: 700; }
+.theme-bot .btn-accent:hover { background: var(--color-gold-dark); }
+.theme-bot .portal-footer { background: var(--color-primary-dark); color: rgba(255,255,255,0.8); }
 .theme-bot .portal-footer { background: #14201A; color: rgba(255,255,255,0.85); }
 
 /* ---- Icon KPI cards (v2) ---- */

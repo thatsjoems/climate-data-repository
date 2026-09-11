@@ -2,6 +2,7 @@ import { useState, ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import NotificationBell from './NotificationBell'
+import botLogo from '../assets/bot_logo.png'
 
 export interface SidebarItem {
   key: string
@@ -39,13 +40,11 @@ export default function PortalShell({
     navigate('/login')
   }
 
-  const emblemText = theme === 'institution' ? 'CDR' : 'BOT'
-
   return (
     <div className={`portal-shell theme-${theme}`}>
       <aside className={`portal-sidebar ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-brand">
-          <div className="sidebar-brand-emblem">{emblemText}</div>
+          <img src={botLogo} alt="Bank of Tanzania" className="sidebar-brand-logo" />
           {!collapsed && (
             <div className="sidebar-brand-text">
               <strong>{brandTitle}</strong>
