@@ -42,7 +42,7 @@ def test_valid_climate_csv_is_ingested(client, db_session):
     make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
     token = login(client, "analyst1").json()["access_token"]
     csv_bytes = _csv_bytes([
-        "Dodoma,Chamwino District,2026,7,45.2,28.5,Drought,MEDIUM,REC-1",
+        "Dodoma,Chamwino,2026,7,45.2,28.5,Drought,MEDIUM,REC-1",
         "Mwanza,,2026,7,120.0,25.1,Flood,HIGH,REC-2",
     ])
     res = client.post(
@@ -148,7 +148,7 @@ def test_missing_climate_data_shown_as_none_never_fabricated(client, db_session)
 
     inst = make_institution(db_session)
     # Seed a submission for a region with NO climate data at all
-    _seed_submission_for(db_session, inst, region="Kigoma", district="Kigoma District")
+    _seed_submission_for(db_session, inst, region="Kigoma", district="Kigoma")
 
     make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
     token = login(client, "analyst1").json()["access_token"]

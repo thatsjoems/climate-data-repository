@@ -4,33 +4,38 @@ Upload/validation and workflow tests.
 Covers acceptance criteria: invalid submissions must never be approvable,
 reviewers can't approve their own upload, and a corrected resubmission must
 supersede the earlier attempt so analytics never double-count it.
+
+Uses BOT's own official 38-column template structure (see
+app.services.template_generator.COLUMNS) - headers are the real official
+labels, not internal field names, exactly like a real uploaded file.
 """
 import io
 from openpyxl import Workbook
 
 from app.models.models import RoleEnum, SubmissionStatus
+from app.services.template_generator import COLUMNS
 from tests.conftest import make_institution, make_user, login, auth_header
 
-REQUIRED_HEADERS = [
-    "loan_id", "borrower_name", "loan_amount_tzs", "collateral_type",
-    "collateral_value_tzs", "region", "district", "reporting_period",
-    "climate_hazard_exposure",
-]
+FIELD_TO_LABEL = dict(COLUMNS)
 
 
 def build_test_excel(rows: list[dict], reporting_period: str | None = None, sheet_name="Loan_Collateral_Data") -> bytes:
-    """Builds a minimal, valid .xlsx in memory matching the CDR template structure."""
+    """
+    Builds a minimal .xlsx matching the real official template structure -
+    header row with BOT's own column labels, `rows` keyed by our internal
+    field names (e.g. "loan_id", "region"). `reporting_period` is accepted
+    for call-site compatibility but is no longer a file column (BOT's real
+    template states it once per file on the upload form, not per row).
+    """
     wb = Workbook()
     ws = wb.active
     ws.title = sheet_name
-    for col_idx, header in enumerate(REQUIRED_HEADERS, start=1):
-        ws.cell(row=1, column=col_idx, value=header)
+    fields = [f for f, _ in COLUMNS]
+    for col_idx, field in enumerate(fields, start=1):
+        ws.cell(row=1, column=col_idx, value=FIELD_TO_LABEL[field])
     for row_idx, row in enumerate(rows, start=2):
-        for col_idx, header in enumerate(REQUIRED_HEADERS, start=1):
-            value = row.get(header, "")
-            if header == "reporting_period" and reporting_period and header not in row:
-                value = reporting_period
-            ws.cell(row=row_idx, column=col_idx, value=value)
+        for col_idx, field in enumerate(fields, start=1):
+            ws.cell(row=row_idx, column=col_idx, value=row.get(field))
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
@@ -48,11 +53,28 @@ def _upload(client, token, rows, reporting_period="2026-Q1", filename="data.xlsx
 
 
 VALID_ROW = {
-    "loan_id": "LN-1", "borrower_name": "Acme Ltd", "loan_amount_tzs": 5_000_000,
-    "collateral_type": "Landed Property", "collateral_value_tzs": 8_000_000,
-    "region": "Dodoma", "district": "Chamwino District", "reporting_period": "2026-Q1",
-    "climate_hazard_exposure": "None",
+    "customer_id": "CUST-1", "loan_id": "LN-1", "loan_amount_tzs": 5_000_000,
+    "collateral_type": "Residential mortgage", "collateral_value_tzs": 8_000_000,
+    "region": "Dodoma", "district": "Chamwino",
 }
+
+
+def test_upload_rejects_malformed_reporting_period_format(client, db_session):
+    """
+    Defense-in-depth: even though the frontend now offers this as a dropdown
+    (never free text), the API itself must still reject a malformed value -
+    anyone calling it directly could send anything.
+    """
+    _setup_institution_user(db_session)
+    token = login(client, "inst_user").json()["access_token"]
+    file_bytes = build_test_excel([VALID_ROW])
+    res = client.post(
+        "/api/submissions/upload",
+        data={"reporting_period": "Q1-2026"},  # wrong order - not YYYY-Qn
+        files={"file": ("data.xlsx", file_bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=auth_header(token),
+    )
+    assert res.status_code == 400
 
 
 def _setup_institution_user(db_session, username="inst_user", institution_code="BANK-A"):
@@ -113,13 +135,19 @@ def test_upload_district_must_belong_to_selected_region(client, db_session):
     assert res.json()["status"] == "INVALID"
 
 
-def test_reporting_period_mismatch_between_form_and_file_rejected(client, db_session):
+def test_reporting_period_is_attached_from_the_form_not_a_file_column(client, db_session):
+    """
+    BOT's own official template states the reporting date ONCE per file
+    ("LOAN AND COLLATERAL DATA AS AT ___"), not as a per-row column - so the
+    old "form vs file column" mismatch scenario no longer exists. This test
+    replaces it: confirms the form's reporting_period is what's actually
+    stored against the submission, regardless of anything in the file itself.
+    """
     _setup_institution_user(db_session)
     token = login(client, "inst_user").json()["access_token"]
-    row = dict(VALID_ROW, reporting_period="2025-Q4")  # file says Q4 2025
-    res = _upload(client, token, [row], reporting_period="2026-Q1")  # form says Q1 2026
+    res = _upload(client, token, [VALID_ROW], reporting_period="2026-Q2")
     assert res.status_code == 201
-    assert res.json()["status"] == "INVALID"
+    assert res.json()["reporting_period"] == "2026-Q2"
 
 
 def test_duplicate_loan_id_within_same_file_flagged(client, db_session):

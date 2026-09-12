@@ -155,22 +155,77 @@ class Submission(Base):
 
 
 class SubmissionRecord(Base):
-    """A single data row (e.g. one loan) extracted from an uploaded Excel submission."""
+    """
+    A single data row (one loan) extracted from an uploaded Excel submission.
+
+    Field structure mirrors BOT's own official "Climate Data Template" exactly
+    (38 columns) - not a simplified prototype subset. Column groups, matching
+    the template's own layout:
+      A. Borrower/Branch info   B. Loan details
+      C. Location of invested loan (region/district/ward/village + GPS)
+      D. Collateral details + its own location (region/district/ward/village + GPS)
+      E. Climate-risk insurance on the collateral
+    """
     __tablename__ = "submission_records"
 
     id = Column(String, primary_key=True, default=gen_uuid)
     submission_id = Column(String, ForeignKey("submissions.id"), nullable=False)
     row_number = Column(Integer, nullable=False)
-
-    loan_id = Column(String(100), nullable=True, index=True)
-    borrower_name = Column(String(255), nullable=True)
-    loan_amount_tzs = Column(Float, nullable=True)
-    collateral_type = Column(String(100), nullable=True)
-    collateral_value_tzs = Column(Float, nullable=True)
-    region = Column(String(100), nullable=True, index=True)
-    district = Column(String(100), nullable=True)
-    climate_hazard_exposure = Column(String(100), nullable=True)  # e.g. Drought, Flood, None
     is_valid = Column(Boolean, default=True)
+
+    # ---- A. Borrower / Branch info ----
+    customer_id = Column(String(100), nullable=True, index=True)  # BOT's own real identifier - not a name
+    branch_code = Column(String(50), nullable=True)
+    branch_name = Column(String(255), nullable=True)
+    client_type = Column(String(50), nullable=True)          # Corporations, Individuals, Non-salaried, Staff
+    business_size = Column(String(50), nullable=True)        # Large, Medium, Micro, Small
+    annual_turnover_tzs = Column(Float, nullable=True)
+
+    # ---- B. Loan details ----
+    loan_id = Column(String(100), nullable=True, index=True)  # "Loan number" in the official template
+    disbursement_date = Column(String(30), nullable=True)     # kept as text - BOT's own sample data is not ISO-clean
+    maturity_date = Column(String(30), nullable=True)
+    currency = Column(String(10), nullable=True)              # TZS, USD, Other
+    loan_amount_tzs = Column(Float, nullable=True)             # "TZS Disbursed Amount"
+    outstanding_principal_tzs = Column(Float, nullable=True)
+    annual_interest_rate = Column(Float, nullable=True)
+    loan_type = Column(String(50), nullable=True)              # Business, Mortgage, Personal
+    loan_economic_activity = Column(String(100), nullable=True)
+    loan_purpose = Column(String(255), nullable=True)
+    asset_classification = Column(String(50), nullable=True)   # Current, Doubtful, Sub-standard
+
+    # ---- C. Location of invested loan ----
+    region = Column(String(100), nullable=True, index=True)    # kept name "region" - the loan's own location, used throughout existing analytics
+    district = Column(String(100), nullable=True)
+    ward = Column(String(150), nullable=True)
+    village = Column(String(150), nullable=True)               # "Street/village"
+    loan_latitude = Column(Float, nullable=True)
+    loan_longitude = Column(Float, nullable=True)
+
+    # ---- D. Collateral details + its own location ----
+    collateral_type = Column(String(150), nullable=True)        # "Collateral Pledged" - 21 official categories
+    collateral_pledged_date = Column(String(30), nullable=True)
+    collateral_value_tzs = Column(Float, nullable=True)         # "TZS Market value of the collateral"
+    collateral_forced_sale_value_tzs = Column(Float, nullable=True)
+    collateral_economic_activity = Column(String(100), nullable=True)
+    collateral_region = Column(String(100), nullable=True)
+    collateral_district = Column(String(100), nullable=True)
+    collateral_ward = Column(String(150), nullable=True)
+    collateral_village = Column(String(150), nullable=True)
+    collateral_latitude = Column(Float, nullable=True)
+    collateral_longitude = Column(Float, nullable=True)
+
+    # ---- E. Climate-risk insurance on the collateral ----
+    insurance_coverage = Column(String(10), nullable=True)      # YES / NO
+    insurance_policy_type = Column(String(150), nullable=True)
+    insurance_provider_name = Column(String(255), nullable=True)
+    insurance_value_protected_tzs = Column(Float, nullable=True)
+
+    # Legacy field - the official template has no borrower-name field (only
+    # customer_id), so this is never populated by new uploads. Kept nullable
+    # so any pre-existing rows/reports referencing it don't break.
+    borrower_name = Column(String(255), nullable=True)
+    climate_hazard_exposure = Column(String(100), nullable=True)  # e.g. Drought, Flood, None
 
     submission = relationship("Submission", back_populates="records")
 

@@ -97,3 +97,53 @@ exactly which quality flags contributed — surfaced in the dashboard table,
 the PDF/Excel reports, and the CSV export. See
 `tests/test_combined_exposure_quality.py` for the regression tests locking
 this in.
+
+## MAJOR UPGRADE: Official BOT Template Adopted (38 columns)
+
+The submission template, database model, and validation engine were
+completely rebuilt around **Bank of Tanzania's own official Climate Data
+Template** (provided directly by the user, along with the 2022 Census
+village/mtaa list and the Zanzibar Frame) - replacing the earlier
+9-column prototype template entirely.
+
+**What changed:**
+- `SubmissionRecord` now has BOT's exact 38 fields (Customer ID, Client
+  Type, Business Size, full loan terms, separate location + GPS for BOTH
+  the loan and its collateral, and climate-risk insurance details) instead
+  of a simplified 9-field subset.
+- All dropdown option lists (Client Type, Collateral Pledged - 21 real
+  categories, Loan Economic Activity, Asset Classification, etc.) now match
+  BOT's own official "DROP DOWN" reference sheet exactly, not an
+  approximation sourced from a BOT report.
+- **Region -> District -> Ward -> Village/Street cascading dropdowns**, four
+  levels deep, built from the real 2022 Census hierarchy (31 regions, 151
+  districts, 4,342 wards/shehia, 19,946 villages/mitaa) - applied
+  independently to both the loan's own location and the collateral's
+  location. Verified working at full scale via LibreOffice (see
+  `app/services/geo_lookup.py` for the data, `template_generator.py` for
+  the Excel-side INDIRECT()-based implementation, including correct
+  handling of apostrophes and other special characters in real place names).
+- **GPS-region consistency check**: a row's stated latitude/longitude is
+  flagged (WARNING, not a hard rejection - see `validation_service.py` for
+  why) when more than 300km from the selected region's own centroid. This
+  is an honest approximation - we have region centroids, not district/ward
+  boundary polygons, so it catches gross mismatches without false-flagging
+  correct points in Tanzania's largest regions.
+- The per-row `reporting_period` column was removed - BOT's own template
+  states the reporting date ONCE per file ("LOAN AND COLLATERAL DATA AS AT
+  ___"), not per row, so the reporting period is now form-only, attached to
+  the Submission as a whole.
+- `customer_id` (BOT's real identifier) replaces the invented `borrower_name`
+  field as the "who is this loan for" identifier throughout Total Borrowers
+  and related KPIs. `borrower_name` remains on the model as an unused,
+  nullable legacy column so nothing referencing old data breaks.
+
+**Known consequence, stated plainly**: BOT's official template has no
+self-reported hazard-exposure column (hazard is meant to come from joining
+with TMA/PMO climate data by region - exactly what Combined
+Climate-Financial Exposure already does), so the institution-self-reported
+"Hazard Exposure" pie chart will show every new submission as hazard
+"None" going forward. Fixing this properly means recomputing hazard
+exposure from the region-based climate join instead of a self-reported
+column - not done in this pass, flagged here rather than left silently
+broken.

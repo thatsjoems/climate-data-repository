@@ -57,6 +57,24 @@ def test_quality_composition_is_reported_when_mixed(client, db_session):
     assert "UNVALIDATED" in row["climate_data_quality"]
 
 
+def test_single_uniform_unvalidated_quality_is_not_labelled_mixed(client, db_session):
+    """
+    Regression test: a region where EVERY contributing reading shares the
+    same non-VALIDATED flag (e.g. all UNVALIDATED, nothing actually blended)
+    must be labelled with that flag directly, not "MIXED (...)" - "mixed"
+    would misleadingly imply more than one kind of reading was combined.
+    """
+    inst = make_institution(db_session)
+    _seed_submission_for(db_session, inst)
+
+    _add_climate_record(db_session, quality_flag="UNVALIDATED", rainfall=40.0)
+    _add_climate_record(db_session, quality_flag="UNVALIDATED", rainfall=60.0)
+
+    results = get_combined_climate_financial_exposure(db_session)
+    row = next(r for r in results if r["region"] == "Dodoma")
+    assert row["climate_data_quality"] == "UNVALIDATED"
+
+
 def test_reporting_period_is_matched_directly_when_present(client, db_session):
     """
     A record tagged with the WRONG reporting_period but matching year/month
@@ -100,3 +118,48 @@ def test_no_climate_data_reports_null_quality_not_a_fabricated_default(client, d
     row = next(r for r in results if r["region"] == "Mbeya")
     assert row["avg_rainfall_mm"] is None
     assert row["climate_data_quality"] is None
+
+
+# ---------------------------------------------------------------------------
+# Hazard Exposure - derived from real ClimateRecord.hazard_type, NOT a
+# self-reported field (the official BOT template has none - see
+# analytics_service.get_hazard_exposure's docstring).
+# ---------------------------------------------------------------------------
+from app.services.analytics_service import get_hazard_exposure
+
+
+def test_hazard_exposure_derives_from_real_climate_record_not_self_report(client, db_session):
+    inst = make_institution(db_session)
+    _seed_submission_for(db_session, inst)  # region=Dodoma, reporting_period=2026-Q1
+
+    rec = ClimateRecord(region="Dodoma", year=2026, month=2, hazard_type="Drought",
+                         reporting_period="2026-Q1", quality_flag="VALIDATED")
+    db_session.add(rec)
+    db_session.commit()
+
+    results = get_hazard_exposure(db_session)
+    row = next(r for r in results if r["region"] == "Dodoma")
+    assert row["hazard_type"] == "Drought"
+
+
+def test_hazard_exposure_is_none_when_no_climate_data_exists(client, db_session):
+    """A region with real loan exposure but zero climate data must show hazard 'None' - never guessed."""
+    inst = make_institution(db_session)
+    _seed_submission_for(db_session, inst, region="Mbeya")
+
+    results = get_hazard_exposure(db_session)
+    row = next(r for r in results if r["region"] == "Mbeya")
+    assert row["hazard_type"] == "None"
+
+
+def test_hazard_exposure_ignores_flagged_climate_records(client, db_session):
+    inst = make_institution(db_session)
+    _seed_submission_for(db_session, inst)
+
+    db_session.add(ClimateRecord(region="Dodoma", year=2026, month=2, hazard_type="Flood",
+                                  reporting_period="2026-Q1", quality_flag="FLAGGED"))
+    db_session.commit()
+
+    results = get_hazard_exposure(db_session)
+    row = next(r for r in results if r["region"] == "Dodoma")
+    assert row["hazard_type"] == "None"  # the only hazard reading is FLAGGED, so it must not count

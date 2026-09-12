@@ -108,20 +108,58 @@ class ValidationErrorOut(BaseModel):
 
 class SubmissionRecordOut(BaseModel):
     """
-    A single submitted row (e.g. one loan), so an institution can review the
-    actual data it sent - not just the validation error list.
+    A single submitted row (one loan), so an institution can review the
+    actual data it sent - not just the validation error list. Mirrors
+    SubmissionRecord's full 38-field structure (BOT's official template).
     """
     model_config = ConfigDict(from_attributes=True)
     row_number: int
+    is_valid: bool
+
+    customer_id: Optional[str] = None
+    branch_code: Optional[str] = None
+    branch_name: Optional[str] = None
+    client_type: Optional[str] = None
+    business_size: Optional[str] = None
+    annual_turnover_tzs: Optional[float] = None
+
     loan_id: Optional[str] = None
-    borrower_name: Optional[str] = None
+    disbursement_date: Optional[str] = None
+    maturity_date: Optional[str] = None
+    currency: Optional[str] = None
     loan_amount_tzs: Optional[float] = None
-    collateral_type: Optional[str] = None
-    collateral_value_tzs: Optional[float] = None
+    outstanding_principal_tzs: Optional[float] = None
+    annual_interest_rate: Optional[float] = None
+    loan_type: Optional[str] = None
+    loan_economic_activity: Optional[str] = None
+    loan_purpose: Optional[str] = None
+    asset_classification: Optional[str] = None
+
     region: Optional[str] = None
     district: Optional[str] = None
+    ward: Optional[str] = None
+    village: Optional[str] = None
+    loan_latitude: Optional[float] = None
+    loan_longitude: Optional[float] = None
+
+    collateral_type: Optional[str] = None
+    collateral_pledged_date: Optional[str] = None
+    collateral_value_tzs: Optional[float] = None
+    collateral_forced_sale_value_tzs: Optional[float] = None
+    collateral_economic_activity: Optional[str] = None
+    collateral_region: Optional[str] = None
+    collateral_district: Optional[str] = None
+    collateral_ward: Optional[str] = None
+    collateral_village: Optional[str] = None
+    collateral_latitude: Optional[float] = None
+    collateral_longitude: Optional[float] = None
+
+    insurance_coverage: Optional[str] = None
+    insurance_policy_type: Optional[str] = None
+    insurance_provider_name: Optional[str] = None
+    insurance_value_protected_tzs: Optional[float] = None
+
     climate_hazard_exposure: Optional[str] = None
-    is_valid: bool
 
 
 class SubmissionOut(BaseModel):

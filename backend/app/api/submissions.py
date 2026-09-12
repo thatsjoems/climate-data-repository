@@ -12,6 +12,7 @@ WORKFLOW / VERSIONING RULES (see docs/SUBMISSION_LIFECYCLE.md for full detail):
 - A reviewer can never approve/reject their own upload (maker-checker).
 """
 import os
+import re
 import uuid
 from datetime import datetime
 
@@ -27,6 +28,7 @@ from app.models.models import (
 )
 from app.schemas.schemas import SubmissionOut, SubmissionDetailOut, ReviewRequest
 from app.services.validation_service import validate_excel_file
+from app.services.template_generator import FIELD_NAMES
 from app.services.audit_service import record_audit
 from app.services.notification_service import notify_roles, notify_user
 
@@ -50,6 +52,13 @@ def upload_submission(
 ):
     if not current_user.institution_id:
         raise HTTPException(status_code=400, detail="This user is not linked to any institution")
+
+    # Defense-in-depth (Module: reporting period as dropdown): the frontend now
+    # offers this as a dropdown, but the API itself must never trust that -
+    # anyone calling it directly (a script, a test, a future client) could
+    # send anything.
+    if not re.match(r"^\d{4}-Q[1-4]$", reporting_period.strip()):
+        raise HTTPException(status_code=400, detail=f"Invalid reporting period format '{reporting_period}' - expected YYYY-Qn, e.g. 2026-Q3")
 
     file_bytes = file.file.read()
 
@@ -149,15 +158,8 @@ def upload_submission(
         db.add(SubmissionRecord(
             submission_id=submission.id,
             row_number=r["row_number"],
-            loan_id=r.get("loan_id"),
-            borrower_name=r.get("borrower_name"),
-            loan_amount_tzs=r.get("loan_amount_tzs"),
-            collateral_type=r.get("collateral_type"),
-            collateral_value_tzs=r.get("collateral_value_tzs"),
-            region=r.get("region"),
-            district=r.get("district"),
-            climate_hazard_exposure=r.get("climate_hazard_exposure"),
             is_valid=r.get("is_valid", False),
+            **{f: r.get(f) for f in FIELD_NAMES},
         ))
 
     for issue in issues:

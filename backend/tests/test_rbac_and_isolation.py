@@ -47,7 +47,7 @@ def test_bot_user_cannot_view_password_reset_requests(client, db_session):
     assert res.status_code == 403
 
 
-def _seed_submission_for(db_session, institution, region="Dodoma", district="Chamwino District", amount=1_000_000.0):
+def _seed_submission_for(db_session, institution, region="Dodoma", district="Chamwino", amount=1_000_000.0):
     submitter = make_user(db_session, role=RoleEnum.INSTITUTION_USER, institution=institution,
                            username=f"submitter_{institution.code}")
     submission = Submission(
@@ -174,9 +174,8 @@ def test_institution_id_in_request_body_is_ignored_for_uploads(client, db_sessio
     # confirm the resulting submission is still correctly attributed to inst_a.
     from tests.test_upload_and_workflow import build_test_excel  # local import to avoid cycle at collection time
     file_bytes = build_test_excel([{
-        "loan_id": "LN-1", "borrower_name": "B", "loan_amount_tzs": 100, "collateral_type": "Land",
-        "collateral_value_tzs": 100, "region": "Dodoma", "district": "Chamwino District",
-        "reporting_period": "2026-Q1", "climate_hazard_exposure": "None",
+        "customer_id": "CUST-1", "loan_id": "LN-1", "loan_amount_tzs": 100, "collateral_type": "Cash",
+        "collateral_value_tzs": 100, "region": "Dodoma", "district": "Chamwino",
     }], reporting_period="2026-Q1")
 
     res = client.post(
@@ -223,7 +222,7 @@ def test_system_admin_cannot_generate_summary_report(client, db_session):
 def test_region_map_points_uses_real_data_and_known_coordinates(client, db_session):
     """Map points must come from real submitted exposure, attached to real region coordinates."""
     inst = make_institution(db_session)
-    _seed_submission_for(db_session, inst, region="Dodoma", district="Chamwino District", amount=2_000_000.0)
+    _seed_submission_for(db_session, inst, region="Dodoma", district="Chamwino", amount=2_000_000.0)
 
     make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
     token = login(client, "analyst1").json()["access_token"]

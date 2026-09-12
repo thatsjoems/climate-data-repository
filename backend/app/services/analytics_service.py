@@ -68,8 +68,8 @@ def get_kpi_summary(db: Session, institution_id: str | None = None) -> dict:
         func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0)
     ).scalar()
     total_borrowers = records_query.filter(
-        SubmissionRecord.borrower_name.isnot(None), SubmissionRecord.borrower_name != ""
-    ).with_entities(func.count(func.distinct(SubmissionRecord.borrower_name))).scalar()
+        SubmissionRecord.customer_id.isnot(None), SubmissionRecord.customer_id != ""
+    ).with_entities(func.count(func.distinct(SubmissionRecord.customer_id))).scalar()
 
     return {
         "total_institutions": total_institutions,
@@ -111,29 +111,64 @@ def get_climate_trends(db: Session, region: str | None = None) -> list[dict]:
 
 def get_hazard_exposure(db: Session, institution_id: str | None = None) -> list[dict]:
     """
-    Shows how much loan value sits in areas with reported climate hazard exposure.
-    Scoped to a single institution's own data when institution_id is given.
+    Shows how much loan value sits in areas with a REAL recorded climate
+    hazard - derived from actual TMA/PMO-sourced ClimateRecord entries for
+    the matching region and reporting period, exactly like Combined
+    Climate-Financial Exposure does it (see that function's docstring for
+    the full reasoning: FLAGGED readings excluded, reporting_period matched
+    directly with a legacy year/month fallback).
+
+    This does NOT read a self-reported hazard field from the institution's
+    own submission - BOT's official template has no such column (hazard
+    exposure is meant to come from TMA/PMO data, not institutions
+    self-declaring their own risk). A region/period with no climate data at
+    all correctly shows hazard "None" here - never guessed.
     """
-    results = (
+    combos = (
         _active_records_query(db, institution_id)
         .with_entities(
             SubmissionRecord.region,
-            SubmissionRecord.climate_hazard_exposure,
-            func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0).label("exposed_amount"),
+            Submission.reporting_period,
+            func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0).label("total_loan"),
             func.count(SubmissionRecord.id).label("record_count"),
         )
-        .group_by(SubmissionRecord.region, SubmissionRecord.climate_hazard_exposure)
+        .group_by(SubmissionRecord.region, Submission.reporting_period)
         .all()
     )
-    return [
-        {
-            "region": r.region,
-            "hazard_type": r.climate_hazard_exposure,
-            "exposed_loan_amount_tzs": float(r.exposed_amount or 0.0),
-            "record_count": r.record_count,
-        }
-        for r in results
-    ]
+
+    # Aggregate loan exposure by (region, dominant hazard for that region+period)
+    aggregated: dict[tuple[str, str], dict] = {}
+    for combo in combos:
+        dominant_hazard = "None"
+        parsed = _quarter_to_months(combo.reporting_period)
+        filters = [ClimateRecord.region == combo.region, ClimateRecord.quality_flag != "FLAGGED"]
+        period_filter = ClimateRecord.reporting_period == combo.reporting_period
+        if parsed:
+            year, months = parsed
+            legacy_filter = (
+                (ClimateRecord.reporting_period.is_(None))
+                & (ClimateRecord.year == year)
+                & (ClimateRecord.month.in_(months))
+            )
+            filters.append(period_filter | legacy_filter)
+        else:
+            filters.append(period_filter)
+
+        climate_rows = db.query(ClimateRecord).filter(*filters).all()
+        hazard_counts: dict[str, int] = {}
+        for c in climate_rows:
+            if c.hazard_type and c.hazard_type != "None":
+                hazard_counts[c.hazard_type] = hazard_counts.get(c.hazard_type, 0) + 1
+        if hazard_counts:
+            dominant_hazard = max(hazard_counts, key=hazard_counts.get)
+
+        key = (combo.region, dominant_hazard)
+        if key not in aggregated:
+            aggregated[key] = {"region": combo.region, "hazard_type": dominant_hazard, "exposed_loan_amount_tzs": 0.0, "record_count": 0}
+        aggregated[key]["exposed_loan_amount_tzs"] += float(combo.total_loan or 0.0)
+        aggregated[key]["record_count"] += combo.record_count
+
+    return list(aggregated.values())
 
 
 def get_region_map_points(db: Session, institution_id: str | None = None) -> list[dict]:
@@ -335,6 +370,12 @@ def get_combined_climate_financial_exposure(db: Session, institution_id: str | N
             flags_present = sorted({c.quality_flag or "UNVALIDATED" for c in climate_rows})
             if flags_present == ["VALIDATED"]:
                 climate_data_quality = "VALIDATED"
+            elif len(flags_present) == 1:
+                # A single uniform quality that isn't VALIDATED (e.g. every
+                # contributing reading is UNVALIDATED, or every one is
+                # SYNTHETIC) - "MIXED" would be misleading here since nothing
+                # is actually blended together.
+                climate_data_quality = flags_present[0]
             else:
                 climate_data_quality = "MIXED (" + ", ".join(flags_present) + ")"
 

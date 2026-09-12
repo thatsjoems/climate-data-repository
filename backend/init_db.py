@@ -101,6 +101,38 @@ try:
                     ))
 
         db.commit()
+
+        # ---- Extra demo records covering ALL FOUR quality_flag states ----
+        # The main loop above only ever produces "SYNTHETIC" (and the ingestion
+        # pipeline only ever produces "UNVALIDATED" - see
+        # climate_ingestion_service.py's own reasoning for why it never
+        # self-assigns "VALIDATED"). Without this, "VALIDATED" and "FLAGGED"
+        # would never appear anywhere in a fresh demo environment, even though
+        # the UI (Climate Data Quality, Combined Exposure's quality column)
+        # is built to show all four. These are still unmistakably demo data
+        # (dataset_name/source unchanged) - only the quality_flag itself
+        # simulates what each workflow state would look like once a real
+        # human QC step (not yet built - see docs) exists to assign it.
+        demo_period_year, demo_period_month, demo_quarter = 2026, 8, 3
+        db.add_all([
+            ClimateRecord(
+                region="Dodoma", district=None, year=demo_period_year, month=demo_period_month,
+                rainfall_mm=88.4, avg_temperature_c=27.1, hazard_type="Drought", hazard_severity="MEDIUM",
+                source="SYNTHETIC_SAMPLE", reporting_period=f"{demo_period_year}-Q{demo_quarter}",
+                period_type="MONTHLY", dataset_name="CDR Synthetic Demo Dataset", dataset_version="v1",
+                quality_flag="VALIDATED", processing_method="SYNTHETIC_SEED_QC_DEMO",
+                ingestion_timestamp=seed_run_time,
+            ),
+            ClimateRecord(
+                region="Mwanza", district=None, year=demo_period_year, month=demo_period_month,
+                rainfall_mm=9999.0, avg_temperature_c=27.5, hazard_type="Flood", hazard_severity="HIGH",
+                source="SYNTHETIC_SAMPLE", reporting_period=f"{demo_period_year}-Q{demo_quarter}",
+                period_type="MONTHLY", dataset_name="CDR Synthetic Demo Dataset", dataset_version="v1",
+                quality_flag="FLAGGED", processing_method="SYNTHETIC_SEED_QC_DEMO",
+                ingestion_timestamp=seed_run_time,
+            ),
+        ])
+        db.commit()
         print("Seed data loaded successfully.")
         print("")
         print("========== DEMO LOGIN CREDENTIALS ==========")

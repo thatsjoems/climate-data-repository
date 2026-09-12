@@ -24,13 +24,14 @@ interface ValidationErrorItem {
 
 interface SubmissionRecordItem {
   row_number: number
+  customer_id: string | null
   loan_id: string | null
-  borrower_name: string | null
   loan_amount_tzs: number | null
   collateral_type: string | null
   collateral_value_tzs: number | null
   region: string | null
   district: string | null
+  ward: string | null
   climate_hazard_exposure: string | null
   is_valid: boolean
 }
@@ -43,6 +44,22 @@ const STATUS_LABELS: Record<string, string> = {
   REJECTED: 'Rejected',
   SUPERSEDED: 'Superseded',
 }
+
+// Reporting Period as a dropdown (Module: prevent free-text format errors like
+// "Q3-2026" or "2026 Q3") - computed from today's date so this never goes
+// stale: 2 years back through 1 year ahead, quarterly, most recent first.
+function buildReportingPeriodOptions(): string[] {
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const options: string[] = []
+  for (let year = currentYear + 1; year >= currentYear - 2; year--) {
+    for (let q = 4; q >= 1; q--) {
+      options.push(`${year}-Q${q}`)
+    }
+  }
+  return options
+}
+const REPORTING_PERIOD_OPTIONS = buildReportingPeriodOptions()
 
 function scrollTo(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -192,13 +209,16 @@ export default function InstitutionPortal() {
           <h3>Upload Data</h3>
           <p>Upload your completed template file for automated validation.</p>
           <form onSubmit={handleUpload} className="upload-form" style={{ maxWidth: 'none' }}>
-            <label>Reporting Period (e.g. 2026-Q3)</label>
-            <input
-              type="text"
+            <label>Reporting Period</label>
+            <select
               value={reportingPeriod}
               onChange={(e) => setReportingPeriod(e.target.value)}
-              placeholder="2026-Q3"
-            />
+            >
+              <option value="">-- Select reporting period --</option>
+              {REPORTING_PERIOD_OPTIONS.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
             <label>Completed Excel file</label>
             <input
               type="file"
@@ -262,20 +282,22 @@ export default function InstitutionPortal() {
             <table>
               <thead>
                 <tr>
-                  <th>Row</th><th>Loan ID</th><th>Borrower</th><th>Loan Amount</th>
-                  <th>Collateral</th><th>Region</th><th>District</th><th>Hazard</th><th>Valid?</th>
+                  <th>Row</th><th>Customer ID</th><th>Loan ID</th><th>Loan Amount</th>
+                  <th>Collateral Type</th><th>Collateral Value</th><th>Region</th><th>District</th><th>Ward</th><th>Hazard</th><th>Valid?</th>
                 </tr>
               </thead>
               <tbody>
                 {selected.records.map((r) => (
                   <tr key={r.row_number}>
                     <td>{r.row_number}</td>
+                    <td>{r.customer_id ?? '-'}</td>
                     <td>{r.loan_id ?? '-'}</td>
-                    <td>{r.borrower_name ?? '-'}</td>
                     <td>{r.loan_amount_tzs?.toLocaleString() ?? '-'}</td>
+                    <td>{r.collateral_type ?? '-'}</td>
                     <td>{r.collateral_value_tzs?.toLocaleString() ?? '-'}</td>
                     <td>{r.region ?? '-'}</td>
                     <td>{r.district ?? '-'}</td>
+                    <td>{r.ward ?? '-'}</td>
                     <td>{r.climate_hazard_exposure ?? '-'}</td>
                     <td>{r.is_valid ? '✅' : '❌'}</td>
                   </tr>
