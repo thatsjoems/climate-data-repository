@@ -138,6 +138,11 @@ export default function InternalPortal() {
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [hazardExposure, setHazardExposure] = useState<HazardExposure[]>([])
   const [combinedExposure, setCombinedExposure] = useState<CombinedExposure[]>([])
+  const [validatedOnly, setValidatedOnly] = useState(false)
+  const [institutions, setInstitutions] = useState<{ id: string; name: string }[]>([])
+  const [filterInstitutionId, setFilterInstitutionId] = useState('')
+  const [filterRegion, setFilterRegion] = useState('')
+  const [filterReportingPeriod, setFilterReportingPeriod] = useState('')
   const [mapPoints, setMapPoints] = useState<RegionMapPoint[]>([])
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [notesById, setNotesById] = useState<Record<string, string>>({})
@@ -207,21 +212,59 @@ export default function InternalPortal() {
     }
   }
 
+  function buildFilterQuery(extra: Record<string, string | boolean> = {}) {
+    const params = new URLSearchParams()
+    if (filterInstitutionId) params.set('filter_institution_id', filterInstitutionId)
+    if (filterRegion) params.set('filter_region', filterRegion)
+    if (filterReportingPeriod) params.set('filter_reporting_period', filterReportingPeriod)
+    for (const [k, v] of Object.entries(extra)) params.set(k, String(v))
+    return params.toString()
+  }
+
   async function loadAll() {
-    const [kpiRes, subsRes, hazardRes, combinedRes, advisoryRes, mapRes] = await Promise.all([
-      apiClient.get('/analytics/kpi-summary'),
+    const [instRes, kpiRes, subsRes, hazardRes, combinedRes, advisoryRes, mapRes] = await Promise.all([
+      apiClient.get('/institutions'),
+      apiClient.get(`/analytics/kpi-summary?${buildFilterQuery()}`),
       apiClient.get('/submissions'),
-      apiClient.get('/analytics/hazard-exposure'),
-      apiClient.get('/analytics/combined-climate-financial-exposure'),
+      apiClient.get(`/analytics/hazard-exposure?${buildFilterQuery({ validated_only: validatedOnly })}`),
+      apiClient.get(`/analytics/combined-climate-financial-exposure?${buildFilterQuery({ validated_only: validatedOnly })}`),
       apiClient.get('/risk-advisories'),
       apiClient.get('/analytics/map-points'),
     ])
+    setInstitutions(instRes.data)
     setKpi(kpiRes.data)
     setSubmissions(subsRes.data)
     setHazardExposure(hazardRes.data)
     setCombinedExposure(combinedRes.data)
     setRiskAdvisories(advisoryRes.data)
     setMapPoints(mapRes.data)
+  }
+
+  async function reloadClimateExposureViews(nextValidatedOnly: boolean) {
+    const [hazardRes, combinedRes] = await Promise.all([
+      apiClient.get(`/analytics/hazard-exposure?${buildFilterQuery({ validated_only: nextValidatedOnly })}`),
+      apiClient.get(`/analytics/combined-climate-financial-exposure?${buildFilterQuery({ validated_only: nextValidatedOnly })}`),
+    ])
+    setHazardExposure(hazardRes.data)
+    setCombinedExposure(combinedRes.data)
+  }
+
+  async function applyDashboardFilters() {
+    const [kpiRes, hazardRes, combinedRes] = await Promise.all([
+      apiClient.get(`/analytics/kpi-summary?${buildFilterQuery()}`),
+      apiClient.get(`/analytics/hazard-exposure?${buildFilterQuery({ validated_only: validatedOnly })}`),
+      apiClient.get(`/analytics/combined-climate-financial-exposure?${buildFilterQuery({ validated_only: validatedOnly })}`),
+    ])
+    setKpi(kpiRes.data)
+    setHazardExposure(hazardRes.data)
+    setCombinedExposure(combinedRes.data)
+  }
+
+  function resetDashboardFilters() {
+    setFilterInstitutionId(''); setFilterRegion(''); setFilterReportingPeriod('')
+    apiClient.get('/analytics/kpi-summary').then((r) => setKpi(r.data))
+    apiClient.get(`/analytics/hazard-exposure?validated_only=${validatedOnly}`).then((r) => setHazardExposure(r.data))
+    apiClient.get(`/analytics/combined-climate-financial-exposure?validated_only=${validatedOnly}`).then((r) => setCombinedExposure(r.data))
   }
 
   async function handleCreateAdvisory(e: FormEvent) {
@@ -376,6 +419,40 @@ export default function InternalPortal() {
         {reportMessage && <div className="alert-info">{reportMessage}</div>}
       </section>
 
+      <section className="card" id="dashboard-filters">
+        <h2>🔍 Dashboard Filters</h2>
+        <p className="note">
+          Narrow the KPI cards, Hazard Exposure, and Combined Exposure below by institution,
+          region, and/or reporting period. Filters only ever narrow the sector-wide view - they
+          never widen access.
+        </p>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', marginBottom: '0.2rem' }}>Institution</label>
+            <select value={filterInstitutionId} onChange={(e) => setFilterInstitutionId(e.target.value)}>
+              <option value="">All institutions</option>
+              {institutions.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', marginBottom: '0.2rem' }}>Region</label>
+            <select value={filterRegion} onChange={(e) => setFilterRegion(e.target.value)}>
+              <option value="">All regions</option>
+              {[...new Set(combinedExposure.map((c) => c.region))].sort().map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', marginBottom: '0.2rem' }}>Reporting Period</label>
+            <select value={filterReportingPeriod} onChange={(e) => setFilterReportingPeriod(e.target.value)}>
+              <option value="">All periods</option>
+              {[...new Set([...combinedExposure.map((c) => c.reporting_period), ...submissions.map((s) => s.reporting_period)])].sort().reverse().map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <button className="btn-accent" onClick={applyDashboardFilters}>Apply Filters</button>
+          <button onClick={resetDashboardFilters}>Reset</button>
+        </div>
+      </section>
+
       {kpi && (
         <section className="kpi-grid-v2" id="kpi-section">
           <div className="kpi-card-v2">
@@ -431,6 +508,15 @@ export default function InternalPortal() {
       <section className="card" id="hazard-section">
         <h2>🌦️ Climate Hazard Exposure Distribution</h2>
         <p className="note">Share of valid loan exposure associated with each reported climate hazard.</p>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', marginBottom: '0.75rem' }}>
+          <input
+            type="checkbox"
+            checked={validatedOnly}
+            onChange={(e) => { setValidatedOnly(e.target.checked); reloadClimateExposureViews(e.target.checked) }}
+          />
+          Show VALIDATED climate readings only (affects this chart and Combined Exposure below — for
+          official/supervisory use; leave unchecked to include SYNTHETIC/UNVALIDATED demo data too)
+        </label>
         <PieChart segments={hazardSegments.length ? hazardSegments : [{ label: 'No data yet', value: 1, color: '#EDEBE3' }]} />
       </section>
 
@@ -678,7 +764,7 @@ export default function InternalPortal() {
                               {' '}{snapshot.latest_climate_reading.rainfall_mm} mm rainfall,
                               {' '}{snapshot.latest_climate_reading.avg_temperature_c}°C,
                               {' '}hazard: {snapshot.latest_climate_reading.hazard_type || 'None'}
-                              {' '}({snapshot.latest_climate_reading.source})
+                              {' '}({snapshot.latest_climate_reading.source} · {snapshot.latest_climate_reading.quality_flag || 'UNVALIDATED'})
                             </>
                           )}
                         </div>

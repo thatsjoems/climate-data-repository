@@ -12,8 +12,8 @@ Source: "Concept Note on the Proposed Enhancement of the Climate Data Repository
 | 6 | Automated data validation and error feedback | **IMPLEMENTED** | `validation_service.py` + `ValidationError` model |
 | 7 | Submission history / tracking | **IMPLEMENTED** | `GET /api/submissions` (institution-level data isolation) |
 | 8 | BOT dashboard with overview of submissions, loans, collateral, climate data | **IMPLEMENTED** | `InternalPortal.tsx` + `/api/analytics/kpi-summary` |
-| 9 | Advanced filtering (institution, period, geography, hazard) | **PARTIAL (MVP)** | Status filter implemented; full geography/period filtering is **Should-Have** for the next phase |
-| 10 | Dashboard Export (PDF, Excel, CSV, image) | **IMPLEMENTED** | BOT_USER: `GET /api/reports/summary.pdf`, `/summary.xlsx` (multi-sheet), `/combined-exposure.csv`. INSTITUTION_USER: `GET /api/submissions/export.csv` (own submission history, isolated). SYSTEM_ADMIN: `GET /api/audit-logs/export.csv` (honors the same filters as the on-screen list). Image export was judged unnecessary once PDF/Excel/CSV cover every practical use case |
+| 9 | Advanced filtering (institution, period, geography, hazard) | **IMPLEMENTED** | Dashboard Filters panel (`InternalPortal.tsx`) lets a BOT Analyst narrow KPI Summary, Hazard Exposure, and Combined Climate-Financial Exposure by institution, region, and reporting period simultaneously (`filter_institution_id`/`filter_region`/`filter_reporting_period` query params, added to `analytics_service.py`'s `_active_records_query()` and threaded through all three endpoints). Filters only ever narrow an already tenant-scoped view - they cannot widen access |
+| 10 | Dashboard Export (PDF, Excel, CSV, image) | **PARTIALLY IMPLEMENTED (no image export)** | BOT_USER: `GET /api/reports/summary.pdf`, `/summary.xlsx` (multi-sheet), `/combined-exposure.csv`. INSTITUTION_USER: `GET /api/submissions/export.csv` (own submission history, isolated). SYSTEM_ADMIN: `GET /api/audit-logs/export.csv` (honors the same filters as the on-screen list). Image export (a static picture of a chart) was deliberately not built - PDF/Excel/CSV cover every practical reporting use case identified so far, and this is stated honestly here as an open item rather than claimed complete, since the ICN's own wording names "image" explicitly |
 | 11 | Password recovery workflow | **IMPLEMENTED** | Public "Forgot Password" page (`ForgotPassword.tsx` → `POST /api/password-reset-requests`) creates a reset request without revealing whether the account exists; a SYSTEM_ADMIN reviews and approves/rejects it, generating a new temporary password shared out-of-band |
 | 12 | Integration with RTIS, BSIS, QGIS, ArcGIS | **NOT YET IMPLEMENTED - Out of scope (Future/Mock)** | No real credentials/API access were provided. Backend design (modular API routers) is "integration-ready" but no real adapter has been built. **Note:** the Geospatial Overview map itself was built independently of these systems — see item 12b and `docs/GEOSPATIAL_MAP.md` |
 | 12b | Geospatial visualization of climate/financial exposure | **IMPLEMENTED (region-level)** | `GET /api/analytics/map-points` + `HazardMap.tsx` render an interactive map (Leaflet + OpenStreetMap - free, self-hosted, no external GIS dependency) plotting real hazard-exposure figures at real region-centroid coordinates. Deliberately self-sufficient per explicit direction: the system should operate on institution-submitted + own climate data alone, not depend on an external map service. Precise per-loan coordinates await BOT's forthcoming data template (see `docs/GEOSPATIAL_MAP.md`) |
@@ -69,8 +69,8 @@ branding — extracted directly from the ICN document's own mockup images
 (logo, dark/gold color scheme) — rather than a generic placeholder theme.
 
 
-- The entire **MUST HAVE** workflow (login \u2192 template \u2192 upload \u2192 validation \u2192 storage \u2192 internal review \u2192 dashboard) has been **built and fully functional**.
-- **SHOULD HAVE** items (export, advanced filters, password recovery) - the underlying foundation exists (APIs already return correct data), but the additional UI/endpoints have not yet been added.
+- The entire **MUST HAVE** workflow (login → template → upload → validation → storage → internal review → dashboard) has been **built and fully functional**.
+- **SHOULD HAVE** items (export, advanced filters, password recovery) are now **all implemented** - see items 9, 10, and 11 above. The one exception is image export specifically (item 10), left as an open, honestly-stated gap.
 - **FUTURE WORK** (live RTIS/BSIS/QGIS/ArcGIS integration, real TMA/PMO data) - not possible without real access/credentials from BOT - these are clearly documented as gaps, not hidden.
 
 ## Data-integrity fix (after external review): Combined Climate-Financial Exposure honesty
@@ -147,3 +147,34 @@ Climate-Financial Exposure already does), so the institution-self-reported
 exposure from the region-based climate join instead of a self-reported
 column - not done in this pass, flagged here rather than left silently
 broken.
+
+## Second external review — fixes applied
+
+A second external review correctly identified three further issues, verified against actual code before fixing:
+
+1. **Risk Advisory snapshot bug**: `get_exposure_snapshot()` could surface a
+   FLAGGED (analyst-rejected) reading as the "latest climate reading" in an
+   advisory note, and its `hazard_type` filter used the dead self-reported
+   `climate_hazard_exposure` field (never populated since the official
+   template has no such column). Both fixed: FLAGGED is now excluded
+   everywhere a climate figure is presented, and hazard filtering resolves
+   via real `ClimateRecord.hazard_type` matches, consistent with Hazard
+   Exposure and Combined Exposure.
+2. **VALIDATED-only toggle**: Hazard Exposure and Combined Exposure now
+   accept a `validated_only` flag (UI checkbox in `InternalPortal.tsx`) so
+   an analyst can switch between an exploratory view (everything except
+   FLAGGED - useful while most data is still SYNTHETIC/UNVALIDATED) and a
+   strict official view (VALIDATED readings only). This was a deliberate
+   design choice over hard-coding VALIDATED-only everywhere: doing so today
+   would leave these views empty, since almost nothing has been through a
+   real human QC step yet.
+3. **Advanced filtering** (item 9 above) was completed in direct response
+   to this review.
+
+**Deliberately not built**: a manual "Validate/Flag" QC UI for individual
+climate readings. This was considered and explicitly deferred - the ICN
+does not require a human-driven promotion workflow for climate readings;
+it is infrastructure specific to the interim manual bridge (see
+`docs/TMA_INGESTION.md`), which is itself temporary by design. Effort was
+directed at Advanced Filtering instead, which the ICN's own wording
+requires and which does not depend on BOT-provided access.

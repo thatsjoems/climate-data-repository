@@ -31,10 +31,16 @@ def _scope_for(current_user: User) -> str | None:
 
 @router.get("/kpi-summary", response_model=KPISummary)
 def kpi_summary(
+    filter_institution_id: str | None = Query(default=None, description="Advanced filter: narrow to one institution (BOT view only)"),
+    filter_region: str | None = Query(default=None, description="Advanced filter: narrow to one region"),
+    filter_reporting_period: str | None = Query(default=None, description="Advanced filter: narrow to one reporting period"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
 ):
-    return analytics_service.get_kpi_summary(db, institution_id=_scope_for(current_user))
+    return analytics_service.get_kpi_summary(
+        db, institution_id=_scope_for(current_user), filter_institution_id=filter_institution_id,
+        filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+    )
 
 
 @router.get("/climate-trends", response_model=list[ClimateTrendPoint])
@@ -49,14 +55,26 @@ def climate_trends(
 
 @router.get("/hazard-exposure", response_model=list[HazardExposurePoint])
 def hazard_exposure(
+    validated_only: bool = Query(default=False, description="Restrict to fully human-reviewed climate readings only"),
+    filter_institution_id: str | None = Query(default=None),
+    filter_region: str | None = Query(default=None),
+    filter_reporting_period: str | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
 ):
-    return analytics_service.get_hazard_exposure(db, institution_id=_scope_for(current_user))
+    return analytics_service.get_hazard_exposure(
+        db, institution_id=_scope_for(current_user), validated_only=validated_only,
+        filter_institution_id=filter_institution_id, filter_region=filter_region,
+        filter_reporting_period=filter_reporting_period,
+    )
 
 
 @router.get("/combined-climate-financial-exposure", response_model=list[CombinedExposurePoint])
 def combined_climate_financial_exposure(
+    validated_only: bool = Query(default=False, description="Restrict to fully human-reviewed climate readings only"),
+    filter_institution_id: str | None = Query(default=None),
+    filter_region: str | None = Query(default=None),
+    filter_reporting_period: str | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
 ):
@@ -65,7 +83,11 @@ def combined_climate_financial_exposure(
     combined with real financial exposure (loans/collateral) for the same
     region and reporting period - see analytics_service docstring for method.
     """
-    return analytics_service.get_combined_climate_financial_exposure(db, institution_id=_scope_for(current_user))
+    return analytics_service.get_combined_climate_financial_exposure(
+        db, institution_id=_scope_for(current_user), validated_only=validated_only,
+        filter_institution_id=filter_institution_id, filter_region=filter_region,
+        filter_reporting_period=filter_reporting_period,
+    )
 
 
 @router.get("/map-points", response_model=list[RegionMapPoint])

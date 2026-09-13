@@ -75,6 +75,75 @@ def test_single_uniform_unvalidated_quality_is_not_labelled_mixed(client, db_ses
     assert row["climate_data_quality"] == "UNVALIDATED"
 
 
+# ---------------------------------------------------------------------------
+# Risk Advisory exposure snapshot - found via external review: FLAGGED
+# readings could leak into "latest climate reading", and hazard_type
+# filtering used a self-reported field the official template no longer
+# populates. Both fixed in get_exposure_snapshot().
+# ---------------------------------------------------------------------------
+from app.services.analytics_service import get_exposure_snapshot
+
+
+def test_exposure_snapshot_excludes_flagged_as_latest_reading(client, db_session):
+    inst = make_institution(db_session)
+    _seed_submission_for(db_session, inst)
+
+    db_session.add(ClimateRecord(region="Dodoma", year=2026, month=3, rainfall_mm=9999.0,
+                                  quality_flag="FLAGGED", reporting_period="2026-Q1"))
+    db_session.add(ClimateRecord(region="Dodoma", year=2026, month=1, rainfall_mm=55.0,
+                                  quality_flag="VALIDATED", reporting_period="2026-Q1"))
+    db_session.commit()
+
+    snapshot = get_exposure_snapshot(db_session, region="Dodoma")
+    # The FLAGGED reading is chronologically more recent (month 3) but must
+    # never surface - the VALIDATED one (month 1) should be returned instead.
+    assert snapshot["latest_climate_reading"]["rainfall_mm"] == 55.0
+    assert snapshot["latest_climate_reading"]["quality_flag"] == "VALIDATED"
+
+
+def test_exposure_snapshot_hazard_filter_uses_real_climate_data(client, db_session):
+    """hazard_type filtering must resolve via real ClimateRecord.hazard_type, not the dead self-reported field."""
+    inst = make_institution(db_session)
+    _seed_submission_for(db_session, inst, region="Dodoma", amount=1_000_000.0)
+    _seed_submission_for(db_session, inst, region="Mbeya", amount=2_000_000.0)
+
+    db_session.add(ClimateRecord(region="Dodoma", year=2026, month=2, hazard_type="Drought",
+                                  reporting_period="2026-Q1", quality_flag="VALIDATED"))
+    db_session.commit()
+
+    snapshot = get_exposure_snapshot(db_session, hazard_type="Drought")
+    # Only Dodoma has a Drought reading - Mbeya's exposure must not be included.
+    assert snapshot["total_loan_exposure_tzs"] == 1_000_000.0
+
+
+# ---------------------------------------------------------------------------
+# Advanced filtering (Module: dashboard filters) - found via external review:
+# ICN explicitly asks for analysis "by reporting institution, reporting
+# period, geographical location, climate hazard". These narrow an already
+# tenant-scoped query further - they never widen access.
+# ---------------------------------------------------------------------------
+from app.services.analytics_service import get_kpi_summary
+
+
+def test_kpi_summary_can_be_narrowed_by_region(client, db_session):
+    inst = make_institution(db_session)
+    _seed_submission_for(db_session, inst, region="Dodoma", amount=1_000_000.0)
+    _seed_submission_for(db_session, inst, region="Mbeya", amount=5_000_000.0)
+
+    kpi = get_kpi_summary(db_session, filter_region="Dodoma")
+    assert kpi["total_loan_exposure_tzs"] == 1_000_000.0
+
+
+def test_combined_exposure_can_be_narrowed_by_reporting_period(client, db_session):
+    inst = make_institution(db_session)
+    _seed_submission_for(db_session, inst, region="Dodoma")  # default period 2026-Q1
+
+    results_matching = get_combined_climate_financial_exposure(db_session, filter_reporting_period="2026-Q1")
+    results_other = get_combined_climate_financial_exposure(db_session, filter_reporting_period="2027-Q1")
+    assert any(r["region"] == "Dodoma" for r in results_matching)
+    assert not any(r["region"] == "Dodoma" for r in results_other)
+
+
 def test_reporting_period_is_matched_directly_when_present(client, db_session):
     """
     A record tagged with the WRONG reporting_period but matching year/month

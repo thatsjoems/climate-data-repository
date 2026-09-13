@@ -29,11 +29,23 @@ from app.models.models import (
 EXCLUDED_STATUSES = (SubmissionStatus.REJECTED, SubmissionStatus.SUPERSEDED)
 
 
-def _active_records_query(db: Session, institution_id: str | None = None):
+def _active_records_query(
+    db: Session, institution_id: str | None = None,
+    filter_institution_id: str | None = None, filter_region: str | None = None,
+    filter_reporting_period: str | None = None,
+):
     """
     Base query: valid rows belonging to a non-rejected, non-superseded submission.
     Always joins Submission so institution scoping and status exclusion are
     enforced in exactly one place.
+
+    `institution_id` is the mandatory SECURITY scope (an INSTITUTION_USER's own
+    tenant - enforced by the API layer, never optional for that role).
+    `filter_institution_id`/`filter_region`/`filter_reporting_period` are
+    OPTIONAL analytical narrowing (Module: advanced filtering) - e.g. a BOT
+    Analyst voluntarily narrowing a sector-wide view to one institution/region/
+    period. These never widen access beyond what `institution_id` already
+    allows - they can only narrow further.
     """
     query = (
         db.query(SubmissionRecord)
@@ -43,23 +55,39 @@ def _active_records_query(db: Session, institution_id: str | None = None):
     )
     if institution_id:
         query = query.filter(Submission.institution_id == institution_id)
+    if filter_institution_id:
+        query = query.filter(Submission.institution_id == filter_institution_id)
+    if filter_region:
+        query = query.filter(SubmissionRecord.region == filter_region)
+    if filter_reporting_period:
+        query = query.filter(Submission.reporting_period == filter_reporting_period)
     return query
 
 
-def get_kpi_summary(db: Session, institution_id: str | None = None) -> dict:
-    if institution_id:
+def get_kpi_summary(
+    db: Session, institution_id: str | None = None,
+    filter_institution_id: str | None = None, filter_region: str | None = None,
+    filter_reporting_period: str | None = None,
+) -> dict:
+    effective_institution = institution_id or filter_institution_id
+    if effective_institution:
         total_institutions = 1
-        submission_base = db.query(Submission).filter(Submission.institution_id == institution_id)
+        submission_base = db.query(Submission).filter(Submission.institution_id == effective_institution)
     else:
         total_institutions = db.query(Institution).filter(Institution.is_active == True).count()  # noqa: E712
         submission_base = db.query(Submission)
+    if filter_reporting_period:
+        submission_base = submission_base.filter(Submission.reporting_period == filter_reporting_period)
 
     total_submissions = submission_base.count()
 
     def count_status(status: SubmissionStatus) -> int:
         return submission_base.filter(Submission.status == status).count()
 
-    records_query = _active_records_query(db, institution_id)
+    records_query = _active_records_query(
+        db, institution_id, filter_institution_id=filter_institution_id,
+        filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+    )
 
     total_loan = records_query.with_entities(
         func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0)
@@ -109,7 +137,11 @@ def get_climate_trends(db: Session, region: str | None = None) -> list[dict]:
     ]
 
 
-def get_hazard_exposure(db: Session, institution_id: str | None = None) -> list[dict]:
+def get_hazard_exposure(
+    db: Session, institution_id: str | None = None, validated_only: bool = False,
+    filter_institution_id: str | None = None, filter_region: str | None = None,
+    filter_reporting_period: str | None = None,
+) -> list[dict]:
     """
     Shows how much loan value sits in areas with a REAL recorded climate
     hazard - derived from actual TMA/PMO-sourced ClimateRecord entries for
@@ -123,9 +155,19 @@ def get_hazard_exposure(db: Session, institution_id: str | None = None) -> list[
     exposure is meant to come from TMA/PMO data, not institutions
     self-declaring their own risk). A region/period with no climate data at
     all correctly shows hazard "None" here - never guessed.
+
+    validated_only: when True, only fully human-reviewed (quality_flag=
+    VALIDATED) climate readings count toward the dominant hazard - for a
+    supervisory/official view where SYNTHETIC and UNVALIDATED readings
+    should not influence a hazard classification presented as authoritative.
+    The default (False) includes everything except FLAGGED, which suits
+    exploratory analysis during the period before live TMA data exists.
     """
     combos = (
-        _active_records_query(db, institution_id)
+        _active_records_query(
+            db, institution_id, filter_institution_id=filter_institution_id,
+            filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+        )
         .with_entities(
             SubmissionRecord.region,
             Submission.reporting_period,
@@ -141,7 +183,10 @@ def get_hazard_exposure(db: Session, institution_id: str | None = None) -> list[
     for combo in combos:
         dominant_hazard = "None"
         parsed = _quarter_to_months(combo.reporting_period)
-        filters = [ClimateRecord.region == combo.region, ClimateRecord.quality_flag != "FLAGGED"]
+        if validated_only:
+            filters = [ClimateRecord.region == combo.region, ClimateRecord.quality_flag == "VALIDATED"]
+        else:
+            filters = [ClimateRecord.region == combo.region, ClimateRecord.quality_flag != "FLAGGED"]
         period_filter = ClimateRecord.reporting_period == combo.reporting_period
         if parsed:
             year, months = parsed
@@ -237,12 +282,23 @@ def get_exposure_snapshot(
     fabricates or infers a figure. Risk Advisory Reports are a BOT_USER-only
     feature, so institution_id is normally None (sector-wide view) here, but the
     parameter exists for consistency and future institution-specific advisories.
+
+    hazard_type is resolved the same way as get_hazard_exposure() - from real
+    ClimateRecord.hazard_type entries (excluding FLAGGED), never from the old
+    self-reported field, which the official BOT template no longer has any way
+    to populate.
     """
     query = _active_records_query(db, institution_id)
     if region:
         query = query.filter(SubmissionRecord.region == region)
     if hazard_type:
-        query = query.filter(SubmissionRecord.climate_hazard_exposure == hazard_type)
+        regions_with_hazard = (
+            db.query(ClimateRecord.region)
+            .filter(ClimateRecord.hazard_type == hazard_type, ClimateRecord.quality_flag != "FLAGGED")
+            .distinct()
+            .all()
+        )
+        query = query.filter(SubmissionRecord.region.in_([r[0] for r in regions_with_hazard]))
 
     total_exposure = query.with_entities(
         func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0)
@@ -263,10 +319,13 @@ def get_exposure_snapshot(
     # Attach the most recent real meteorological reading for this region, if any exists -
     # this is what actually lets the analyst combine financial exposure with climate data
     # in a single advisory note, instead of the two datasets living in isolation.
+    # FLAGGED readings are excluded, matching the same rule used everywhere else
+    # a climate figure is presented (Combined Exposure, Hazard Exposure) - a
+    # reading an analyst has already rejected must never resurface here.
     if region:
         latest_climate = (
             db.query(ClimateRecord)
-            .filter(ClimateRecord.region == region)
+            .filter(ClimateRecord.region == region, ClimateRecord.quality_flag != "FLAGGED")
             .order_by(ClimateRecord.year.desc(), ClimateRecord.month.desc())
             .first()
         )
@@ -279,6 +338,7 @@ def get_exposure_snapshot(
                 "hazard_type": latest_climate.hazard_type,
                 "hazard_severity": latest_climate.hazard_severity,
                 "source": latest_climate.source,
+                "quality_flag": latest_climate.quality_flag,
             }
 
     return snapshot
@@ -295,7 +355,11 @@ def _quarter_to_months(reporting_period: str) -> tuple[int, list[int]] | None:
     return year, [start_month, start_month + 1, start_month + 2]
 
 
-def get_combined_climate_financial_exposure(db: Session, institution_id: str | None = None) -> list[dict]:
+def get_combined_climate_financial_exposure(
+    db: Session, institution_id: str | None = None, validated_only: bool = False,
+    filter_institution_id: str | None = None, filter_region: str | None = None,
+    filter_reporting_period: str | None = None,
+) -> list[dict]:
     """
     THE core ICN aim: combine financial sector data with climate/meteorological data
     so climate impact on financial stability can actually be assessed together,
@@ -306,9 +370,19 @@ def get_combined_climate_financial_exposure(db: Session, institution_id: str | N
     recorded for that same region during the matching months/year, and returns
     both sets of figures side by side. No figure here is invented - a null/absent
     climate reading is honestly represented as null, not backfilled with a guess.
+
+    validated_only: when True, restricts to fully human-reviewed (quality_flag=
+    VALIDATED) readings only - for an official/supervisory view where SYNTHETIC
+    and UNVALIDATED readings should not silently inform a figure presented as
+    authoritative. Defaults to False (everything except FLAGGED) since most
+    data is still SYNTHETIC/UNVALIDATED during the period before live TMA data
+    exists - see docs/ASSUMPTIONS_AND_LIMITATIONS.md.
     """
     combos = (
-        _active_records_query(db, institution_id)
+        _active_records_query(
+            db, institution_id, filter_institution_id=filter_institution_id,
+            filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+        )
         .with_entities(
             SubmissionRecord.region,
             Submission.reporting_period,
@@ -350,10 +424,11 @@ def get_combined_climate_financial_exposure(db: Session, institution_id: str | N
         climate_rows = (
             db.query(ClimateRecord)
             .filter(*filters)
-            # FLAGGED means an analyst has already judged this specific reading
-            # unreliable - it must never be blended into a figure presented as
-            # informing financial-stability decisions, regardless of source.
-            .filter(ClimateRecord.quality_flag != "FLAGGED")
+            .filter(ClimateRecord.quality_flag == "VALIDATED" if validated_only else
+                    # FLAGGED means an analyst has already judged this specific reading
+                    # unreliable - it must never be blended into a figure presented as
+                    # informing financial-stability decisions, regardless of source.
+                    ClimateRecord.quality_flag != "FLAGGED")
             .all()
         )
         if climate_rows:
