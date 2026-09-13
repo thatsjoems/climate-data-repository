@@ -283,10 +283,12 @@ def get_exposure_snapshot(
     feature, so institution_id is normally None (sector-wide view) here, but the
     parameter exists for consistency and future institution-specific advisories.
 
-    hazard_type is resolved the same way as get_hazard_exposure() - from real
-    ClimateRecord.hazard_type entries (excluding FLAGGED), never from the old
-    self-reported field, which the official BOT template no longer has any way
-    to populate.
+    Unlike the exploratory dashboard views (Hazard Exposure, Combined Exposure,
+    which default to "everything except FLAGGED" with an optional VALIDATED-
+    only toggle), a Risk Advisory Note is a formal, archived document - so
+    climate data here is ALWAYS restricted to quality_flag == VALIDATED, with
+    no toggle. If no VALIDATED reading exists, `climate_data_note` explains
+    this plainly instead of silently attaching a SYNTHETIC/UNVALIDATED one.
     """
     query = _active_records_query(db, institution_id)
     if region:
@@ -294,7 +296,7 @@ def get_exposure_snapshot(
     if hazard_type:
         regions_with_hazard = (
             db.query(ClimateRecord.region)
-            .filter(ClimateRecord.hazard_type == hazard_type, ClimateRecord.quality_flag != "FLAGGED")
+            .filter(ClimateRecord.hazard_type == hazard_type, ClimateRecord.quality_flag == "VALIDATED")
             .distinct()
             .all()
         )
@@ -323,9 +325,14 @@ def get_exposure_snapshot(
     # a climate figure is presented (Combined Exposure, Hazard Exposure) - a
     # reading an analyst has already rejected must never resurface here.
     if region:
+        # A Risk Advisory Note is a formal, archived supervisory document -
+        # held to a stricter standard than the exploratory dashboard views
+        # above. Only a fully human-reviewed (VALIDATED) reading may be
+        # attached; SYNTHETIC/UNVALIDATED readings are never silently
+        # attached to something presented as informing a real decision.
         latest_climate = (
             db.query(ClimateRecord)
-            .filter(ClimateRecord.region == region, ClimateRecord.quality_flag != "FLAGGED")
+            .filter(ClimateRecord.region == region, ClimateRecord.quality_flag == "VALIDATED")
             .order_by(ClimateRecord.year.desc(), ClimateRecord.month.desc())
             .first()
         )
@@ -340,6 +347,11 @@ def get_exposure_snapshot(
                 "source": latest_climate.source,
                 "quality_flag": latest_climate.quality_flag,
             }
+        else:
+            snapshot["climate_data_note"] = (
+                f"No VALIDATED climate observation is available for {region} - "
+                f"this advisory is based on financial exposure data only."
+            )
 
     return snapshot
 

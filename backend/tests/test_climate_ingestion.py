@@ -159,3 +159,84 @@ def test_missing_climate_data_shown_as_none_never_fabricated(client, db_session)
     assert len(rows) == 1
     assert rows[0]["avg_rainfall_mm"] is None
     assert rows[0]["avg_temperature_c"] is None
+
+
+# ---------------------------------------------------------------------------
+# Climate QC promotion (Module: closing the "VALIDATED is unreachable" gap
+# identified via external review) - the one action that lets a human move a
+# reading from UNVALIDATED to VALIDATED or FLAGGED.
+# ---------------------------------------------------------------------------
+
+def test_only_bot_user_can_promote_climate_records(client, db_session):
+    make_user(db_session, role=RoleEnum.INSTITUTION_USER, username="inst_user")
+    token = login(client, "inst_user").json()["access_token"]
+    res = client.post(
+        "/api/climate-data/promote",
+        json={"region": "Dodoma", "reporting_period": "2026-Q1", "new_quality_flag": "VALIDATED"},
+        headers=auth_header(token),
+    )
+    assert res.status_code == 403
+
+
+def test_promote_moves_unvalidated_to_validated(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+
+    db_session.add(ClimateRecord(region="Dodoma", year=2026, month=2, rainfall_mm=50.0,
+                                  reporting_period="2026-Q1", quality_flag="UNVALIDATED"))
+    db_session.add(ClimateRecord(region="Dodoma", year=2026, month=3, rainfall_mm=60.0,
+                                  reporting_period="2026-Q1", quality_flag="UNVALIDATED"))
+    db_session.commit()
+
+    res = client.post(
+        "/api/climate-data/promote",
+        json={"region": "Dodoma", "reporting_period": "2026-Q1", "new_quality_flag": "VALIDATED"},
+        headers=auth_header(token),
+    )
+    assert res.status_code == 200
+    assert res.json()["records_updated"] == 2
+
+    still_unvalidated = db_session.query(ClimateRecord).filter(ClimateRecord.quality_flag == "UNVALIDATED").count()
+    validated = db_session.query(ClimateRecord).filter(ClimateRecord.quality_flag == "VALIDATED").count()
+    assert still_unvalidated == 0
+    assert validated == 2
+
+
+def test_promote_never_touches_synthetic_or_already_decided_records(client, db_session):
+    """SYNTHETIC demo data must never be silently reclassified as if a human reviewed real TMA data."""
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+
+    db_session.add(ClimateRecord(region="Dodoma", year=2026, month=2, rainfall_mm=50.0,
+                                  reporting_period="2026-Q1", quality_flag="SYNTHETIC"))
+    db_session.add(ClimateRecord(region="Dodoma", year=2026, month=3, rainfall_mm=999.0,
+                                  reporting_period="2026-Q1", quality_flag="FLAGGED"))
+    db_session.commit()
+
+    res = client.post(
+        "/api/climate-data/promote",
+        json={"region": "Dodoma", "reporting_period": "2026-Q1", "new_quality_flag": "VALIDATED"},
+        headers=auth_header(token),
+    )
+    assert res.status_code == 200
+    assert res.json()["records_updated"] == 0  # nothing was UNVALIDATED, so nothing changed
+
+    assert db_session.query(ClimateRecord).filter(ClimateRecord.quality_flag == "SYNTHETIC").count() == 1
+    assert db_session.query(ClimateRecord).filter(ClimateRecord.quality_flag == "FLAGGED").count() == 1
+
+
+def test_unvalidated_groups_lists_regions_awaiting_review(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+
+    db_session.add(ClimateRecord(region="Mbeya", year=2026, month=2, rainfall_mm=50.0,
+                                  reporting_period="2026-Q1", quality_flag="UNVALIDATED"))
+    db_session.add(ClimateRecord(region="Mbeya", year=2026, month=3, rainfall_mm=55.0,
+                                  reporting_period="2026-Q1", quality_flag="UNVALIDATED"))
+    db_session.commit()
+
+    res = client.get("/api/climate-data/unvalidated-groups", headers=auth_header(token))
+    assert res.status_code == 200
+    groups = res.json()
+    match = next(g for g in groups if g["region"] == "Mbeya" and g["reporting_period"] == "2026-Q1")
+    assert match["count"] == 2

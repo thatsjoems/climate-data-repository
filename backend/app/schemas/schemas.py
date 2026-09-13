@@ -279,6 +279,26 @@ class DataQualitySummary(BaseModel):
     total_records_duplicate_all_time: int
 
 
+class ClimateQCPromoteRequest(BaseModel):
+    """
+    Human QC action (Module: Climate QC promotion) - the one workflow step
+    that lets any climate reading ever actually reach VALIDATED, closing an
+    otherwise-permanent gap: without this, quality_flag=VALIDATED would be
+    unreachable through any real action in the system, no matter how climate
+    data eventually arrives (manual bridge today, a live TMA feed tomorrow).
+    """
+    region: str
+    reporting_period: str
+    new_quality_flag: str  # "VALIDATED" or "FLAGGED"
+
+
+class ClimateQCPromoteResult(BaseModel):
+    region: str
+    reporting_period: str
+    new_quality_flag: str
+    records_updated: int
+
+
 # ---------- RISK ADVISORY REPORTS ----------
 class RiskAdvisoryCreate(BaseModel):
     title: str

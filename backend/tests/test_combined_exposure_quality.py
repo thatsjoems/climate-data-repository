@@ -116,6 +116,26 @@ def test_exposure_snapshot_hazard_filter_uses_real_climate_data(client, db_sessi
     assert snapshot["total_loan_exposure_tzs"] == 1_000_000.0
 
 
+def test_exposure_snapshot_never_attaches_unvalidated_reading(client, db_session):
+    """
+    Regression test: a Risk Advisory Note is a formal, archived document -
+    stricter than the exploratory dashboard views. Only VALIDATED may ever
+    be attached; SYNTHETIC/UNVALIDATED must never appear, even if it is the
+    only climate data that exists for the region.
+    """
+    inst = make_institution(db_session)
+    _seed_submission_for(db_session, inst, region="Dodoma")
+
+    db_session.add(ClimateRecord(region="Dodoma", year=2026, month=2, rainfall_mm=50.0,
+                                  quality_flag="UNVALIDATED", reporting_period="2026-Q1"))
+    db_session.commit()
+
+    snapshot = get_exposure_snapshot(db_session, region="Dodoma")
+    assert "latest_climate_reading" not in snapshot
+    assert "climate_data_note" in snapshot
+    assert "No VALIDATED" in snapshot["climate_data_note"]
+
+
 # ---------------------------------------------------------------------------
 # Advanced filtering (Module: dashboard filters) - found via external review:
 # ICN explicitly asks for analysis "by reporting institution, reporting

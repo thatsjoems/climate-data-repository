@@ -178,3 +178,41 @@ it is infrastructure specific to the interim manual bridge (see
 `docs/TMA_INGESTION.md`), which is itself temporary by design. Effort was
 directed at Advanced Filtering instead, which the ICN's own wording
 requires and which does not depend on BOT-provided access.
+
+## Third external review — this decision was revisited and reversed
+
+The "deliberately not built" QC UI decision immediately above was
+reconsidered after a third review made a more compelling architectural
+argument than the one that led to deferring it: without ANY promotion
+action, `quality_flag=VALIDATED` would be permanently unreachable in the
+ENTIRE system - not just during the interim manual-bridge period, but even
+after real, live TMA integration exists, since an automated feed alone was
+never going to self-assign VALIDATED either. That is a structural gap in
+the quality_flag system itself, not merely a missing "nice to have" UI.
+Three items were implemented in response:
+
+1. **Climate QC promotion**: `POST /api/climate-data/promote` lets a BOT
+   Analyst mark all UNVALIDATED readings for a (region, reporting_period) as
+   VALIDATED or FLAGGED - the one action that makes VALIDATED reachable.
+   Scoped to region+period rather than a single row or an ingestion batch,
+   because `ClimateRecord` has no batch foreign key (see
+   `ClimateIngestionBatch`'s own docstring) and per-row promotion would not
+   scale to real TMA data volumes; region+period is also exactly how climate
+   data is already looked up everywhere else (Combined Exposure, Hazard
+   Exposure, Risk Advisory). SYNTHETIC and already-FLAGGED/VALIDATED readings
+   are never touched by this action. `GET /api/climate-data/unvalidated-groups`
+   lists what is currently awaiting review. UI: a new table in the "Climate
+   Data Quality" section of the Analyst dashboard.
+2. **Risk Advisory tightened to VALIDATED-only**: unlike the exploratory
+   dashboard views (which default to "everything except FLAGGED", with an
+   optional VALIDATED-only toggle), `get_exposure_snapshot()` now ALWAYS
+   requires quality_flag == VALIDATED for both the hazard-type filter and the
+   attached "latest climate reading" - no toggle, no exception. A Risk
+   Advisory Note is a formal, archived document; if no VALIDATED reading
+   exists, the response includes a plain `climate_data_note` saying so
+   instead of silently attaching SYNTHETIC/UNVALIDATED data.
+3. **Reports now honor Dashboard Filters**: the PDF, Excel, and CSV exports
+   accept the same `filter_institution_id`/`filter_region`/
+   `filter_reporting_period`/`validated_only` parameters as the dashboard,
+   and every report states plainly which filters (if any) were active -
+   never ambiguous about whether a figure is sector-wide or narrowed.

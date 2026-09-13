@@ -143,6 +143,8 @@ export default function InternalPortal() {
   const [filterInstitutionId, setFilterInstitutionId] = useState('')
   const [filterRegion, setFilterRegion] = useState('')
   const [filterReportingPeriod, setFilterReportingPeriod] = useState('')
+  const [unvalidatedGroups, setUnvalidatedGroups] = useState<{ region: string; reporting_period: string; count: number }[]>([])
+  const [qcMessage, setQcMessage] = useState<string | null>(null)
   const [mapPoints, setMapPoints] = useState<RegionMapPoint[]>([])
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [notesById, setNotesById] = useState<Record<string, string>>({})
@@ -167,12 +169,14 @@ export default function InternalPortal() {
 
   async function loadClimateQuality() {
     try {
-      const [qRes, batchesRes] = await Promise.all([
+      const [qRes, batchesRes, groupsRes] = await Promise.all([
         apiClient.get('/climate-data/quality-summary'),
         apiClient.get('/climate-data/ingestions'),
+        apiClient.get('/climate-data/unvalidated-groups'),
       ])
       setDataQuality(qRes.data)
       setIngestionBatches(batchesRes.data)
+      setUnvalidatedGroups(groupsRes.data)
       setClimateQualityError(null)
     } catch (err: any) {
       setClimateQualityError(
@@ -180,6 +184,20 @@ export default function InternalPortal() {
           ? `Failed to load (HTTP ${err.response.status}): ${err.response.data?.detail || err.message}`
           : `Failed to load: ${err.message}`
       )
+    }
+  }
+
+  async function handlePromoteClimateGroup(region: string, reportingPeriod: string, newFlag: 'VALIDATED' | 'FLAGGED') {
+    setQcMessage(null)
+    try {
+      const res = await apiClient.post('/climate-data/promote', {
+        region, reporting_period: reportingPeriod, new_quality_flag: newFlag,
+      })
+      setQcMessage(`${res.data.records_updated} reading(s) for ${region} / ${reportingPeriod} marked ${newFlag}.`)
+      loadClimateQuality()
+      reloadClimateExposureViews(validatedOnly)
+    } catch (err: any) {
+      setQcMessage(err?.response?.data?.detail || 'Failed to update the climate readings.')
     }
   }
 
@@ -297,7 +315,7 @@ export default function InternalPortal() {
     setReportGenerating(true)
     setReportMessage(null)
     try {
-      const res = await apiClient.get('/reports/summary.pdf', { responseType: 'blob' })
+      const res = await apiClient.get(`/reports/summary.pdf?${buildFilterQuery({ validated_only: validatedOnly })}`, { responseType: 'blob' })
       const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
       const link = document.createElement('a')
       link.href = url
@@ -305,7 +323,7 @@ export default function InternalPortal() {
       document.body.appendChild(link)
       link.click()
       link.remove()
-      setReportMessage('Report generated and downloaded.')
+      setReportMessage('Report generated and downloaded (reflects current Dashboard Filters, if any).')
     } catch (err: any) {
       setReportMessage('Failed to generate the report.')
     } finally {
@@ -314,7 +332,7 @@ export default function InternalPortal() {
   }
 
   async function handleDownloadCombinedCsv() {
-    const res = await apiClient.get('/reports/combined-exposure.csv', { responseType: 'blob' })
+    const res = await apiClient.get(`/reports/combined-exposure.csv?${buildFilterQuery({ validated_only: validatedOnly })}`, { responseType: 'blob' })
     const url = window.URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
     const link = document.createElement('a')
     link.href = url
@@ -328,7 +346,7 @@ export default function InternalPortal() {
     setReportGenerating(true)
     setReportMessage(null)
     try {
-      const res = await apiClient.get('/reports/summary.xlsx', { responseType: 'blob' })
+      const res = await apiClient.get(`/reports/summary.xlsx?${buildFilterQuery({ validated_only: validatedOnly })}`, { responseType: 'blob' })
       const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
       const link = document.createElement('a')
       link.href = url
@@ -336,7 +354,7 @@ export default function InternalPortal() {
       document.body.appendChild(link)
       link.click()
       link.remove()
-      setReportMessage('Excel report generated and downloaded.')
+      setReportMessage('Excel report generated and downloaded (reflects current Dashboard Filters, if any).')
     } catch (err: any) {
       setReportMessage('Failed to generate the Excel report.')
     } finally {
@@ -581,6 +599,36 @@ export default function InternalPortal() {
         </form>
         {climateUploadMessage && <div className="alert-info" style={{ marginTop: '0.5rem' }}>{climateUploadMessage}</div>}
 
+        <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.4rem' }}>Climate Quality Control — Readings Awaiting Review</h3>
+        <p className="note">
+          A human review action: mark all UNVALIDATED readings for a region/period as VALIDATED
+          (fit to inform official analytics and Risk Advisory Notes) or FLAGGED (rejected -
+          excluded from every calculation). SYNTHETIC demo data and already-decided readings are
+          never touched by this action.
+        </p>
+        {qcMessage && <div className="alert-info">{qcMessage}</div>}
+        <table>
+          <thead><tr><th>Region</th><th>Reporting Period</th><th>Unvalidated Readings</th><th>Action</th></tr></thead>
+          <tbody>
+            {unvalidatedGroups.map((g) => (
+              <tr key={`${g.region}-${g.reporting_period}`}>
+                <td>{g.region}</td>
+                <td>{g.reporting_period}</td>
+                <td>{g.count}</td>
+                <td>
+                  <button onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'VALIDATED')} style={{ marginRight: '0.4rem' }}>
+                    ✓ Validate
+                  </button>
+                  <button onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'FLAGGED')}>
+                    ✕ Flag as Bad Data
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {unvalidatedGroups.length === 0 && <tr><td colSpan={4}>Nothing awaiting review right now.</td></tr>}
+          </tbody>
+        </table>
+
         <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.4rem' }}>Recent Ingestion Batches</h3>
         <table>
           <thead><tr><th>When</th><th>Source</th><th>File</th><th>Received</th><th>Accepted</th><th>Rejected</th><th>Duplicate</th></tr></thead>
@@ -765,6 +813,12 @@ export default function InternalPortal() {
                               {' '}{snapshot.latest_climate_reading.avg_temperature_c}°C,
                               {' '}hazard: {snapshot.latest_climate_reading.hazard_type || 'None'}
                               {' '}({snapshot.latest_climate_reading.source} · {snapshot.latest_climate_reading.quality_flag || 'UNVALIDATED'})
+                            </>
+                          )}
+                          {snapshot.climate_data_note && (
+                            <>
+                              <br />
+                              <span style={{ color: 'var(--color-warning)' }}>⚠️ {snapshot.climate_data_note}</span>
                             </>
                           )}
                         </div>

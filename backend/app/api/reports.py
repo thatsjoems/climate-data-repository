@@ -6,7 +6,7 @@ BOT_USER (Analyst) - consistent with the rest of this project's role
 separation, since the report contains climate/submission data.
 """
 import csv
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import io
@@ -24,6 +24,10 @@ router = APIRouter(prefix="/reports", tags=["Reports"])
 
 @router.get("/summary.pdf")
 def download_summary_report(
+    filter_institution_id: str | None = Query(default=None),
+    filter_region: str | None = Query(default=None),
+    filter_reporting_period: str | None = Query(default=None),
+    validated_only: bool = Query(default=False),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):
@@ -31,9 +35,16 @@ def download_summary_report(
     Automatically compiles the current KPI summary, climate hazard exposure,
     combined climate-financial exposure, and recent Risk Advisory Reports into
     a single PDF - the same figures already on the dashboard, formatted for
-    sharing/filing instead of manual copy-paste into a document.
+    sharing/filing instead of manual copy-paste into a document. Honors the
+    same institution/region/period/validated-only filters as the dashboard
+    (Module: advanced filtering) - the report always states which filters
+    were active so it is never ambiguous whether a figure is sector-wide.
     """
-    pdf_bytes = generate_summary_report_pdf(db, current_user)
+    pdf_bytes = generate_summary_report_pdf(
+        db, current_user, filter_institution_id=filter_institution_id,
+        filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+        validated_only=validated_only,
+    )
 
     record_audit(
         db, current_user.id, "REPORT_GENERATED", "Report", None,
@@ -50,15 +61,24 @@ def download_summary_report(
 
 @router.get("/summary.xlsx")
 def download_summary_report_excel(
+    filter_institution_id: str | None = Query(default=None),
+    filter_region: str | None = Query(default=None),
+    filter_reporting_period: str | None = Query(default=None),
+    validated_only: bool = Query(default=False),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):
     """
     Same figures as the PDF report (Section 20: Reporting - Excel export),
     as a multi-sheet workbook for analysts who want to filter/pivot the
-    numbers themselves rather than read a formatted document.
+    numbers themselves rather than read a formatted document. Honors the
+    same dashboard filters as the PDF report - see its docstring.
     """
-    excel_bytes = generate_summary_report_excel(db, current_user)
+    excel_bytes = generate_summary_report_excel(
+        db, current_user, filter_institution_id=filter_institution_id,
+        filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+        validated_only=validated_only,
+    )
 
     record_audit(
         db, current_user.id, "REPORT_GENERATED", "Report", None,
@@ -75,6 +95,10 @@ def download_summary_report_excel(
 
 @router.get("/combined-exposure.csv")
 def download_combined_exposure_csv(
+    filter_institution_id: str | None = Query(default=None),
+    filter_region: str | None = Query(default=None),
+    filter_reporting_period: str | None = Query(default=None),
+    validated_only: bool = Query(default=False),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):
@@ -83,9 +107,14 @@ def download_combined_exposure_csv(
     same underlying data as the dashboard table and the PDF report, in a
     format an analyst can open directly in Excel or feed into another tool.
     A blank climate cell means no reading exists for that region/period -
-    the CSV never fills it in.
+    the CSV never fills it in. Honors the same dashboard filters as the PDF/
+    Excel reports.
     """
-    rows = analytics_service.get_combined_climate_financial_exposure(db, institution_id=None)
+    rows = analytics_service.get_combined_climate_financial_exposure(
+        db, institution_id=None, validated_only=validated_only,
+        filter_institution_id=filter_institution_id, filter_region=filter_region,
+        filter_reporting_period=filter_reporting_period,
+    )
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)

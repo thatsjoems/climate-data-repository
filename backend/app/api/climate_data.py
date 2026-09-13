@@ -25,6 +25,7 @@ from app.models.models import (
 )
 from app.schemas.schemas import (
     ClimateIngestionBatchOut, ClimateIngestionDetailOut, DataQualitySummary,
+    ClimateQCPromoteRequest, ClimateQCPromoteResult,
 )
 from app.services.climate_ingestion_service import parse_and_validate_climate_file
 from app.services.template_generator import TANZANIA_REGIONS
@@ -169,3 +170,79 @@ def data_quality_summary(
         total_records_rejected_all_time=int(total_rejected),
         total_records_duplicate_all_time=int(total_duplicate),
     )
+
+
+@router.post("/promote", response_model=ClimateQCPromoteResult)
+def promote_climate_records(
+    payload: ClimateQCPromoteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
+):
+    """
+    Human QC action: an Analyst who has reviewed the readings for a specific
+    region + reporting period marks them VALIDATED (fit to inform official
+    analytics and Risk Advisory Notes) or FLAGGED (rejected - excluded from
+    every calculation that uses climate data). Only currently-UNVALIDATED
+    records are affected - SYNTHETIC demo data is never silently reclassified
+    as if a human had reviewed real TMA data, and an already-decided record
+    is not re-decided by a second promote call (re-run the ingestion or
+    contact an admin if a correction is genuinely needed).
+
+    This is deliberately scoped to (region, reporting_period) rather than a
+    single row or a whole ingestion batch: ClimateRecord has no batch foreign
+    key (see ClimateIngestionBatch's own docstring), and per-row promotion
+    would not scale to real TMA data volumes. Region+period matches exactly
+    how climate data is already looked up everywhere else in this system
+    (Combined Exposure, Hazard Exposure, Risk Advisory).
+    """
+    if payload.new_quality_flag not in ("VALIDATED", "FLAGGED"):
+        raise HTTPException(status_code=400, detail="new_quality_flag must be 'VALIDATED' or 'FLAGGED'")
+
+    records = (
+        db.query(ClimateRecord)
+        .filter(
+            ClimateRecord.region == payload.region,
+            ClimateRecord.reporting_period == payload.reporting_period,
+            ClimateRecord.quality_flag == "UNVALIDATED",
+        )
+        .all()
+    )
+    for r in records:
+        r.quality_flag = payload.new_quality_flag
+        r.processing_method = f"QC_PROMOTED_BY_{current_user.username}"
+    db.commit()
+
+    record_audit(
+        db, current_user.id, "CLIMATE_DATA_QC_PROMOTED", "ClimateRecord", None,
+        f"{len(records)} UNVALIDATED reading(s) for {payload.region}/{payload.reporting_period} "
+        f"marked {payload.new_quality_flag} by {current_user.username}",
+    )
+
+    return ClimateQCPromoteResult(
+        region=payload.region, reporting_period=payload.reporting_period,
+        new_quality_flag=payload.new_quality_flag, records_updated=len(records),
+    )
+
+
+@router.get("/unvalidated-groups")
+def list_unvalidated_groups(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
+):
+    """
+    Lists every (region, reporting_period) combination that currently has at
+    least one UNVALIDATED reading, with a count - so the Climate QC screen
+    can show the Analyst exactly what is waiting for review without them
+    needing to already know which regions/periods to check.
+    """
+    rows = (
+        db.query(
+            ClimateRecord.region, ClimateRecord.reporting_period,
+            func.count(ClimateRecord.id).label("count"),
+        )
+        .filter(ClimateRecord.quality_flag == "UNVALIDATED", ClimateRecord.reporting_period.isnot(None))
+        .group_by(ClimateRecord.region, ClimateRecord.reporting_period)
+        .order_by(ClimateRecord.region, ClimateRecord.reporting_period)
+        .all()
+    )
+    return [{"region": r.region, "reporting_period": r.reporting_period, "count": r.count} for r in rows]
