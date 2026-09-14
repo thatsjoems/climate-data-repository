@@ -19,8 +19,28 @@ _DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "tanzania_geograp
 
 @lru_cache(maxsize=1)
 def _load() -> dict:
+    """
+    Loads and normalizes the geography JSON. The source files (2022 Census
+    village list, Zanzibar Frame) contain a small number of names with
+    stray leading/trailing whitespace - e.g. a ward literally stored as
+    "Kwa Mchina " (trailing space) in the Zanzibar Frame. Uploaded Excel
+    values are stripped during validation (so a user typing "Dodoma " with
+    a trailing space still matches "Dodoma"), so this reference data must
+    be stripped identically at load time, or a technically-correct name
+    would incorrectly fail validation due to whitespace alone.
+    """
     with open(_DATA_PATH, encoding="utf-8") as f:
-        return json.load(f)
+        raw = json.load(f)
+    return {
+        region.strip(): {
+            district.strip(): {
+                ward.strip(): [v.strip() for v in villages]
+                for ward, villages in wards.items()
+            }
+            for district, wards in districts.items()
+        }
+        for region, districts in raw.items()
+    }
 
 
 def all_regions() -> list[str]:
