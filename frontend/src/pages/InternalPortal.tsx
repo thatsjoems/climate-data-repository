@@ -224,7 +224,17 @@ export default function InternalPortal() {
       setClimateFile(null)
       loadClimateQuality()
     } catch (err: any) {
-      setClimateUploadMessage(err?.response?.data?.detail || 'Failed to ingest the file.')
+      if (err?.response?.data?.detail) {
+        setClimateUploadMessage(err.response.data.detail)
+      } else if (err?.response?.status) {
+        setClimateUploadMessage(
+          err.response.status === 413
+            ? 'The file is too large for the server to accept (HTTP 413).'
+            : `Failed to ingest the file (HTTP ${err.response.status}).`
+        )
+      } else {
+        setClimateUploadMessage('Failed to ingest the file - no response from the server (network error or timeout).')
+      }
     } finally {
       setClimateUploading(false)
     }

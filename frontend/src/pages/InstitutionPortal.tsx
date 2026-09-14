@@ -139,7 +139,17 @@ export default function InstitutionPortal() {
       setReportingPeriod('')
       loadSubmissions()
     } catch (err: any) {
-      setUploadMessage(err?.response?.data?.detail || 'Failed to upload the file.')
+      if (err?.response?.data?.detail) {
+        setUploadMessage(err.response.data.detail)
+      } else if (err?.response?.status) {
+        setUploadMessage(
+          err.response.status === 413
+            ? 'The file is too large for the server to accept (HTTP 413). Please contact support if this file should be within the allowed size.'
+            : `Failed to upload the file (HTTP ${err.response.status}).`
+        )
+      } else {
+        setUploadMessage('Failed to upload the file - no response from the server (network error or timeout).')
+      }
     } finally {
       setUploading(false)
     }
