@@ -138,11 +138,12 @@ def generate_summary_report_pdf(
     )
     story.append(Paragraph("2. Climate Hazard Exposure by Region", styles["SectionHeading"]))
     story.append(Paragraph(
-        "Loan exposure grouped by region and institution-reported climate hazard.",
+        "Loan exposure in regions/periods with each recorded climate hazard "
+        "(from real ClimateRecord observations, not institution self-reporting).",
         styles["BodyNote"],
     ))
     story.append(_table(
-        ["Region", "Hazard", "Loan Exposure", "Records"],
+        ["Region", "Recorded Hazard", "Loan Exposure in Region/Period", "Records"],
         [[h["region"], h["hazard_type"] or "None", _fmt_tzs(h["exposed_loan_amount_tzs"]), str(h["record_count"])]
          for h in hazard_rows],
         col_widths=[4.5 * cm, 3.5 * cm, 5 * cm, 3.5 * cm],
@@ -268,7 +269,7 @@ def generate_summary_report_excel(
         filter_institution_id=filter_institution_id, filter_region=filter_region,
         filter_reporting_period=filter_reporting_period,
     )
-    write_sheet(ws2, ["Region", "Hazard", "Loan Exposure (TZS)", "Records"], [
+    write_sheet(ws2, ["Region", "Recorded Hazard", "Loan Exposure in Region/Period (TZS)", "Records"], [
         [h["region"], h["hazard_type"] or "None", h["exposed_loan_amount_tzs"], h["record_count"]]
         for h in hazard_rows
     ])

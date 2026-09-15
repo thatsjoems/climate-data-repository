@@ -338,6 +338,7 @@ class RiskAdvisoryNote(Base):
     title = Column(String(255), nullable=False)
     region = Column(String(100), nullable=True)          # null = applies broadly / multiple regions
     hazard_type = Column(String(100), nullable=True)      # null = general / cross-hazard note
+    reporting_period = Column(String(20), nullable=True)   # null = not scoped to one period; when set, climate/financial figures are matched to exactly this period (never "whatever is latest")
     risk_level = Column(SAEnum(RiskLevel), nullable=False)
 
     narrative = Column(Text, nullable=False)               # analyst's assessment in their own words

@@ -290,6 +290,7 @@ class ClimateQCPromoteRequest(BaseModel):
     region: str
     reporting_period: str
     new_quality_flag: str  # "VALIDATED" or "FLAGGED"
+    reason: Optional[str] = None  # analyst's justification - strongly recommended for FLAGGED, stored in the audit log for governance/traceability
 
 
 class ClimateQCPromoteResult(BaseModel):
@@ -304,6 +305,7 @@ class RiskAdvisoryCreate(BaseModel):
     title: str
     region: Optional[str] = None
     hazard_type: Optional[str] = None
+    reporting_period: Optional[str] = None  # when set, climate/financial figures are matched to exactly this period
     risk_level: RiskLevel
     narrative: str
     recommendation: Optional[str] = None
@@ -315,6 +317,7 @@ class RiskAdvisoryOut(BaseModel):
     title: str
     region: Optional[str] = None
     hazard_type: Optional[str] = None
+    reporting_period: Optional[str] = None
     risk_level: RiskLevel
     narrative: str
     recommendation: Optional[str] = None

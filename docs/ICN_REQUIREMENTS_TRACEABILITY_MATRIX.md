@@ -216,3 +216,80 @@ Three items were implemented in response:
    `filter_reporting_period`/`validated_only` parameters as the dashboard,
    and every report states plainly which filters (if any) were active -
    never ambiguous about whether a figure is sector-wide or narrowed.
+
+## Fourth external review — fixes applied
+
+Six issues from a fourth review were verified against actual code and fixed:
+
+1. **Map filter desynchronization (HIGH)**: `/analytics/map-points` did not
+   accept `validated_only`/`filter_institution_id`/`filter_region`/
+   `filter_reporting_period`, so the Geospatial map could silently keep
+   showing sector-wide/unfiltered data while the dashboard's KPI cards and
+   charts were correctly filtered - a serious consistency risk on a
+   supervisory screen. Fixed: `get_region_map_points()` now accepts and
+   applies the exact same filters, and every frontend function that refreshes
+   filtered data (`loadAll`, `reloadClimateExposureViews`,
+   `applyDashboardFilters`, `resetDashboardFilters`) now refreshes the map too.
+2. **Risk Advisory temporal mismatch (HIGH)**: the attached "latest climate
+   reading" was matched by region only, so an advisory about Q2 could show a
+   Q4 reading just because it was more recent. Fixed: `RiskAdvisoryNote`
+   gained an optional `reporting_period` field (UI: a dropdown on the
+   advisory form); when set, `get_exposure_snapshot()` restricts BOTH the
+   financial exposure total and the attached climate reading to that exact
+   period, with the same region+period matching logic (direct match,
+   year/month fallback for legacy records) used by Combined Exposure.
+3. **Climate physical plausibility**: rainfall (0-5000mm), temperature
+   (-20 to 55°C), latitude (-90 to 90), longitude (-180 to 180) are now
+   range-checked on ingestion, and temperature_min/avg/max are checked for
+   internal consistency (min ≤ avg ≤ max) when more than one is present.
+4. **Hazard normalization**: "Flood", "flood", "FLOOD", "Flooding" (and
+   similar variants for Drought/Cyclone/Landslide) now all normalize to the
+   same canonical value used everywhere else in the system
+   (`template_generator.HAZARD_OPTIONS`) on ingestion. An unrecognized value
+   is rejected rather than silently kept as a fragmenting free-text category.
+5. **Source provenance control**: the climate ingestion "source" field was
+   free text, so an analyst could label any manually-uploaded file
+   `TMA_FILE`, indistinguishable from a genuinely verified feed once stored.
+   Now restricted to `MANUAL_TMA_FILE` / `MANUAL_PMO_FILE` /
+   `MANUAL_OTHER_FILE` - every option is honest that this is a human's
+   self-declared belief about origin, not a verified integration. No
+   "official"/"verified" option exists, since none would be true yet.
+6. **"Dominant hazard" terminology**: dashboard wording changed from "Flood
+   Loan Exposure" (implies each loan was individually affected) to "Loan
+   Exposure in Regions/Periods with Recorded Flood Hazard" (accurately
+   describes what the figure actually is - a regional climate pattern
+   association, not a per-loan claim).
+
+All six are covered by new/updated tests (`test_climate_ingestion.py`).
+
+## Fifth external review — fixes applied
+
+Five issues fixed after this review confirmed all prior major fixes held:
+
+1. **Stale "institution-reported climate hazard" wording** in the PDF/Excel
+   reports (`report_service.py`) - now correctly says hazard exposure comes
+   from real `ClimateRecord` observations, not institution self-reporting.
+   Column headers changed from "Hazard"/"Loan Exposure" to "Recorded Hazard"/
+   "Loan Exposure in Region/Period" for the same reason, matching the
+   dashboard wording fixed in the previous review round.
+2. **VALIDATED-only is now the default**, not an opt-in: the dashboard's
+   checkbox defaults to checked, and the `validated_only` API/report
+   parameters default to `true`. An analyst can still switch to the
+   exploratory view (include SYNTHETIC/UNVALIDATED) with one click, but the
+   default a supervisory dashboard opens to is now the conservative one -
+   only the underlying service-layer Python defaults were left at `False`
+   (they're always explicitly overridden by the API layer, and several
+   existing tests call them directly expecting the permissive default).
+3. **Climate duplicate-detection precision**: `station_id` was added to the
+   dedup key (alongside region/district/year/month/source_record_id) -
+   without it, two genuinely different stations reporting for the same
+   district/month with no `source_record_id` would collide on the same key,
+   and the second station's real observation would be wrongly rejected as a
+   duplicate.
+4. **Self-declared source disclaimer**: the Climate Data Ingestion form now
+   states plainly, next to the source dropdown, that the TMA/PMO option is
+   the analyst's own belief about origin and is not independently verified.
+5. **QC reason field**: `POST /api/climate-data/promote` now accepts an
+   optional `reason` (UI: a text box next to each Validate/Flag row),
+   recorded in the audit log entry - closing the "no justification for a QC
+   decision" governance gap raised in two separate reviews.

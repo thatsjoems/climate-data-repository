@@ -35,10 +35,20 @@ router = APIRouter(prefix="/climate-data", tags=["Climate Data Ingestion"])
 
 MAX_CLIMATE_FILE_SIZE_MB = settings.MAX_UPLOAD_SIZE_MB  # reuse the same configured ceiling as submissions
 
+# Provenance control (Module: source integrity) - found via external review:
+# an unrestricted free-text "source" field let an analyst label ANY file
+# "TMA_FILE", making it indistinguishable from a genuinely verified feed once
+# stored. Every option here is honest about what this pipeline actually is:
+# a human manually uploading a file and asserting where they believe it came
+# from - not a cryptographically or systematically verified integration.
+# There is deliberately no "TMA_OFFICIAL"/"TMA_API" option: that would only
+# become truthful once a real, authenticated TMA integration exists.
+ALLOWED_CLIMATE_SOURCES = {"MANUAL_TMA_FILE", "MANUAL_PMO_FILE", "MANUAL_OTHER_FILE"}
+
 
 @router.post("/ingest", response_model=ClimateIngestionDetailOut, status_code=201)
 async def ingest_climate_file(
-    source: str = Form(..., description='e.g. "TMA_FILE" or "MANUAL_UPLOAD" - never invent "TMA_API" unless real'),
+    source: str = Form(..., description=f"One of: {', '.join(sorted(ALLOWED_CLIMATE_SOURCES))} - self-declared by the uploading analyst, not independently verified"),
     dataset_name: str = Form(default=None),
     dataset_version: str = Form(default=None),
     file: UploadFile = File(...),
@@ -54,6 +64,12 @@ async def ingest_climate_file(
     if not (file.filename.lower().endswith(".csv") or file.filename.lower().endswith((".xlsx", ".xls"))):
         raise HTTPException(status_code=400, detail="Only .csv or .xlsx files are accepted")
 
+    if source not in ALLOWED_CLIMATE_SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{source}' is not a recognized source - must be one of: {', '.join(sorted(ALLOWED_CLIMATE_SOURCES))}",
+        )
+
     contents = await file.read()
     size_mb = len(contents) / (1024 * 1024)
     if size_mb > MAX_CLIMATE_FILE_SIZE_MB:
@@ -62,7 +78,7 @@ async def ingest_climate_file(
     # Build the existing-observation key set for duplicate detection (never overwrite silently)
     existing_rows = db.query(
         ClimateRecord.region, ClimateRecord.district, ClimateRecord.year,
-        ClimateRecord.month, ClimateRecord.source_record_id,
+        ClimateRecord.month, ClimateRecord.source_record_id, ClimateRecord.station_id,
     ).all()
     existing_keys = set(existing_rows)
 
@@ -215,7 +231,8 @@ def promote_climate_records(
     record_audit(
         db, current_user.id, "CLIMATE_DATA_QC_PROMOTED", "ClimateRecord", None,
         f"{len(records)} UNVALIDATED reading(s) for {payload.region}/{payload.reporting_period} "
-        f"marked {payload.new_quality_flag} by {current_user.username}",
+        f"marked {payload.new_quality_flag} by {current_user.username}"
+        + (f" - Reason: {payload.reason}" if payload.reason else ""),
     )
 
     return ClimateQCPromoteResult(

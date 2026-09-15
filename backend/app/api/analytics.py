@@ -55,7 +55,7 @@ def climate_trends(
 
 @router.get("/hazard-exposure", response_model=list[HazardExposurePoint])
 def hazard_exposure(
-    validated_only: bool = Query(default=False, description="Restrict to fully human-reviewed climate readings only"),
+    validated_only: bool = Query(default=True, description="Restrict to fully human-reviewed climate readings only"),
     filter_institution_id: str | None = Query(default=None),
     filter_region: str | None = Query(default=None),
     filter_reporting_period: str | None = Query(default=None),
@@ -71,7 +71,7 @@ def hazard_exposure(
 
 @router.get("/combined-climate-financial-exposure", response_model=list[CombinedExposurePoint])
 def combined_climate_financial_exposure(
-    validated_only: bool = Query(default=False, description="Restrict to fully human-reviewed climate readings only"),
+    validated_only: bool = Query(default=True, description="Restrict to fully human-reviewed climate readings only"),
     filter_institution_id: str | None = Query(default=None),
     filter_region: str | None = Query(default=None),
     filter_reporting_period: str | None = Query(default=None),
@@ -92,12 +92,23 @@ def combined_climate_financial_exposure(
 
 @router.get("/map-points", response_model=list[RegionMapPoint])
 def region_map_points(
+    validated_only: bool = Query(default=True),
+    filter_institution_id: str | None = Query(default=None),
+    filter_region: str | None = Query(default=None),
+    filter_reporting_period: str | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
 ):
     """
     Region-level points for the Geospatial Overview map: real hazard exposure
     from submitted data, attached to real region centroid coordinates. See
-    analytics_service.get_region_map_points() for how this is built.
+    analytics_service.get_region_map_points() for how this is built. Honors
+    the same Dashboard Filters/validated_only as KPI, Hazard Exposure, and
+    Combined Exposure - the map must never silently show a different scope
+    than the rest of the screen.
     """
-    return analytics_service.get_region_map_points(db, institution_id=_scope_for(current_user))
+    return analytics_service.get_region_map_points(
+        db, institution_id=_scope_for(current_user), validated_only=validated_only,
+        filter_institution_id=filter_institution_id, filter_region=filter_region,
+        filter_reporting_period=filter_reporting_period,
+    )

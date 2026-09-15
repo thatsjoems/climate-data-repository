@@ -27,7 +27,7 @@ def download_summary_report(
     filter_institution_id: str | None = Query(default=None),
     filter_region: str | None = Query(default=None),
     filter_reporting_period: str | None = Query(default=None),
-    validated_only: bool = Query(default=False),
+    validated_only: bool = Query(default=True),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):
@@ -64,7 +64,7 @@ def download_summary_report_excel(
     filter_institution_id: str | None = Query(default=None),
     filter_region: str | None = Query(default=None),
     filter_reporting_period: str | None = Query(default=None),
-    validated_only: bool = Query(default=False),
+    validated_only: bool = Query(default=True),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):
@@ -98,7 +98,7 @@ def download_combined_exposure_csv(
     filter_institution_id: str | None = Query(default=None),
     filter_region: str | None = Query(default=None),
     filter_reporting_period: str | None = Query(default=None),
-    validated_only: bool = Query(default=False),
+    validated_only: bool = Query(default=True),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):

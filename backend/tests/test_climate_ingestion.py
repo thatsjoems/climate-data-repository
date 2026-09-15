@@ -18,7 +18,7 @@ def test_only_bot_user_can_ingest_climate_data(client, db_session):
     csv_bytes = _csv_bytes(["Dodoma,,2026,7,45.2,28.5,Drought,MEDIUM,REC-1"])
     res = client.post(
         "/api/climate-data/ingest",
-        data={"source": "MANUAL_UPLOAD"},
+        data={"source": "MANUAL_TMA_FILE"},
         files={"file": ("data.csv", csv_bytes, "text/csv")},
         headers=auth_header(token),
     )
@@ -31,7 +31,7 @@ def test_system_admin_cannot_ingest_climate_data(client, db_session):
     csv_bytes = _csv_bytes(["Dodoma,,2026,7,45.2,28.5,Drought,MEDIUM,REC-1"])
     res = client.post(
         "/api/climate-data/ingest",
-        data={"source": "MANUAL_UPLOAD"},
+        data={"source": "MANUAL_TMA_FILE"},
         files={"file": ("data.csv", csv_bytes, "text/csv")},
         headers=auth_header(token),
     )
@@ -47,7 +47,7 @@ def test_valid_climate_csv_is_ingested(client, db_session):
     ])
     res = client.post(
         "/api/climate-data/ingest",
-        data={"source": "MANUAL_UPLOAD", "dataset_name": "Test Batch"},
+        data={"source": "MANUAL_TMA_FILE", "dataset_name": "Test Batch"},
         files={"file": ("data.csv", csv_bytes, "text/csv")},
         headers=auth_header(token),
     )
@@ -59,7 +59,7 @@ def test_valid_climate_csv_is_ingested(client, db_session):
     stored = db_session.query(ClimateRecord).all()
     assert len(stored) == 2
     assert stored[0].quality_flag == "UNVALIDATED"
-    assert stored[0].source == "MANUAL_UPLOAD"
+    assert stored[0].source == "MANUAL_TMA_FILE"
 
 
 def test_invalid_region_is_rejected_not_guessed(client, db_session):
@@ -69,7 +69,7 @@ def test_invalid_region_is_rejected_not_guessed(client, db_session):
     csv_bytes = _csv_bytes(["Narnia,,2026,7,45.2,28.5,,,REC-1"])
     res = client.post(
         "/api/climate-data/ingest",
-        data={"source": "MANUAL_UPLOAD"},
+        data={"source": "MANUAL_TMA_FILE"},
         files={"file": ("data.csv", csv_bytes, "text/csv")},
         headers=auth_header(token),
     )
@@ -86,7 +86,7 @@ def test_row_with_no_measurement_is_rejected(client, db_session):
     csv_bytes = _csv_bytes(["Dodoma,,2026,7,,,,,REC-1"])
     res = client.post(
         "/api/climate-data/ingest",
-        data={"source": "MANUAL_UPLOAD"},
+        data={"source": "MANUAL_TMA_FILE"},
         files={"file": ("data.csv", csv_bytes, "text/csv")},
         headers=auth_header(token),
     )
@@ -101,13 +101,13 @@ def test_duplicate_observation_across_two_uploads_is_rejected_not_overwritten(cl
     csv_bytes = _csv_bytes(["Dodoma,,2026,7,45.2,28.5,Drought,MEDIUM,REC-1"])
 
     first = client.post(
-        "/api/climate-data/ingest", data={"source": "MANUAL_UPLOAD"},
+        "/api/climate-data/ingest", data={"source": "MANUAL_TMA_FILE"},
         files={"file": ("data.csv", csv_bytes, "text/csv")}, headers=auth_header(token),
     )
     assert first.json()["records_accepted"] == 1
 
     second = client.post(
-        "/api/climate-data/ingest", data={"source": "MANUAL_UPLOAD"},
+        "/api/climate-data/ingest", data={"source": "MANUAL_TMA_FILE"},
         files={"file": ("data2.csv", csv_bytes, "text/csv")}, headers=auth_header(token),
     )
     assert second.json()["records_accepted"] == 0
@@ -124,7 +124,7 @@ def test_data_quality_summary_reflects_real_counts(client, db_session):
         "Narnia,,2026,7,45.2,28.5,,,REC-2",
     ])
     client.post(
-        "/api/climate-data/ingest", data={"source": "MANUAL_UPLOAD"},
+        "/api/climate-data/ingest", data={"source": "MANUAL_TMA_FILE"},
         files={"file": ("data.csv", csv_bytes, "text/csv")}, headers=auth_header(token),
     )
 
@@ -240,3 +240,136 @@ def test_unvalidated_groups_lists_regions_awaiting_review(client, db_session):
     groups = res.json()
     match = next(g for g in groups if g["region"] == "Mbeya" and g["reporting_period"] == "2026-Q1")
     assert match["count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Source provenance control (Module: source integrity) - found via external
+# review: an unrestricted free-text "source" field let an analyst label any
+# file "TMA_FILE", indistinguishable from a genuinely verified feed.
+# ---------------------------------------------------------------------------
+
+def test_ingest_rejects_unrecognized_source_value(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    csv_bytes = _csv_bytes(["Dodoma,,2026,7,45.2,28.5,Drought,MEDIUM,REC-1"])
+    res = client.post(
+        "/api/climate-data/ingest",
+        data={"source": "TMA_FILE"},  # sounds official but is not an allowed value
+        files={"file": ("data.csv", csv_bytes, "text/csv")},
+        headers=auth_header(token),
+    )
+    assert res.status_code == 400
+
+
+def test_ingest_accepts_manual_tma_file_source(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    csv_bytes = _csv_bytes(["Dodoma,,2026,7,45.2,28.5,Drought,MEDIUM,REC-1"])
+    res = client.post(
+        "/api/climate-data/ingest",
+        data={"source": "MANUAL_TMA_FILE"},
+        files={"file": ("data.csv", csv_bytes, "text/csv")},
+        headers=auth_header(token),
+    )
+    assert res.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# Climate physical plausibility (Module: climate data quality) - found via
+# external review: negative rainfall, out-of-range temperatures, and invalid
+# GPS coordinates could previously pass validation as long as they were
+# numeric.
+# ---------------------------------------------------------------------------
+
+def test_ingest_rejects_negative_rainfall(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    csv_bytes = _csv_bytes(["Dodoma,,2026,7,-50.0,28.5,,,REC-1"])
+    res = client.post(
+        "/api/climate-data/ingest", data={"source": "MANUAL_TMA_FILE"},
+        files={"file": ("data.csv", csv_bytes, "text/csv")}, headers=auth_header(token),
+    )
+    assert res.status_code == 201
+    assert res.json()["records_rejected"] == 1
+
+
+def test_ingest_rejects_implausible_temperature(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    csv_bytes = _csv_bytes(["Dodoma,,2026,7,45.2,500.0,,,REC-1"])
+    res = client.post(
+        "/api/climate-data/ingest", data={"source": "MANUAL_TMA_FILE"},
+        files={"file": ("data.csv", csv_bytes, "text/csv")}, headers=auth_header(token),
+    )
+    assert res.status_code == 201
+    assert res.json()["records_rejected"] == 1
+
+
+def test_ingest_rejects_invalid_gps_coordinates(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    header = "region,district,year,month,rainfall_mm,avg_temperature_c,hazard_type,hazard_severity,latitude,longitude,source_record_id"
+    csv_bytes = (header + "\nDodoma,,2026,7,45.2,28.5,,,999,35.0,REC-1\n").encode()
+    res = client.post(
+        "/api/climate-data/ingest", data={"source": "MANUAL_TMA_FILE"},
+        files={"file": ("data.csv", csv_bytes, "text/csv")}, headers=auth_header(token),
+    )
+    assert res.status_code == 201
+    assert res.json()["records_rejected"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Hazard normalization (Module: hazard taxonomy) - found via external
+# review: "Flood", "flood", "FLOOD", "Flooding" could each count as a
+# different hazard in analytics, fragmenting hazard counts.
+# ---------------------------------------------------------------------------
+
+def test_ingest_normalizes_hazard_case_and_synonyms(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    csv_bytes = _csv_bytes([
+        "Dodoma,,2026,7,45.2,28.5,flooding,MEDIUM,REC-1",
+        "Dodoma,,2026,8,50.0,27.0,FLOOD,MEDIUM,REC-2",
+    ])
+    res = client.post(
+        "/api/climate-data/ingest", data={"source": "MANUAL_TMA_FILE"},
+        files={"file": ("data.csv", csv_bytes, "text/csv")}, headers=auth_header(token),
+    )
+    assert res.status_code == 201
+    assert res.json()["records_accepted"] == 2
+    hazards = {r.hazard_type for r in db_session.query(ClimateRecord).all()}
+    assert hazards == {"Flood"}  # both synonyms normalized to the same canonical form
+
+
+def test_ingest_rejects_unrecognized_hazard_type(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    csv_bytes = _csv_bytes(["Dodoma,,2026,7,45.2,28.5,Earthquake,MEDIUM,REC-1"])
+    res = client.post(
+        "/api/climate-data/ingest", data={"source": "MANUAL_TMA_FILE"},
+        files={"file": ("data.csv", csv_bytes, "text/csv")}, headers=auth_header(token),
+    )
+    assert res.status_code == 201
+    assert res.json()["records_rejected"] == 1
+
+
+def test_promote_reason_is_recorded_in_audit_log(client, db_session):
+    from app.models.models import AuditLog
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+
+    db_session.add(ClimateRecord(region="Dodoma", year=2026, month=2, rainfall_mm=9999.0,
+                                  reporting_period="2026-Q1", quality_flag="UNVALIDATED"))
+    db_session.commit()
+
+    res = client.post(
+        "/api/climate-data/promote",
+        json={"region": "Dodoma", "reporting_period": "2026-Q1", "new_quality_flag": "FLAGGED",
+              "reason": "Rainfall value inconsistent with source station record."},
+        headers=auth_header(token),
+    )
+    assert res.status_code == 200
+
+    entry = db_session.query(AuditLog).filter(AuditLog.action == "CLIMATE_DATA_QC_PROMOTED").order_by(AuditLog.created_at.desc()).first()
+    assert entry is not None
+    assert "Rainfall value inconsistent with source station record." in entry.details

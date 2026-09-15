@@ -52,6 +52,7 @@ interface RiskAdvisory {
   title: string
   region: string | null
   hazard_type: string | null
+  reporting_period: string | null
   risk_level: string
   narrative: string
   recommendation: string | null
@@ -132,19 +133,33 @@ interface IngestionBatch {
   created_at: string
 }
 
+function buildReportingPeriodOptions(): string[] {
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const options: string[] = []
+  for (let year = currentYear + 1; year >= currentYear - 2; year--) {
+    for (let q = 4; q >= 1; q--) {
+      options.push(`${year}-Q${q}`)
+    }
+  }
+  return options
+}
+const REPORTING_PERIOD_OPTIONS = buildReportingPeriodOptions()
+
 export default function InternalPortal() {
   const { user } = useAuth()
   const [kpi, setKpi] = useState<KPI | null>(null)
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [hazardExposure, setHazardExposure] = useState<HazardExposure[]>([])
   const [combinedExposure, setCombinedExposure] = useState<CombinedExposure[]>([])
-  const [validatedOnly, setValidatedOnly] = useState(false)
+  const [validatedOnly, setValidatedOnly] = useState(true)
   const [institutions, setInstitutions] = useState<{ id: string; name: string }[]>([])
   const [filterInstitutionId, setFilterInstitutionId] = useState('')
   const [filterRegion, setFilterRegion] = useState('')
   const [filterReportingPeriod, setFilterReportingPeriod] = useState('')
   const [unvalidatedGroups, setUnvalidatedGroups] = useState<{ region: string; reporting_period: string; count: number }[]>([])
   const [qcMessage, setQcMessage] = useState<string | null>(null)
+  const [qcReasons, setQcReasons] = useState<Record<string, string>>({})
   const [mapPoints, setMapPoints] = useState<RegionMapPoint[]>([])
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [notesById, setNotesById] = useState<Record<string, string>>({})
@@ -153,14 +168,14 @@ export default function InternalPortal() {
   const [riskAdvisories, setRiskAdvisories] = useState<RiskAdvisory[]>([])
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
   const [advisoryForm, setAdvisoryForm] = useState({
-    title: '', region: '', hazard_type: '', risk_level: 'MEDIUM', narrative: '', recommendation: '',
+    title: '', region: '', hazard_type: '', reporting_period: '', risk_level: 'MEDIUM', narrative: '', recommendation: '',
   })
   const [advisoryMessage, setAdvisoryMessage] = useState<string | null>(null)
   const [submittingAdvisory, setSubmittingAdvisory] = useState(false)
   const [dataQuality, setDataQuality] = useState<DataQuality | null>(null)
   const [ingestionBatches, setIngestionBatches] = useState<IngestionBatch[]>([])
   const [climateFile, setClimateFile] = useState<File | null>(null)
-  const [climateSource, setClimateSource] = useState('MANUAL_UPLOAD')
+  const [climateSource, setClimateSource] = useState('MANUAL_TMA_FILE')
   const [climateDatasetName, setClimateDatasetName] = useState('')
   const [climateUploading, setClimateUploading] = useState(false)
   const [climateUploadMessage, setClimateUploadMessage] = useState<string | null>(null)
@@ -189,11 +204,14 @@ export default function InternalPortal() {
 
   async function handlePromoteClimateGroup(region: string, reportingPeriod: string, newFlag: 'VALIDATED' | 'FLAGGED') {
     setQcMessage(null)
+    const key = `${region}-${reportingPeriod}`
+    const reason = qcReasons[key] || undefined
     try {
       const res = await apiClient.post('/climate-data/promote', {
-        region, reporting_period: reportingPeriod, new_quality_flag: newFlag,
+        region, reporting_period: reportingPeriod, new_quality_flag: newFlag, reason,
       })
       setQcMessage(`${res.data.records_updated} reading(s) for ${region} / ${reportingPeriod} marked ${newFlag}.`)
+      setQcReasons((prev) => { const next = { ...prev }; delete next[key]; return next })
       loadClimateQuality()
       reloadClimateExposureViews(validatedOnly)
     } catch (err: any) {
@@ -257,7 +275,7 @@ export default function InternalPortal() {
       apiClient.get(`/analytics/hazard-exposure?${buildFilterQuery({ validated_only: validatedOnly })}`),
       apiClient.get(`/analytics/combined-climate-financial-exposure?${buildFilterQuery({ validated_only: validatedOnly })}`),
       apiClient.get('/risk-advisories'),
-      apiClient.get('/analytics/map-points'),
+      apiClient.get(`/analytics/map-points?${buildFilterQuery({ validated_only: validatedOnly })}`),
     ])
     setInstitutions(instRes.data)
     setKpi(kpiRes.data)
@@ -269,30 +287,35 @@ export default function InternalPortal() {
   }
 
   async function reloadClimateExposureViews(nextValidatedOnly: boolean) {
-    const [hazardRes, combinedRes] = await Promise.all([
+    const [hazardRes, combinedRes, mapRes] = await Promise.all([
       apiClient.get(`/analytics/hazard-exposure?${buildFilterQuery({ validated_only: nextValidatedOnly })}`),
       apiClient.get(`/analytics/combined-climate-financial-exposure?${buildFilterQuery({ validated_only: nextValidatedOnly })}`),
+      apiClient.get(`/analytics/map-points?${buildFilterQuery({ validated_only: nextValidatedOnly })}`),
     ])
     setHazardExposure(hazardRes.data)
     setCombinedExposure(combinedRes.data)
+    setMapPoints(mapRes.data)
   }
 
   async function applyDashboardFilters() {
-    const [kpiRes, hazardRes, combinedRes] = await Promise.all([
+    const [kpiRes, hazardRes, combinedRes, mapRes] = await Promise.all([
       apiClient.get(`/analytics/kpi-summary?${buildFilterQuery()}`),
       apiClient.get(`/analytics/hazard-exposure?${buildFilterQuery({ validated_only: validatedOnly })}`),
       apiClient.get(`/analytics/combined-climate-financial-exposure?${buildFilterQuery({ validated_only: validatedOnly })}`),
+      apiClient.get(`/analytics/map-points?${buildFilterQuery({ validated_only: validatedOnly })}`),
     ])
     setKpi(kpiRes.data)
     setHazardExposure(hazardRes.data)
     setCombinedExposure(combinedRes.data)
+    setMapPoints(mapRes.data)
   }
 
   function resetDashboardFilters() {
     setFilterInstitutionId(''); setFilterRegion(''); setFilterReportingPeriod('')
-    apiClient.get('/analytics/kpi-summary').then((r) => setKpi(r.data))
+    apiClient.get(`/analytics/kpi-summary?validated_only=${validatedOnly}`).then((r) => setKpi(r.data))
     apiClient.get(`/analytics/hazard-exposure?validated_only=${validatedOnly}`).then((r) => setHazardExposure(r.data))
     apiClient.get(`/analytics/combined-climate-financial-exposure?validated_only=${validatedOnly}`).then((r) => setCombinedExposure(r.data))
+    apiClient.get(`/analytics/map-points?validated_only=${validatedOnly}`).then((r) => setMapPoints(r.data))
   }
 
   async function handleCreateAdvisory(e: FormEvent) {
@@ -304,9 +327,10 @@ export default function InternalPortal() {
         ...advisoryForm,
         region: advisoryForm.region || null,
         hazard_type: advisoryForm.hazard_type || null,
+        reporting_period: advisoryForm.reporting_period || null,
         recommendation: advisoryForm.recommendation || null,
       })
-      setAdvisoryForm({ title: '', region: '', hazard_type: '', risk_level: 'MEDIUM', narrative: '', recommendation: '' })
+      setAdvisoryForm({ title: '', region: '', hazard_type: '', reporting_period: '', risk_level: 'MEDIUM', narrative: '', recommendation: '' })
       setAdvisoryMessage('Risk advisory published.')
       loadAll()
     } catch (err: any) {
@@ -535,7 +559,10 @@ export default function InternalPortal() {
 
       <section className="card" id="hazard-section">
         <h2>🌦️ Climate Hazard Exposure Distribution</h2>
-        <p className="note">Share of valid loan exposure associated with each reported climate hazard.</p>
+        <p className="note">
+          Share of valid loan exposure in regions/periods where each hazard was the most-frequently
+          recorded climate observation - a regional pattern, not a claim about any individual loan.
+        </p>
         <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', marginBottom: '0.75rem' }}>
           <input
             type="checkbox"
@@ -587,10 +614,16 @@ export default function InternalPortal() {
           TMA feed would use; once that exists, this manual step is no longer needed. See
           docs/TMA_INGESTION.md.
         </p>
+        <p className="note" style={{ fontWeight: 600 }}>
+          ⚠️ Self-declared source — the option below is your own belief about where the file came
+          from; it is not independently verified. Do not select "TMA" or "PMO" unless you are
+          confident of the actual origin.
+        </p>
         <form onSubmit={handleClimateUpload} style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <select value={climateSource} onChange={(e) => setClimateSource(e.target.value)}>
-            <option value="MANUAL_UPLOAD">Manual Upload</option>
-            <option value="TMA_FILE">TMA File</option>
+            <option value="MANUAL_TMA_FILE">File I believe is from TMA</option>
+            <option value="MANUAL_PMO_FILE">File I believe is from PMO</option>
+            <option value="MANUAL_OTHER_FILE">Other source</option>
           </select>
           <input
             placeholder="Dataset name (optional)"
@@ -618,13 +651,22 @@ export default function InternalPortal() {
         </p>
         {qcMessage && <div className="alert-info">{qcMessage}</div>}
         <table>
-          <thead><tr><th>Region</th><th>Reporting Period</th><th>Unvalidated Readings</th><th>Action</th></tr></thead>
+          <thead><tr><th>Region</th><th>Reporting Period</th><th>Unvalidated Readings</th><th>Reason (recommended, esp. for Flag)</th><th>Action</th></tr></thead>
           <tbody>
             {unvalidatedGroups.map((g) => (
               <tr key={`${g.region}-${g.reporting_period}`}>
                 <td>{g.region}</td>
                 <td>{g.reporting_period}</td>
                 <td>{g.count}</td>
+                <td>
+                  <input
+                    type="text"
+                    placeholder="e.g. Cross-checked against station report"
+                    value={qcReasons[`${g.region}-${g.reporting_period}`] || ''}
+                    onChange={(e) => setQcReasons((prev) => ({ ...prev, [`${g.region}-${g.reporting_period}`]: e.target.value }))}
+                    style={{ width: '100%', minWidth: 180 }}
+                  />
+                </td>
                 <td>
                   <button onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'VALIDATED')} style={{ marginRight: '0.4rem' }}>
                     ✓ Validate
@@ -635,7 +677,7 @@ export default function InternalPortal() {
                 </td>
               </tr>
             ))}
-            {unvalidatedGroups.length === 0 && <tr><td colSpan={4}>Nothing awaiting review right now.</td></tr>}
+            {unvalidatedGroups.length === 0 && <tr><td colSpan={5}>Nothing awaiting review right now.</td></tr>}
           </tbody>
         </table>
 
@@ -742,6 +784,14 @@ export default function InternalPortal() {
             <datalist id="region-options">
               {[...new Set(hazardExposure.map((h) => h.region))].map((r) => <option key={r} value={r} />)}
             </datalist>
+            <label>Reporting Period (optional — strongly recommended when a Region is set, so the attached climate reading matches the same period as the financial figures)</label>
+            <select
+              value={advisoryForm.reporting_period}
+              onChange={(e) => setAdvisoryForm({ ...advisoryForm, reporting_period: e.target.value })}
+            >
+              <option value="">-- Not period-specific --</option>
+              {REPORTING_PERIOD_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
             <label>Hazard Type (optional)</label>
             <select
               value={advisoryForm.hazard_type}
@@ -798,7 +848,7 @@ export default function InternalPortal() {
                   <div>
                     <h4>{note.title}</h4>
                     <div className="advisory-meta">
-                      {note.region || 'All regions'} · {note.hazard_type || 'General'} · by {note.created_by_name} · {new Date(note.created_at).toLocaleDateString()}
+                      {note.region || 'All regions'} · {note.reporting_period || 'Not period-specific'} · {note.hazard_type || 'General'} · by {note.created_by_name} · {new Date(note.created_at).toLocaleDateString()}
                     </div>
                   </div>
                   <span className={`badge badge-${note.risk_level.toLowerCase()}`}>{note.risk_level}</span>
@@ -894,9 +944,13 @@ export default function InternalPortal() {
 
       <section className="card">
         <h2>🌍 Climate & Financial Exposure by Region</h2>
-        <p className="note">Total value of loans (from valid submissions) per region and reported climate hazard.</p>
+        <p className="note">
+          Loan value in regions/periods where this hazard was the most-frequently recorded climate
+          observation - this describes the region's recorded climate pattern, not a claim that
+          each individual loan itself was directly affected by that hazard.
+        </p>
         <table>
-          <thead><tr><th>Region</th><th>Hazard</th><th>Loan Exposure</th><th>Record Count</th></tr></thead>
+          <thead><tr><th>Region</th><th>Recorded Hazard</th><th>Loan Exposure in Region/Period</th><th>Record Count</th></tr></thead>
           <tbody>
             {hazardExposure.map((h, idx) => (
               <tr key={idx}>

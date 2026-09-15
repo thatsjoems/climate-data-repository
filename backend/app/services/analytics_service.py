@@ -205,6 +205,10 @@ def get_hazard_exposure(
             if c.hazard_type and c.hazard_type != "None":
                 hazard_counts[c.hazard_type] = hazard_counts.get(c.hazard_type, 0) + 1
         if hazard_counts:
+            # The most-frequently recorded hazard for this region/period - a
+            # description of the region's recorded climate pattern, NOT a claim
+            # that every individual loan below was itself directly affected by
+            # this specific hazard (Module: hazard terminology precision).
             dominant_hazard = max(hazard_counts, key=hazard_counts.get)
 
         key = (combo.region, dominant_hazard)
@@ -216,7 +220,11 @@ def get_hazard_exposure(
     return list(aggregated.values())
 
 
-def get_region_map_points(db: Session, institution_id: str | None = None) -> list[dict]:
+def get_region_map_points(
+    db: Session, institution_id: str | None = None, validated_only: bool = False,
+    filter_institution_id: str | None = None, filter_region: str | None = None,
+    filter_reporting_period: str | None = None,
+) -> list[dict]:
     """
     Region-level map points for the Geospatial Overview: real hazard-exposure
     figures (from get_hazard_exposure) attached to real region centroid
@@ -226,10 +234,21 @@ def get_region_map_points(db: Session, institution_id: str | None = None) -> lis
     A region is only included if we actually have a known centroid for it,
     so an unrecognized/misspelled region name is silently excluded rather
     than plotted at a wrong or default location.
+
+    Accepts the exact same filters as the dashboard's other analytical
+    views (Module: map/dashboard filter consistency - found via external
+    review: without this, an analyst could narrow the dashboard to one
+    institution/region/period/VALIDATED-only, while the map kept silently
+    showing the unfiltered sector-wide picture. A supervisory tool must
+    never let two parts of the same screen silently disagree about scope.
     """
     from app.services.geo_reference import get_region_coordinates
 
-    exposure_rows = get_hazard_exposure(db, institution_id)
+    exposure_rows = get_hazard_exposure(
+        db, institution_id, validated_only=validated_only,
+        filter_institution_id=filter_institution_id, filter_region=filter_region,
+        filter_reporting_period=filter_reporting_period,
+    )
 
     # Collapse per-hazard rows into one point per region (a region may have
     # several hazard types recorded across its submissions).
@@ -273,7 +292,7 @@ def get_region_map_points(db: Session, institution_id: str | None = None) -> lis
 
 def get_exposure_snapshot(
     db: Session, region: str | None = None, hazard_type: str | None = None,
-    institution_id: str | None = None,
+    institution_id: str | None = None, reporting_period: str | None = None,
 ) -> dict:
     """
     Real, queryable figures for a given region/hazard combination (or overall if
@@ -289,14 +308,25 @@ def get_exposure_snapshot(
     climate data here is ALWAYS restricted to quality_flag == VALIDATED, with
     no toggle. If no VALIDATED reading exists, `climate_data_note` explains
     this plainly instead of silently attaching a SYNTHETIC/UNVALIDATED one.
+
+    reporting_period (optional): when the analyst scopes the advisory to a
+    specific period, financial exposure AND the attached climate reading are
+    BOTH restricted to that exact period - never "whatever the latest reading
+    happens to be", which could silently be a different quarter than the
+    financial figures the advisory is actually about (found via external
+    review). When omitted, the advisory is a general/undated note and the
+    prior behaviour (latest available reading) applies.
     """
-    query = _active_records_query(db, institution_id)
+    query = _active_records_query(db, institution_id, filter_reporting_period=reporting_period)
     if region:
         query = query.filter(SubmissionRecord.region == region)
     if hazard_type:
+        hazard_climate_filters = [ClimateRecord.hazard_type == hazard_type, ClimateRecord.quality_flag == "VALIDATED"]
+        if reporting_period:
+            hazard_climate_filters.append(ClimateRecord.reporting_period == reporting_period)
         regions_with_hazard = (
             db.query(ClimateRecord.region)
-            .filter(ClimateRecord.hazard_type == hazard_type, ClimateRecord.quality_flag == "VALIDATED")
+            .filter(*hazard_climate_filters)
             .distinct()
             .all()
         )
@@ -313,26 +343,39 @@ def get_exposure_snapshot(
     snapshot = {
         "region": region,
         "hazard_type": hazard_type,
+        "reporting_period": reporting_period,
         "total_loan_exposure_tzs": float(total_exposure),
         "total_collateral_value_tzs": float(total_collateral),
         "matching_record_count": record_count,
     }
 
-    # Attach the most recent real meteorological reading for this region, if any exists -
-    # this is what actually lets the analyst combine financial exposure with climate data
-    # in a single advisory note, instead of the two datasets living in isolation.
-    # FLAGGED readings are excluded, matching the same rule used everywhere else
-    # a climate figure is presented (Combined Exposure, Hazard Exposure) - a
-    # reading an analyst has already rejected must never resurface here.
+    # Attach a real meteorological reading for this region, if any exists -
+    # this is what actually lets the analyst combine financial exposure with
+    # climate data in a single advisory note, instead of the two datasets
+    # living in isolation.
     if region:
         # A Risk Advisory Note is a formal, archived supervisory document -
         # held to a stricter standard than the exploratory dashboard views
         # above. Only a fully human-reviewed (VALIDATED) reading may be
         # attached; SYNTHETIC/UNVALIDATED readings are never silently
         # attached to something presented as informing a real decision.
+        climate_filters = [ClimateRecord.region == region, ClimateRecord.quality_flag == "VALIDATED"]
+        if reporting_period:
+            parsed = _quarter_to_months(reporting_period)
+            period_filter = ClimateRecord.reporting_period == reporting_period
+            if parsed:
+                year, months = parsed
+                legacy_filter = (
+                    (ClimateRecord.reporting_period.is_(None))
+                    & (ClimateRecord.year == year)
+                    & (ClimateRecord.month.in_(months))
+                )
+                climate_filters.append(period_filter | legacy_filter)
+            else:
+                climate_filters.append(period_filter)
         latest_climate = (
             db.query(ClimateRecord)
-            .filter(ClimateRecord.region == region, ClimateRecord.quality_flag == "VALIDATED")
+            .filter(*climate_filters)
             .order_by(ClimateRecord.year.desc(), ClimateRecord.month.desc())
             .first()
         )
@@ -348,8 +391,9 @@ def get_exposure_snapshot(
                 "quality_flag": latest_climate.quality_flag,
             }
         else:
+            scope = f"{region} / {reporting_period}" if reporting_period else region
             snapshot["climate_data_note"] = (
-                f"No VALIDATED climate observation is available for {region} - "
+                f"No VALIDATED climate observation is available for {scope} - "
                 f"this advisory is based on financial exposure data only."
             )
 

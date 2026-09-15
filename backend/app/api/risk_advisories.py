@@ -33,6 +33,7 @@ def _to_out(db: Session, note: RiskAdvisoryNote) -> RiskAdvisoryOut:
         title=note.title,
         region=note.region,
         hazard_type=note.hazard_type,
+        reporting_period=note.reporting_period,
         risk_level=note.risk_level,
         narrative=note.narrative,
         recommendation=note.recommendation,
@@ -71,12 +72,16 @@ def create_risk_advisory(
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):
     """Only BOT_USER (Analyst) may author a risk advisory - see module docstring."""
-    snapshot = get_exposure_snapshot(db, region=payload.region, hazard_type=payload.hazard_type)
+    snapshot = get_exposure_snapshot(
+        db, region=payload.region, hazard_type=payload.hazard_type,
+        reporting_period=payload.reporting_period,
+    )
 
     note = RiskAdvisoryNote(
         title=payload.title,
         region=payload.region,
         hazard_type=payload.hazard_type,
+        reporting_period=payload.reporting_period,
         risk_level=payload.risk_level,
         narrative=payload.narrative,
         recommendation=payload.recommendation,
