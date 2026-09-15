@@ -396,6 +396,26 @@ export default function InternalPortal() {
     }
   }
 
+  async function handleGenerateReportImage() {
+    setReportGenerating(true)
+    setReportMessage(null)
+    try {
+      const res = await apiClient.get(`/reports/summary.png?${buildFilterQuery({ validated_only: validatedOnly })}`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'image/png' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `CDR_Summary_Report_${new Date().toISOString().slice(0, 10)}.png`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setReportMessage('Image snapshot generated and downloaded (reflects current Dashboard Filters, if any).')
+    } catch (err: any) {
+      setReportMessage('Failed to generate the image snapshot.')
+    } finally {
+      setReportGenerating(false)
+    }
+  }
+
   async function handleReview(submissionId: string, decision: 'APPROVE' | 'REJECT') {
     await apiClient.post(`/submissions/${submissionId}/review`, {
       decision,
@@ -460,13 +480,15 @@ export default function InternalPortal() {
         <h2>⬇️ Automated Reports</h2>
         <p className="note">
           Compiles the current KPI summary, climate hazard exposure, combined climate-financial
-          exposure, and recent Risk Advisory Reports into a single PDF — the same figures shown
-          on this dashboard, ready to file or share instead of copying numbers manually.
+          exposure, and recent Risk Advisory Reports into PDF, Excel, or a single-image snapshot
+          — the same figures shown on this dashboard, ready to file or share instead of copying
+          numbers manually.
         </p>
         <button className="btn-accent" onClick={handleGenerateReport} disabled={reportGenerating}>
           {reportGenerating ? 'Generating...' : 'Generate Summary Report (PDF)'}
         </button>{' '}
         <button onClick={handleGenerateReportExcel} disabled={reportGenerating}>Generate Summary Report (Excel)</button>{' '}
+        <button onClick={handleGenerateReportImage} disabled={reportGenerating}>Generate Summary Snapshot (Image)</button>{' '}
         <button onClick={handleDownloadCombinedCsv}>Download Combined Exposure (CSV)</button>
         {reportMessage && <div className="alert-info">{reportMessage}</div>}
       </section>

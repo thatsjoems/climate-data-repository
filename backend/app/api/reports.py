@@ -15,7 +15,7 @@ from datetime import datetime
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.models.models import User, RoleEnum
-from app.services.report_service import generate_summary_report_pdf, generate_summary_report_excel
+from app.services.report_service import generate_summary_report_pdf, generate_summary_report_excel, generate_summary_report_image
 from app.services import analytics_service
 from app.services.audit_service import record_audit
 
@@ -89,6 +89,41 @@ def download_summary_report_excel(
     return StreamingResponse(
         io.BytesIO(excel_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/summary.png")
+def download_summary_report_image(
+    filter_institution_id: str | None = Query(default=None),
+    filter_region: str | None = Query(default=None),
+    filter_reporting_period: str | None = Query(default=None),
+    validated_only: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
+):
+    """
+    A single PNG snapshot of the KPI summary and hazard exposure - the ICN's
+    own wording names "PDF, Excel, CSV and image files" as the required
+    export formats, so this completes that list. Same real, queried figures
+    as the PDF/Excel reports - never separately computed. Honors the same
+    dashboard filters.
+    """
+    image_bytes = generate_summary_report_image(
+        db, current_user, filter_institution_id=filter_institution_id,
+        filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+        validated_only=validated_only,
+    )
+
+    record_audit(
+        db, current_user.id, "REPORT_GENERATED", "Report", None,
+        "Automated summary report (Image) generated"
+    )
+
+    filename = f"CDR_Summary_Report_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.png"
+    return StreamingResponse(
+        io.BytesIO(image_bytes),
+        media_type="image/png",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 

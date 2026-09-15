@@ -43,7 +43,6 @@ Figure 4). Two concrete details from that report were adopted here:
   training environment — credentials are shown once to the approving System Admin, who relays
   them to the institution through a verified channel (phone/official email). The same applies to
   approved password reset requests (`docs/ICN_REQUIREMENTS_TRACEABILITY_MATRIX.md`, item 11).
-- Dashboard export to PDF/Excel/Image (the underlying data structure exists, but export endpoints have not been added).
 - Enterprise SSO, production-grade deployment, and formal security certification.
 
 ## Security - What Was Implemented in This Prototype

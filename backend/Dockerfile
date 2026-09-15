@@ -3,6 +3,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# fonts-dejavu-core: needed for rendering readable text in the PNG dashboard-
+# summary export (Module: image export) - python:3.12-slim has no TTF fonts
+# by default, so PIL would otherwise fall back to a tiny, hard-to-read bitmap font.
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

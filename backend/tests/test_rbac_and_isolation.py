@@ -286,6 +286,24 @@ def test_bot_user_can_download_summary_excel(client, db_session):
     assert "spreadsheetml" in res.headers["content-type"]
 
 
+def test_bot_user_can_download_summary_image(client, db_session):
+    """Image export (ICN's own wording: 'PDF, Excel, CSV and image files')."""
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    res = client.get("/api/reports/summary.png", headers=auth_header(token))
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/png"
+    assert res.content[:8] == b"\x89PNG\r\n\x1a\n"  # real PNG file signature, not just the right content-type header
+
+
+def test_institution_user_cannot_download_summary_image(client, db_session):
+    inst = make_institution(db_session, code="BANK-A")
+    make_user(db_session, role=RoleEnum.INSTITUTION_USER, institution=inst, username="inst_user")
+    token = login(client, "inst_user").json()["access_token"]
+    res = client.get("/api/reports/summary.png", headers=auth_header(token))
+    assert res.status_code == 403
+
+
 def test_institution_user_can_export_own_submission_history(client, db_session):
     inst = make_institution(db_session, code="BANK-A")
     make_user(db_session, role=RoleEnum.INSTITUTION_USER, institution=inst, username="inst_user")

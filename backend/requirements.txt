@@ -15,6 +15,7 @@ psycopg2-binary==2.9.9
 
 # Report generation (Module: automated reporting)
 reportlab==4.2.5
+Pillow==10.4.0
 
 # Testing (Module: automated testing - see tests/)
 pytest==8.3.3
