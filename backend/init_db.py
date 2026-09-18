@@ -22,23 +22,52 @@ def ensure_schema():
     """Bring the database to the latest Alembic revision without deleting data.
 
     Fresh databases are migrated normally. A legacy CDR database that predates
-    Alembic is stamped at the initial baseline only after its expected tables
-    are confirmed, then upgraded through subsequent migrations.
+    Alembic is stamped at the initial baseline only after a preflight check
+    confirms its actual columns - not just its table names - match what
+    revision d2616a6f36ac's own CREATE TABLE statements expect. Table-name
+    matching alone cannot tell a fully-caught-up legacy database (which is
+    what every real deployment of this project actually is, since the prior
+    ensure_postgres_compatibility() bridge already added columns like
+    climate_records.batch_id before Alembic existed) apart from an older,
+    partially-migrated one for which stamping at this baseline would be
+    silently wrong. Blindly stamping a mismatched database is worse than
+    refusing to guess - it would make Alembic believe columns already exist
+    that don't, and every later migration would then build on a false premise.
     """
     backend_dir = Path(__file__).resolve().parent
     with engine.connect() as conn:
-        tables = set(inspect(conn).get_table_names())
+        insp = inspect(conn)
+        tables = set(insp.get_table_names())
+        climate_columns = (
+            {c["name"] for c in insp.get_columns("climate_records")}
+            if "climate_records" in tables else set()
+        )
     expected = {
         "institutions", "users", "refresh_tokens", "submissions",
         "submission_records", "validation_errors", "climate_records",
         "risk_advisory_notes", "password_reset_requests", "notifications",
         "climate_ingestion_batches", "climate_ingestion_errors", "audit_logs",
     }
-    alembic_tables = tables & {"alembic_version"}
     if "alembic_version" not in tables and expected.issubset(tables):
-        # The current pre-Alembic CDR schema is the baseline. Do not destroy or
-        # recreate it; subsequent migrations perform additive/controlled fixes.
-        subprocess.run([sys.executable, "-m", "alembic", "stamp", "d2616a6f36ac"], cwd=backend_dir, check=True)
+        if "batch_id" in climate_columns:
+            # Matches revision d2616a6f36ac's own snapshot exactly (that
+            # migration's climate_records already includes batch_id) - safe
+            # to baseline here and let subsequent migrations build on it.
+            subprocess.run([sys.executable, "-m", "alembic", "stamp", "d2616a6f36ac"], cwd=backend_dir, check=True)
+        else:
+            # Every table this project has ever created is here, but this
+            # specific database predates even the batch_id bridge - an older
+            # shape than any baseline this project's migrations assume. Stop
+            # rather than guess: an incorrect stamp cannot be safely undone
+            # once later migrations have built on it.
+            raise RuntimeError(
+                "Found the CDR tables, but climate_records is missing the "
+                "batch_id column expected by every Alembic baseline this "
+                "project ships. Refusing to guess which revision this "
+                "database actually matches - back it up, then either add "
+                "batch_id manually to match d2616a6f36ac before retrying, "
+                "or start from a fresh database."
+            )
     subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=backend_dir, check=True)
 
 print("Applying database migrations...")

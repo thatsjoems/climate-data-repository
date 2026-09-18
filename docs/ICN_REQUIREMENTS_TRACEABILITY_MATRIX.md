@@ -423,3 +423,29 @@ returning a clear HTTP 409 instead of a raw 500 if a genuine concurrent
 upload ever collides with the new database-level uniqueness guarantee -
 the database-level protection this review added is a real backstop now,
 but a caught, explained conflict is better than an unhandled crash.
+
+
+## Ninth review — independent re-verification of the eighth review's fixes
+
+A separate reviewer, given only the original (pre-fix) uploaded ZIP from the
+eighth review, independently re-derived both critical defects above and
+confirmed them against the same file paths - a useful cross-check, since it
+reached the same conclusions through its own reading of the code rather than
+trusting this project's account of them. It also correctly noted that the
+fixes were absent from *that particular ZIP* (accurate for the file it was
+given) and raised one additional, genuinely useful point that this project's
+own fix had not yet covered:
+
+**The legacy-database preflight was checking table names only, not actual
+columns.** `expected.issubset(tables)` confirms every CDR table exists, but
+says nothing about whether a given table's *columns* match what revision
+`d2616a6f36ac` assumes - a table-name match cannot tell a fully-caught-up
+legacy database (every real deployment of this project, since the prior
+`ensure_postgres_compatibility()` bridge already added `climate_records.batch_id`
+before Alembic existed) apart from an older, partially-migrated one for which
+stamping at this baseline would be silently wrong. `init_db.py`'s
+`ensure_schema()` now also checks that `climate_records.batch_id` actually
+exists before stamping a legacy database at `d2616a6f36ac`; if the tables
+exist but that column doesn't, it raises a clear error and refuses to guess,
+rather than risk a mismatched stamp that later migrations would silently
+build on.
