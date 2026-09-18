@@ -12,7 +12,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, String, Integer, Float, Boolean, DateTime, Date, ForeignKey, Text, Enum as SAEnum
+    Column, String, Integer, Float, Boolean, DateTime, Date, ForeignKey, Text, Enum as SAEnum,
+    Index, CheckConstraint
 )
 from sqlalchemy.orm import relationship
 
@@ -79,7 +80,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     role = Column(SAEnum(RoleEnum), nullable=False, default=RoleEnum.INSTITUTION_USER)
-    institution_id = Column(String, ForeignKey("institutions.id"), nullable=True)
+    institution_id = Column(String, ForeignKey("institutions.id"), nullable=True, index=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, nullable=True)
@@ -152,6 +153,13 @@ class Submission(Base):
     institution = relationship("Institution", back_populates="submissions")
     records = relationship("SubmissionRecord", back_populates="submission", cascade="all, delete-orphan")
     errors = relationship("ValidationError", back_populates="submission", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_submissions_institution_period_status", "institution_id", "reporting_period", "status"),
+        Index("ix_submissions_submitted_by_user", "submitted_by_user_id"),
+        Index("ix_submissions_reviewed_by_user", "reviewed_by_user_id"),
+        CheckConstraint("length(reporting_period) = 7 AND substr(reporting_period, 5, 2) = '-Q' AND substr(reporting_period, 7, 1) IN ('1','2','3','4')", name="ck_submissions_reporting_period_format"),
+    )
 
 
 class SubmissionRecord(Base):
@@ -229,6 +237,22 @@ class SubmissionRecord(Base):
 
     submission = relationship("Submission", back_populates="records")
 
+    __table_args__ = (
+        Index("ix_submission_records_submission_loan", "submission_id", "loan_id"),
+        Index("ix_submission_records_submission_valid_loan", "submission_id", "is_valid", "loan_id"),
+        CheckConstraint("loan_amount_tzs IS NULL OR loan_amount_tzs >= 0", name="ck_submission_records_loan_amount_nonnegative"),
+        CheckConstraint("outstanding_principal_tzs IS NULL OR outstanding_principal_tzs >= 0", name="ck_submission_records_outstanding_nonnegative"),
+        CheckConstraint("collateral_value_tzs IS NULL OR collateral_value_tzs >= 0", name="ck_submission_records_collateral_value_nonnegative"),
+        CheckConstraint("collateral_forced_sale_value_tzs IS NULL OR collateral_forced_sale_value_tzs >= 0", name="ck_submission_records_forced_sale_nonnegative"),
+        CheckConstraint("insurance_value_protected_tzs IS NULL OR insurance_value_protected_tzs >= 0", name="ck_submission_records_insurance_nonnegative"),
+        CheckConstraint("annual_turnover_tzs IS NULL OR annual_turnover_tzs >= 0", name="ck_submission_records_turnover_nonnegative"),
+        CheckConstraint("annual_interest_rate IS NULL OR (annual_interest_rate >= 0 AND annual_interest_rate <= 100)", name="ck_submission_records_interest_rate"),
+        CheckConstraint("loan_latitude IS NULL OR (loan_latitude >= -90 AND loan_latitude <= 90)", name="ck_submission_records_loan_latitude"),
+        CheckConstraint("loan_longitude IS NULL OR (loan_longitude >= -180 AND loan_longitude <= 180)", name="ck_submission_records_loan_longitude"),
+        CheckConstraint("collateral_latitude IS NULL OR (collateral_latitude >= -90 AND collateral_latitude <= 90)", name="ck_submission_records_collateral_latitude"),
+        CheckConstraint("collateral_longitude IS NULL OR (collateral_longitude >= -180 AND collateral_longitude <= 180)", name="ck_submission_records_collateral_longitude"),
+    )
+
 
 class ValidationError(Base):
     __tablename__ = "validation_errors"
@@ -241,6 +265,10 @@ class ValidationError(Base):
     severity = Column(String(20), default="ERROR")  # ERROR | WARNING
 
     submission = relationship("Submission", back_populates="errors")
+
+    __table_args__ = (
+        Index("ix_validation_errors_submission", "submission_id"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +321,9 @@ class ClimateRecord(Base):
     period_type = Column(String(20), nullable=True)        # DAILY, MONTHLY, QUARTERLY, ANNUAL
 
     # ---- Provenance / traceability ----
+    # Links each observation to the ingestion run that created it. Nullable for
+    # backward compatibility with any legacy rows created before batch linkage.
+    batch_id = Column(String, ForeignKey("climate_ingestion_batches.id"), nullable=True, index=True)
     dataset_name = Column(String(255), nullable=True)
     dataset_version = Column(String(50), nullable=True)
     station_id = Column(String(100), nullable=True, index=True)
@@ -304,6 +335,29 @@ class ClimateRecord(Base):
     quality_flag = Column(String(30), default="UNVALIDATED")  # UNVALIDATED, VALIDATED, FLAGGED, SYNTHETIC
     processing_method = Column(String(100), nullable=True)    # e.g. SYNTHETIC_SEED, TMA_INGESTION, MANUAL_ENTRY
     ingestion_timestamp = Column(DateTime, default=datetime.utcnow)
+
+    ingestion_batch = relationship("ClimateIngestionBatch", back_populates="records")
+
+    __table_args__ = (
+        Index("ix_climate_records_region_period_quality", "region", "reporting_period", "quality_flag"),
+        CheckConstraint("month IS NULL OR (month >= 1 AND month <= 12)", name="ck_climate_records_month"),
+        CheckConstraint("rainfall_mm IS NULL OR rainfall_mm >= 0", name="ck_climate_records_rainfall_nonnegative"),
+        CheckConstraint("avg_temperature_c IS NULL OR (avg_temperature_c >= -90 AND avg_temperature_c <= 70)", name="ck_climate_records_avg_temperature_plausible"),
+        CheckConstraint("temperature_min_c IS NULL OR (temperature_min_c >= -90 AND temperature_min_c <= 70)", name="ck_climate_records_min_temperature_plausible"),
+        CheckConstraint("temperature_max_c IS NULL OR (temperature_max_c >= -90 AND temperature_max_c <= 70)", name="ck_climate_records_max_temperature_plausible"),
+        CheckConstraint("latitude IS NULL OR (latitude >= -90 AND latitude <= 90)", name="ck_climate_records_latitude"),
+        CheckConstraint("longitude IS NULL OR (longitude >= -180 AND longitude <= 180)", name="ck_climate_records_longitude"),
+        CheckConstraint("quality_flag IN ('UNVALIDATED','VALIDATED','FLAGGED','SYNTHETIC')", name="ck_climate_records_quality_flag"),
+        CheckConstraint("period_type IS NULL OR period_type IN ('DAILY','MONTHLY','QUARTERLY','ANNUAL')", name="ck_climate_records_period_type"),
+        CheckConstraint("hazard_severity IS NULL OR hazard_severity IN ('LOW','MEDIUM','HIGH')", name="ck_climate_records_hazard_severity"),
+        CheckConstraint("temperature_min_c IS NULL OR avg_temperature_c IS NULL OR temperature_min_c <= avg_temperature_c", name="ck_climate_records_min_le_avg"),
+        CheckConstraint("temperature_max_c IS NULL OR avg_temperature_c IS NULL OR avg_temperature_c <= temperature_max_c", name="ck_climate_records_avg_le_max"),
+        CheckConstraint("temperature_min_c IS NULL OR temperature_max_c IS NULL OR temperature_min_c <= temperature_max_c", name="ck_climate_records_min_le_max"),
+        Index(
+            "ix_climate_records_observation_identity",
+            "region", "district", "year", "month", "source_record_id", "station_id",
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -344,10 +398,15 @@ class RiskAdvisoryNote(Base):
     narrative = Column(Text, nullable=False)               # analyst's assessment in their own words
     recommendation = Column(Text, nullable=True)            # analyst's recommendation to BOT decision-makers
 
-    data_snapshot = Column(Text, nullable=True)             # JSON string: real figures the note was based on
+    data_snapshot = Column(Text, nullable=True)             # JSON string: real figures the note was based on; kept Text for SQLite/PostgreSQL compatibility
 
     created_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_risk_advisory_notes_region_period", "region", "reporting_period"),
+        Index("ix_risk_advisory_notes_created_by", "created_by_user_id"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +441,11 @@ class PasswordResetRequest(Base):
     reviewed_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_password_reset_requests_user_status", "user_id", "status"),
+        Index("ix_password_reset_requests_reviewer", "reviewed_by_user_id"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -424,7 +488,7 @@ class ClimateIngestionBatch(Base):
     __tablename__ = "climate_ingestion_batches"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    source = Column(String(100), nullable=False)          # e.g. "MANUAL_UPLOAD", "TMA_FILE" - never invented as "TMA_API" unless real
+    source = Column(String(100), nullable=False)          # e.g. "MANUAL_TMA_FILE", "MANUAL_PMO_FILE"; verified integration labels are only used once a real feed exists
     dataset_name = Column(String(255), nullable=True)
     dataset_version = Column(String(50), nullable=True)
     file_name = Column(String(500), nullable=True)
@@ -438,7 +502,13 @@ class ClimateIngestionBatch(Base):
     status = Column(String(30), default="COMPLETED", nullable=False)  # COMPLETED, FAILED
     error_summary = Column(Text, nullable=True)  # human-readable summary of rejected-row reasons (not every row - see ClimateIngestionError for that)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    records = relationship("ClimateRecord", back_populates="ingestion_batch")
+
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_climate_ingestion_batches_source_created", "source", "created_at"),
+    )
 
 
 class ClimateIngestionError(Base):
@@ -450,6 +520,12 @@ class ClimateIngestionError(Base):
     row_number = Column(Integer, nullable=True)
     column_name = Column(String(100), nullable=True)
     error_description = Column(Text, nullable=False)
+
+    batch = relationship("ClimateIngestionBatch")
+
+    __table_args__ = (
+        Index("ix_climate_ingestion_errors_batch_row", "batch_id", "row_number"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -463,4 +539,10 @@ class AuditLog(Base):
     entity_type = Column(String(100), nullable=True)  # e.g. Submission, User
     entity_id = Column(String, nullable=True)
     details = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_audit_logs_action_created", "action", "created_at"),
+        Index("ix_audit_logs_entity", "entity_type", "entity_id"),
+        Index("ix_audit_logs_user_created", "user_id", "created_at"),
+    )

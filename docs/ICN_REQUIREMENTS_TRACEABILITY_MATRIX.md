@@ -171,18 +171,12 @@ A second external review correctly identified three further issues, verified aga
 3. **Advanced filtering** (item 9 above) was completed in direct response
    to this review.
 
-**Deliberately not built**: a manual "Validate/Flag" QC UI for individual
-climate readings. This was considered and explicitly deferred - the ICN
-does not require a human-driven promotion workflow for climate readings;
-it is infrastructure specific to the interim manual bridge (see
-`docs/TMA_INGESTION.md`), which is itself temporary by design. Effort was
-directed at Advanced Filtering instead, which the ICN's own wording
-requires and which does not depend on BOT-provided access.
+**Earlier decision (superseded):** a manual "Validate/Flag" QC UI was initially
+deferred. That decision was later reversed because `quality_flag=VALIDATED`
+would otherwise be unreachable through an operational workflow. The current
+QC implementation is documented in the next section.
 
-## Third external review — this decision was revisited and reversed
-
-The "deliberately not built" QC UI decision immediately above was
-reconsidered after a third review made a more compelling architectural
+The earlier QC deferral was reconsidered after a third review made a more compelling architectural
 argument than the one that led to deferring it: without ANY promotion
 action, `quality_flag=VALIDATED` would be permanently unreachable in the
 ENTIRE system - not just during the interim manual-bridge period, but even
@@ -249,7 +243,7 @@ Six issues from a fourth review were verified against actual code and fixed:
    is rejected rather than silently kept as a fragmenting free-text category.
 5. **Source provenance control**: the climate ingestion "source" field was
    free text, so an analyst could label any manually-uploaded file
-   `TMA_FILE`, indistinguishable from a genuinely verified feed once stored.
+   an official-looking `TMA_FILE` label, indistinguishable from a genuinely verified feed once stored.
    Now restricted to `MANUAL_TMA_FILE` / `MANUAL_PMO_FILE` /
    `MANUAL_OTHER_FILE` - every option is honest that this is a human's
    self-declared belief about origin, not a verified integration. No
@@ -293,3 +287,139 @@ Five issues fixed after this review confirmed all prior major fixes held:
    optional `reason` (UI: a text box next to each Validate/Flag row),
    recorded in the audit log entry - closing the "no justification for a QC
    decision" governance gap raised in two separate reviews.
+
+## Sixth external review — fixes applied
+
+Two further issues verified against actual code and fixed:
+
+1. **KPI filter self-availability bug**: when an INSTITUTION_USER's security
+   scope (`institution_id`) and an analytical `filter_institution_id` were
+   both passed into `_active_records_query()`, they were ANDed together as
+   two separate conditions on the same column - if they ever differed (e.g.
+   a stale/leftover filter value), the query became a contradiction
+   (`institution_id = 'A' AND institution_id = 'B'`), silently returning
+   ZERO records instead of the institution's own real data. Fixed: the
+   security scope now always wins, and the analytical filter is force-
+   cleared to `None` whenever a security scope is already present -
+   confirmed via `test_institution_user_cannot_widen_kpi_with_filter_institution_id`.
+   Also fixed in the same pass: the KPI's "Total Submissions" count did not
+   previously respect `filter_region`, while "Total Loan Exposure" did -
+   an inconsistency within one dashboard view. Both now join through
+   `SubmissionRecord` and apply the same region filter.
+2. **PENDING/INVALID submissions could enter exposure analytics**:
+   `EXCLUDED_STATUSES` only excluded REJECTED and SUPERSEDED, so a row from
+   a submission still awaiting validation (PENDING) or one whose file
+   overall failed validation (INVALID - "awaiting correction", and which
+   can never be directly approved without a corrected resubmission) could
+   still count toward official exposure figures purely because that
+   individual row happened to pass row-level checks. Fixed: only VALID and
+   APPROVED submissions now contribute - confirmed via
+   `test_pending_and_invalid_submissions_do_not_enter_exposure_analytics`.
+   Pre-existing tests were unaffected, since the shared `_seed_submission_for`
+   test helper already used VALID status.
+
+Also corrected: `docs/TMA_INGESTION.md` still described the climate
+duplicate-detection key without `station_id`, contradicting the actual key
+used since an earlier fix - now consistent.
+
+## Seventh external review — database-integrity fixes applied
+
+A review focused specifically on database design (not just application logic)
+found the schema's biggest gap: several integrity guarantees existed only in
+Python, not in the database itself. Verified and fixed:
+
+1. **`climate_records` had no link to the batch that created it.**
+   `source`/`dataset_name`/`station_id` described an observation's origin in
+   free text, but "which upload produced this row?" was not directly
+   answerable from the database. Fixed: `climate_records.batch_id` is now a
+   real foreign key to `climate_ingestion_batches.id`, set at ingestion time
+   (nullable, for any legacy rows) - confirmed via
+   `test_ingested_records_are_linked_to_their_batch`.
+2. **Ingestion audit event was a separate transaction from the data it
+   described.** The batch, its accepted records, and its rejected-row errors
+   committed first; the audit log entry committed afterward, in its own call.
+   A failure between the two could leave climate data saved with no audit
+   trail of it. Fixed: `record_audit()` gained an optional `commit=False`
+   mode (defaults to `True` everywhere else, so no other call site changed
+   behavior); the ingestion endpoint now flushes the audit event and commits
+   everything - batch, records, errors, audit log - together, once.
+3. **Missing indexes on several real query/filter paths** - composite
+   indexes added for `submissions(institution_id, reporting_period, status)`,
+   `submission_records(submission_id, loan_id)`, `climate_records(region,
+   reporting_period, quality_flag)`, and similar, matching how these tables
+   are actually filtered elsewhere in this codebase (not indexed "just in
+   case").
+4. **Controlled schema evolution with Alembic.** Database changes are now
+   represented by reproducible migration revisions. Existing pre-Alembic CDR
+   databases are baselined without deleting their data, then upgraded through
+   the integrity migration. Duplicate data is never silently deleted or merged.
+   Fresh databases are created exclusively through the migration chain.
+5. **Seed data no longer fakes a human QC decision.** Two hardcoded demo
+   rows previously seeded `quality_flag = VALIDATED` / `FLAGGED` directly -
+   states meant to represent a real BOT Analyst's judgement on real ingested
+   data. Removed: seed/demo climate observations now stay `SYNTHETIC`
+   throughout, matching the QC promotion endpoint's own existing rule that
+   SYNTHETIC rows are never reclassified as if a human had reviewed them.
+   **Operational consequence:** a freshly-seeded environment has no
+   VALIDATED climate data until someone actually ingests a file (e.g.
+   `climate_31regions_synthetic.csv`) and promotes it via Climate Data
+   Quality - Risk Advisory/Combined Exposure will show "no VALIDATED
+   observation available" until that step is done. This is intentional, not
+   a defect: it demonstrates the full pipeline rather than a shortcut.
+
+Left deliberately unimplemented, per the review's own caution against
+premature constraints: a database-level UNIQUE constraint for climate
+observation identity or `(institution, reporting_period, loan_id)` (nullable
+source/station identifiers and SUPERSEDED-submission versioning both need a
+clearly-defined canonical rule first, or a blind constraint would reject
+legitimate data); `reporting_period` as a real date-dimension type;
+`data_snapshot`/`audit_logs.details` moving from Text to JSONB. All three
+are noted here as known, intentionally-deferred future work, not gaps
+anyone should be surprised by later.
+
+## Eighth external review — Alembic migrations, database-level integrity
+
+This review added Alembic-based migrations (replacing the additive
+`ensure_postgres_compatibility()` bridge), database-level CHECK constraints
+across financial and climate fields, and two partial unique indexes enforcing
+climate-observation duplicate prevention at the database layer itself (not
+just in application code). Verified and merged, with two critical defects
+found and corrected before merging - not accepted on the strength of the
+reviewer's own "ALEMBIC_UPGRADE_OK" claim alone:
+
+1. **The `reporting_period` format CHECK constraint would have rejected every
+   valid value.** `substr(reporting_period, 6, 1) IN ('1','2','3','4')`
+   checks position 6 of e.g. `"2026-Q3"` - which is always the literal
+   character `'Q'`, never a digit. Confirmed by executing the exact
+   constraint against a real SQLite database: a plainly valid value like
+   `"2026-Q3"` was rejected. This would have made every submission upload
+   fail once the migration ran. Fixed to check position 7 (the actual
+   quarter digit) in both `models.py` and the migration file, then
+   re-verified against 7 real/invalid values including edge cases
+   (`"2026-Q5"`, `"2026Q1"`, `"26-Q1"`) - all now resolve correctly.
+2. **`init_db.py` tried to Alembic-stamp a revision ID that does not
+   exist.** It called `alembic stamp e9e9d40a61d2` to baseline a
+   pre-Alembic database, but neither migration file uses that revision
+   ID (the real initial-schema revision is `d2616a6f36ac`). Alembic
+   validates that a stamped revision exists, so this would have crashed
+   `init_db.py` for exactly the case it was meant to handle: upgrading
+   an existing CDR database (such as this project's own, from every prior
+   session) rather than a brand-new one. Fixed to reference the correct
+   revision ID.
+
+Both defects were the kind that only surface when data is actually
+inserted, or when upgrading a pre-existing database - neither is exercised
+by "does the migration file run on an empty database" testing, which
+matches the reviewer's own disclosure that the full pytest suite could not
+be run in their environment (missing `passlib`, no network access to
+install it). The duplicate-prevention indexes themselves were verified
+correct against 5 real-database scenarios (true duplicate by
+`source_record_id`, true duplicate by `station_id` alone, two observations
+with no identifiers at all - correctly both allowed, since neither can be
+proven duplicate - and a distinct station correctly allowed).
+
+Also added: an `IntegrityError` catch around the climate-ingestion commit,
+returning a clear HTTP 409 instead of a raw 500 if a genuine concurrent
+upload ever collides with the new database-level uniqueness guarantee -
+the database-level protection this review added is a real backstop now,
+but a caught, explained conflict is better than an unhandled crash.

@@ -185,7 +185,7 @@ This file. Also see the updated
 
 | Item | Why it was skipped |
 |---|---|
-| Alembic database migrations | ICN never mentions migrations; `Base.metadata.create_all()` was already an accepted, documented simplification for this training prototype |
+| Alembic database migrations | Production schema evolution is now controlled by a reproducible migration chain; this is an engineering hardening measure rather than a new user-facing ICN feature |
 | JWT → HttpOnly cookie + CSRF rearchitecture, refresh tokens | Large architectural change with no ICN basis; "secure login" is already met by hashing, lockout, and enumeration protection above |
 | Climate-event geospatial data model (event ID, polygons, confidence) | Would require inventing structure for data we don't have access to (no real TMA/PMO feed) — explicitly against this project's no-fabrication rule |
 | ~~Latitude/longitude columns~~ | **Superseded** — see `docs/GEOSPATIAL_MAP.md`: a region-level map was built using known region centroid coordinates and real hazard-exposure data, without waiting for per-loan coordinates |

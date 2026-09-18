@@ -4,10 +4,9 @@ Shared pytest fixtures for the CDR backend test suite.
 Uses an isolated in-memory SQLite database per test (never the real cdr.db),
 so tests never touch real/demo data and can run in any order.
 
-NOTE: importing app.main also triggers its own Base.metadata.create_all()
-against whatever DATABASE_URL is configured for the app (SQLite by default) -
-that is a harmless side effect (an empty/unused table set) and is unrelated to
-the isolated in-memory database these fixtures actually test against.
+NOTE: the application no longer creates production tables as an import side
+effect. Tests intentionally create the isolated in-memory schema directly from
+SQLAlchemy metadata so each test remains independent of Alembic and real data.
 """
 import pytest
 from fastapi.testclient import TestClient

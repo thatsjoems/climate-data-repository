@@ -28,3 +28,15 @@ PostgreSQL 16, provisioned automatically by `docker-compose.yml` (see the `db` s
 Connection details are read from environment variables set in `docker-compose.yml` / a
 `.env` file next to it — see `.env.docker.example` at the project root for what to
 override before any real deployment (database password, `SECRET_KEY`, etc.).
+
+## Database migrations
+
+Production schema evolution is managed with Alembic. From `backend/` run:
+
+```bash
+python -m alembic upgrade head
+```
+
+Do not use `Base.metadata.create_all()` to evolve an existing production
+schema. The container entrypoint runs `init_db.py`, which applies migrations
+before optional demo seeding. Existing database volumes are not deleted.

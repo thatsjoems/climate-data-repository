@@ -8,14 +8,41 @@ climate data for Tanzania.
 Run with: python init_db.py
 """
 import random
+import subprocess
+import sys
 from datetime import datetime
+from pathlib import Path
 
-from app.core.database import Base, engine, SessionLocal
+from sqlalchemy import inspect
+from app.core.database import engine, SessionLocal
 from app.core.security import hash_password
-from app.models.models import User, Institution, RoleEnum, InstitutionType, ClimateRecord
+from app.models.models import User, Institution, RoleEnum, InstitutionType, ClimateRecord, ClimateIngestionBatch
 
-print("Creating database tables...")
-Base.metadata.create_all(bind=engine)
+def ensure_schema():
+    """Bring the database to the latest Alembic revision without deleting data.
+
+    Fresh databases are migrated normally. A legacy CDR database that predates
+    Alembic is stamped at the initial baseline only after its expected tables
+    are confirmed, then upgraded through subsequent migrations.
+    """
+    backend_dir = Path(__file__).resolve().parent
+    with engine.connect() as conn:
+        tables = set(inspect(conn).get_table_names())
+    expected = {
+        "institutions", "users", "refresh_tokens", "submissions",
+        "submission_records", "validation_errors", "climate_records",
+        "risk_advisory_notes", "password_reset_requests", "notifications",
+        "climate_ingestion_batches", "climate_ingestion_errors", "audit_logs",
+    }
+    alembic_tables = tables & {"alembic_version"}
+    if "alembic_version" not in tables and expected.issubset(tables):
+        # The current pre-Alembic CDR schema is the baseline. Do not destroy or
+        # recreate it; subsequent migrations perform additive/controlled fixes.
+        subprocess.run([sys.executable, "-m", "alembic", "stamp", "d2616a6f36ac"], cwd=backend_dir, check=True)
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=backend_dir, check=True)
+
+print("Applying database migrations...")
+ensure_schema()
 
 db = SessionLocal()
 
@@ -77,6 +104,18 @@ try:
         hazards = [None, None, "Drought", "Flood", None, "Cyclone"]
         random.seed(42)  # fixed seed for reproducible demo output
         seed_run_time = datetime.utcnow()
+        synthetic_batch = ClimateIngestionBatch(
+            source="SYNTHETIC_SEED",
+            dataset_name="CDR Synthetic Demo Dataset",
+            dataset_version="v1",
+            file_name="synthetic_seed",
+            records_received=0, records_accepted=0, records_rejected=0, records_duplicate=0,
+            status="COMPLETED",
+            error_summary="Synthetic demonstration data; not an external climate feed.",
+        )
+        db.add(synthetic_batch)
+        db.flush()
+        synthetic_count = 0
         for year in [2024, 2025, 2026]:
             for month in range(1, 13):
                 quarter = (month - 1) // 3 + 1
@@ -98,40 +137,14 @@ try:
                         quality_flag="SYNTHETIC",
                         processing_method="SYNTHETIC_SEED",
                         ingestion_timestamp=seed_run_time,
+                        batch_id=synthetic_batch.id,
                     ))
+                    synthetic_count += 1
+        synthetic_batch.records_received = synthetic_count
+        synthetic_batch.records_accepted = synthetic_count
 
-        db.commit()
-
-        # ---- Extra demo records covering ALL FOUR quality_flag states ----
-        # The main loop above only ever produces "SYNTHETIC" (and the ingestion
-        # pipeline only ever produces "UNVALIDATED" - see
-        # climate_ingestion_service.py's own reasoning for why it never
-        # self-assigns "VALIDATED"). Without this, "VALIDATED" and "FLAGGED"
-        # would never appear anywhere in a fresh demo environment, even though
-        # the UI (Climate Data Quality, Combined Exposure's quality column)
-        # is built to show all four. These are still unmistakably demo data
-        # (dataset_name/source unchanged) - only the quality_flag itself
-        # simulates what each workflow state would look like once a real
-        # human QC step (not yet built - see docs) exists to assign it.
-        demo_period_year, demo_period_month, demo_quarter = 2026, 8, 3
-        db.add_all([
-            ClimateRecord(
-                region="Dodoma", district=None, year=demo_period_year, month=demo_period_month,
-                rainfall_mm=88.4, avg_temperature_c=27.1, hazard_type="Drought", hazard_severity="MEDIUM",
-                source="SYNTHETIC_SAMPLE", reporting_period=f"{demo_period_year}-Q{demo_quarter}",
-                period_type="MONTHLY", dataset_name="CDR Synthetic Demo Dataset", dataset_version="v1",
-                quality_flag="VALIDATED", processing_method="SYNTHETIC_SEED_QC_DEMO",
-                ingestion_timestamp=seed_run_time,
-            ),
-            ClimateRecord(
-                region="Mwanza", district=None, year=demo_period_year, month=demo_period_month,
-                rainfall_mm=9999.0, avg_temperature_c=27.5, hazard_type="Flood", hazard_severity="HIGH",
-                source="SYNTHETIC_SAMPLE", reporting_period=f"{demo_period_year}-Q{demo_quarter}",
-                period_type="MONTHLY", dataset_name="CDR Synthetic Demo Dataset", dataset_version="v1",
-                quality_flag="FLAGGED", processing_method="SYNTHETIC_SEED_QC_DEMO",
-                ingestion_timestamp=seed_run_time,
-            ),
-        ])
+        # Synthetic seed data remains SYNTHETIC throughout. Real VALIDATED/FLAGGED
+        # states are created only by the climate ingestion + human QC workflow.
         db.commit()
         print("Seed data loaded successfully.")
         print("")

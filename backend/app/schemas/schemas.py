@@ -290,7 +290,7 @@ class ClimateQCPromoteRequest(BaseModel):
     region: str
     reporting_period: str
     new_quality_flag: str  # "VALIDATED" or "FLAGGED"
-    reason: Optional[str] = None  # analyst's justification - strongly recommended for FLAGGED, stored in the audit log for governance/traceability
+    reason: Optional[str] = None  # optional for VALIDATED; required for FLAGGED and stored in the audit log for governance/traceability
 
 
 class ClimateQCPromoteResult(BaseModel):

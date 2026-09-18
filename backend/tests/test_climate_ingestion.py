@@ -373,3 +373,52 @@ def test_promote_reason_is_recorded_in_audit_log(client, db_session):
     entry = db_session.query(AuditLog).filter(AuditLog.action == "CLIMATE_DATA_QC_PROMOTED").order_by(AuditLog.created_at.desc()).first()
     assert entry is not None
     assert "Rainfall value inconsistent with source station record." in entry.details
+
+
+def test_flagged_qc_requires_reason(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst_flag_reason")
+    token = login(client, "analyst_flag_reason").json()["access_token"]
+
+    db_session.add(ClimateRecord(region="Dodoma", year=2026, month=2, rainfall_mm=100.0,
+                                  reporting_period="2026-Q1", quality_flag="UNVALIDATED"))
+    db_session.commit()
+
+    res = client.post(
+        "/api/climate-data/promote",
+        json={"region": "Dodoma", "reporting_period": "2026-Q1", "new_quality_flag": "FLAGGED"},
+        headers=auth_header(token),
+    )
+    assert res.status_code == 400
+    assert "reason is required" in res.json()["detail"]
+
+
+def test_ingested_records_are_linked_to_their_batch(client, db_session):
+    """
+    Regression test: every ClimateRecord created by a file ingestion must
+    carry the FK of the ClimateIngestionBatch that created it (provenance -
+    "which file/batch did this observation come from?" must be answerable
+    directly from the database, not just from source/dataset_name text).
+    """
+    from app.models.models import ClimateIngestionBatch
+
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst_prov")
+    token = login(client, "analyst_prov").json()["access_token"]
+    csv_bytes = _csv_bytes([
+        "Dodoma,Chamwino,2026,7,45.2,28.5,Drought,MEDIUM,REC-PROV-1",
+        "Mwanza,,2026,7,120.0,25.1,Flood,HIGH,REC-PROV-2",
+    ])
+    res = client.post(
+        "/api/climate-data/ingest",
+        data={"source": "MANUAL_TMA_FILE", "dataset_name": "Provenance Test Batch"},
+        files={"file": ("data.csv", csv_bytes, "text/csv")},
+        headers=auth_header(token),
+    )
+    assert res.status_code == 201
+    batch_id = res.json()["id"]
+
+    batch = db_session.query(ClimateIngestionBatch).filter_by(id=batch_id).first()
+    assert batch is not None
+
+    records = db_session.query(ClimateRecord).filter_by(batch_id=batch_id).all()
+    assert len(records) == 2
+    assert all(r.batch_id == batch.id for r in records)

@@ -12,6 +12,7 @@ def record_audit(
     entity_type: str | None = None,
     entity_id: str | None = None,
     details: str | None = None,
+    commit: bool = True,
 ):
     log = AuditLog(
         user_id=user_id,
@@ -21,4 +22,7 @@ def record_audit(
         details=details,
     )
     db.add(log)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()

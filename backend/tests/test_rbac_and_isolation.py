@@ -348,3 +348,23 @@ def test_bot_user_cannot_export_audit_log_csv(client, db_session):
     token = login(client, "analyst1").json()["access_token"]
     res = client.get("/api/audit-logs/export.csv", headers=auth_header(token))
     assert res.status_code == 403
+
+
+def test_institution_user_cannot_widen_kpi_with_filter_institution_id(client, db_session):
+    """Security regression: an institution user cannot use the KPI filter to read another tenant's counts."""
+    inst_a = make_institution(db_session, code="BANK-A", name="Bank A")
+    inst_b = make_institution(db_session, code="BANK-B", name="Bank B")
+    _seed_submission_for(db_session, inst_a, amount=1_000_000.0)
+    _seed_submission_for(db_session, inst_b, amount=9_000_000.0)
+
+    viewer = make_user(db_session, role=RoleEnum.INSTITUTION_USER, institution=inst_a, username="viewer_kpi_a")
+    token = login(client, "viewer_kpi_a").json()["access_token"]
+
+    res = client.get(
+        f"/api/analytics/kpi-summary?filter_institution_id={inst_b.id}",
+        headers=auth_header(token),
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["total_loan_exposure_tzs"] == 1_000_000.0
+    assert body["total_submissions"] == 1

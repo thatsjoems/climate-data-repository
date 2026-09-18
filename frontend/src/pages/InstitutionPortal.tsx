@@ -266,8 +266,10 @@ export default function InstitutionPortal() {
                 <td>{s.valid_records}/{s.total_records}</td>
                 <td>{new Date(s.created_at).toLocaleString()}</td>
                 <td>
-                  <button onClick={() => viewDetails(s.id)}>Review</button>{' '}
-                  <button onClick={() => handleDownloadSubmission(s.id, s.file_name)}>Download</button>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <button onClick={() => viewDetails(s.id)}>Review</button>
+                    <button onClick={() => handleDownloadSubmission(s.id, s.file_name)}>Download</button>
+                  </div>
                 </td>
               </tr>
             ))}

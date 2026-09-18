@@ -31,13 +31,20 @@ Schema check (required columns present?)
       ↓
 Per-row validation (region, district, year, month, numeric fields)
       ↓
-Duplicate detection (region + district + year + month + source_record_id)
+Duplicate detection (region + district + year + month + source_record_id + station_id)
       ↓
-Accepted rows → ClimateRecord (quality_flag = UNVALIDATED)
-Rejected rows → ClimateIngestionError (with the specific reason)
+ClimateIngestionBatch created first (provenance: who, when, source, counts)
       ↓
-ClimateIngestionBatch (provenance: who, when, source, counts)
+Accepted rows → ClimateRecord (quality_flag = UNVALIDATED, batch_id = this batch's id)
+Rejected rows → ClimateIngestionError (batch_id = this batch's id, with the specific reason)
+      ↓
+Batch + records + errors + audit event commit together, in one transaction
 ```
+
+`climate_records.batch_id` is a real foreign key to `climate_ingestion_batches.id`
+(nullable, for legacy rows created before this link existed) - so "which file did
+this observation come from?" is answerable directly from the database, not just
+from the `source`/`dataset_name` text fields.
 
 Implementation: `backend/app/services/climate_ingestion_service.py` (parsing
 and validation, pure functions, no DB access — independently testable) and
@@ -63,7 +70,8 @@ file with these columns:
 | `hazard_severity` | No | LOW, MEDIUM, HIGH, or blank |
 | `station_id` / `station_name` | No | For traceability to a specific weather station |
 | `latitude` / `longitude` | No | Station or observation point coordinates |
-| `source_record_id` | No | The source system's own ID for this observation — used for duplicate detection on re-ingestion |
+| `source_record_id` | No | The source system's own ID for this observation — used with `station_id` for duplicate detection on re-ingestion |
+| `station_id` | No | Weather station identifier — included in duplicate identity so different stations are not incorrectly collapsed when `source_record_id` is blank |
 
 \* At least one of `rainfall_mm`, `avg_temperature_c`, `temperature_min_c`,
 `temperature_max_c` must be present — a row with no measurement at all is
@@ -87,7 +95,7 @@ yet built as a UI action; the field exists and is ready for that workflow.
 - **No automatic overwrite of existing observations.** Duplicate detection
   rejects a re-ingested observation rather than silently replacing the
   existing one — a real correction/replacement workflow would need an
-  explicit human decision, which is not yet built.
+  explicit human decision.
 
 ## Steps to connect real TMA data, when TMA is ready
 
@@ -100,15 +108,16 @@ yet built as a UI action; the field exists and is ready for that workflow.
    names** (e.g. abbreviations, different spelling), add a mapping table
    rather than loosening validation — an unmapped region should stay
    rejected, not silently guessed.
-4. **Switch `source` from `"SYNTHETIC_SAMPLE"`/`"MANUAL_UPLOAD"` to the real
-   source label** (e.g. `"TMA_FILE"` or `"TMA_API"`) so every downstream
-   view (Combined Climate-Financial Exposure, Risk Advisory Reports, Data
-   Quality dashboard) automatically distinguishes real from demo data — no
-   other code change needed, since these views already read `source` and
-   `quality_flag` from each record.
-5. **Decide the QC promotion workflow**: who reviews `UNVALIDATED` records
-   and promotes them to `VALIDATED`/`FLAGGED`, and add that as a UI action
-   (currently only the data model supports this state, not a review screen).
+4. **Replace the manual source label with the real integration source only after
+   the provenance is genuinely verified.** The current interim bridge permits
+   `MANUAL_TMA_FILE`, `MANUAL_PMO_FILE`, and `MANUAL_OTHER_FILE`; these remain
+   explicitly self-declared. A future authenticated TMA/PMO adapter can use a
+   dedicated verified source value once that integration contract exists.
+5. **Operate the QC promotion workflow**: the current BOT Analyst UI lists
+   pending `(region, reporting_period)` groups and promotes them to
+   `VALIDATED`/`FLAGGED`. A reason is required when flagging data and is
+   recorded in the audit log. A future production workflow can refine this
+   to batch- or row-level review if finer-grained QC is required.
 6. **Retire the synthetic seed data** from `init_db.py` once real data is
    flowing (or keep both, clearly labelled, during a transition period).
 

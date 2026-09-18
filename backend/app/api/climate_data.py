@@ -16,6 +16,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.core.deps import require_roles
@@ -106,6 +107,7 @@ async def ingest_climate_file(
     for record in result.accepted_records:
         db.add(ClimateRecord(
             **record,
+            batch_id=batch.id,
             source=source,
             quality_flag="UNVALIDATED",  # a human/automated QC pass can promote this later - never assumed valid on arrival
             processing_method="FILE_INGESTION",
@@ -117,14 +119,27 @@ async def ingest_climate_file(
             column_name=issue.column_name, error_description=issue.error_description,
         ))
 
-    db.commit()
-    db.refresh(batch)
-
+    # Write the audit event in the same transaction as the batch and records.
+    # If anything fails before this commit, neither data nor its audit event is persisted.
     record_audit(
         db, current_user.id, "CLIMATE_DATA_INGESTED", "ClimateIngestionBatch", batch.id,
         f"{file.filename}: {batch.records_accepted} accepted, {batch.records_rejected} rejected, "
-        f"{batch.records_duplicate} duplicate"
+        f"{batch.records_duplicate} duplicate",
+        commit=False,
     )
+    try:
+        db.commit()
+    except IntegrityError:
+        # A concurrent upload inserted the same observation between our
+        # application-level duplicate check and this commit - the database's
+        # own uniqueness guarantee (see Alembic migration 8b2f5c1e9a44) is the
+        # final backstop. Roll back and report clearly rather than a raw 500.
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="One or more observations in this file were inserted by a concurrent upload just now. Please re-check and re-upload if needed.",
+        )
+    db.refresh(batch)
 
     return batch
 
@@ -205,14 +220,20 @@ def promote_climate_records(
     contact an admin if a correction is genuinely needed).
 
     This is deliberately scoped to (region, reporting_period) rather than a
-    single row or a whole ingestion batch: ClimateRecord has no batch foreign
-    key (see ClimateIngestionBatch's own docstring), and per-row promotion
-    would not scale to real TMA data volumes. Region+period matches exactly
+    single row or a whole ingestion batch. ClimateRecord now retains an explicit
+    batch_id provenance link, while region+period remains the operational QC
+    scope used by the analytical views. Region+period matches exactly
     how climate data is already looked up everywhere else in this system
     (Combined Exposure, Hazard Exposure, Risk Advisory).
     """
     if payload.new_quality_flag not in ("VALIDATED", "FLAGGED"):
         raise HTTPException(status_code=400, detail="new_quality_flag must be 'VALIDATED' or 'FLAGGED'")
+
+    # A FLAGGED decision is a negative data-quality finding and must be
+    # explainable in the audit trail. VALIDATED may be submitted without a
+    # reason, but FLAGGED requires one so the decision is defensible later.
+    if payload.new_quality_flag == "FLAGGED" and not (payload.reason or "").strip():
+        raise HTTPException(status_code=400, detail="A reason is required when marking climate data as FLAGGED")
 
     records = (
         db.query(ClimateRecord)

@@ -87,8 +87,8 @@ def parse_and_validate_climate_file(
 ) -> IngestionResult:
     """
     Parses a CSV or XLSX of climate observations and validates every row.
-    `existing_keys` is the set of (region, district, year, month, source_record_id
-    or None) tuples already in the database, used for duplicate detection -
+    `existing_keys` is the set of (region, district, year, month, source_record_id, station_id
+    (with nullable source/station identifiers handled consistently) tuples already in the database, used for duplicate detection -
     duplicates are rejected, never silently overwritten (per Section 8).
 
     Never fabricates a value: a row with an unusable region/year is rejected

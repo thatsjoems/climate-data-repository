@@ -218,8 +218,10 @@ export default function AdminPanel() {
                 <td>{r.username}</td>
                 <td><span className="badge badge-pending">Pending</span></td>
                 <td>
-                  <button onClick={() => handleApprovePasswordReset(r.id)}>Approve</button>
-                  <button onClick={() => handleRejectPasswordReset(r.id)}>Reject</button>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <button onClick={() => handleApprovePasswordReset(r.id)}>Approve</button>
+                    <button onClick={() => handleRejectPasswordReset(r.id)}>Reject</button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -314,7 +316,7 @@ export default function AdminPanel() {
       <section className="card">
         <h2>🧾 Audit Log</h2>
         <p className="note">System-wide record of important actions, for accountability and oversight.</p>
-        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center', marginBottom: '0.5rem' }}>
           <input
             placeholder="Filter by action (e.g. LOGIN)"
             value={auditActionFilter}

@@ -26,7 +26,12 @@ from app.models.models import (
 )
 
 # Submission statuses whose records must NEVER contribute to analytics totals.
-EXCLUDED_STATUSES = (SubmissionStatus.REJECTED, SubmissionStatus.SUPERSEDED)
+EXCLUDED_STATUSES = (
+    SubmissionStatus.PENDING,
+    SubmissionStatus.INVALID,
+    SubmissionStatus.REJECTED,
+    SubmissionStatus.SUPERSEDED,
+)
 
 
 def _active_records_query(
@@ -35,7 +40,7 @@ def _active_records_query(
     filter_reporting_period: str | None = None,
 ):
     """
-    Base query: valid rows belonging to a non-rejected, non-superseded submission.
+    Base query: valid rows belonging to a submission that has passed file validation\n    (VALID) or has been approved (APPROVED). Pending, invalid, rejected, and\n    superseded submissions must never contribute to official exposure analytics.
     Always joins Submission so institution scoping and status exclusion are
     enforced in exactly one place.
 
@@ -69,15 +74,35 @@ def get_kpi_summary(
     filter_institution_id: str | None = None, filter_region: str | None = None,
     filter_reporting_period: str | None = None,
 ) -> dict:
-    effective_institution = institution_id or filter_institution_id
+    # Security scope always wins over an analyst-supplied institution filter.
+    # An INSTITUTION_USER can never turn a filter parameter into a different
+    # tenant, even for KPI submission counts.
+    effective_institution = institution_id if institution_id else filter_institution_id
+    effective_filter_institution_id = None if institution_id else filter_institution_id
+
     if effective_institution:
         total_institutions = 1
-        submission_base = db.query(Submission).filter(Submission.institution_id == effective_institution)
+        submission_base = db.query(Submission).filter(
+            Submission.institution_id == effective_institution
+        )
     else:
         total_institutions = db.query(Institution).filter(Institution.is_active == True).count()  # noqa: E712
         submission_base = db.query(Submission)
+
     if filter_reporting_period:
         submission_base = submission_base.filter(Submission.reporting_period == filter_reporting_period)
+
+    # Region is a record-level filter, not a Submission column. Join the
+    # records so the KPI submission counts obey the same dashboard scope as
+    # loan/collateral totals. DISTINCT prevents one submission with many
+    # records in the region from being counted multiple times.
+    if filter_region:
+        submission_base = (
+            submission_base
+            .join(SubmissionRecord, SubmissionRecord.submission_id == Submission.id)
+            .filter(SubmissionRecord.region == filter_region)
+            .distinct()
+        )
 
     total_submissions = submission_base.count()
 
@@ -85,7 +110,8 @@ def get_kpi_summary(
         return submission_base.filter(Submission.status == status).count()
 
     records_query = _active_records_query(
-        db, institution_id, filter_institution_id=filter_institution_id,
+        db, institution_id,
+        filter_institution_id=effective_filter_institution_id,
         filter_region=filter_region, filter_reporting_period=filter_reporting_period,
     )
 
@@ -160,8 +186,9 @@ def get_hazard_exposure(
     VALIDATED) climate readings count toward the dominant hazard - for a
     supervisory/official view where SYNTHETIC and UNVALIDATED readings
     should not influence a hazard classification presented as authoritative.
-    The default (False) includes everything except FLAGGED, which suits
-    exploratory analysis during the period before live TMA data exists.
+    The service-layer default remains False for backward compatibility with
+    direct/internal callers; the public API/report default is True, so the
+    supervisory dashboard opens in VALIDATED-only mode.
     """
     combos = (
         _active_records_query(
@@ -430,9 +457,9 @@ def get_combined_climate_financial_exposure(
     validated_only: when True, restricts to fully human-reviewed (quality_flag=
     VALIDATED) readings only - for an official/supervisory view where SYNTHETIC
     and UNVALIDATED readings should not silently inform a figure presented as
-    authoritative. Defaults to False (everything except FLAGGED) since most
-    data is still SYNTHETIC/UNVALIDATED during the period before live TMA data
-    exists - see docs/ASSUMPTIONS_AND_LIMITATIONS.md.
+    authoritative. The service-layer default remains False for backward compatibility with
+    direct/internal callers. The public API/report default is True, so the
+    supervisory dashboard opens in VALIDATED-only mode.
     """
     combos = (
         _active_records_query(

@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.core.config import settings
-from app.core.database import Base, engine, SessionLocal
+from app.core.database import SessionLocal
 from app.models import models  # noqa: F401 - ensures all tables are registered on Base
 from app.api import auth, users, institutions, templates, submissions, analytics, audit, notifications, password_reset, risk_advisories, reports, climate_data
 
@@ -23,10 +23,6 @@ if settings.ENVIRONMENT == "production" and settings.SECRET_KEY == "change-me":
         "ENVIRONMENT=production. Set a long, unique SECRET_KEY in your environment "
         "before starting the server. Refusing to start."
     )
-
-# Create database tables if they do not already exist (quick-start for SQLite/dev).
-# For real production use, use migrations instead of this.
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

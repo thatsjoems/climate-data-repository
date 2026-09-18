@@ -205,7 +205,11 @@ export default function InternalPortal() {
   async function handlePromoteClimateGroup(region: string, reportingPeriod: string, newFlag: 'VALIDATED' | 'FLAGGED') {
     setQcMessage(null)
     const key = `${region}-${reportingPeriod}`
-    const reason = qcReasons[key] || undefined
+    const reason = (qcReasons[key] || '').trim()
+    if (newFlag === 'FLAGGED' && !reason) {
+      setQcMessage(`Please provide a reason before flagging ${region} / ${reportingPeriod}.`)
+      return
+    }
     try {
       const res = await apiClient.post('/climate-data/promote', {
         region, reporting_period: reportingPeriod, new_quality_flag: newFlag, reason,
@@ -484,12 +488,14 @@ export default function InternalPortal() {
           — the same figures shown on this dashboard, ready to file or share instead of copying
           numbers manually.
         </p>
-        <button className="btn-accent" onClick={handleGenerateReport} disabled={reportGenerating}>
-          {reportGenerating ? 'Generating...' : 'Generate Summary Report (PDF)'}
-        </button>{' '}
-        <button onClick={handleGenerateReportExcel} disabled={reportGenerating}>Generate Summary Report (Excel)</button>{' '}
-        <button onClick={handleGenerateReportImage} disabled={reportGenerating}>Generate Summary Snapshot (Image)</button>{' '}
-        <button onClick={handleDownloadCombinedCsv}>Download Combined Exposure (CSV)</button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center' }}>
+          <button className="btn-accent" onClick={handleGenerateReport} disabled={reportGenerating}>
+            {reportGenerating ? 'Generating...' : 'Generate Summary Report (PDF)'}
+          </button>
+          <button onClick={handleGenerateReportExcel} disabled={reportGenerating}>Generate Summary Report (Excel)</button>
+          <button onClick={handleGenerateReportImage} disabled={reportGenerating}>Generate Summary Snapshot (Image)</button>
+          <button onClick={handleDownloadCombinedCsv}>Download Combined Exposure (CSV)</button>
+        </div>
         {reportMessage && <div className="alert-info">{reportMessage}</div>}
       </section>
 
@@ -690,12 +696,14 @@ export default function InternalPortal() {
                   />
                 </td>
                 <td>
-                  <button onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'VALIDATED')} style={{ marginRight: '0.4rem' }}>
-                    ✓ Validate
-                  </button>
-                  <button onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'FLAGGED')}>
-                    ✕ Flag as Bad Data
-                  </button>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <button onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'VALIDATED')}>
+                      ✓ Validate
+                    </button>
+                    <button onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'FLAGGED')}>
+                      ✕ Flag as Bad Data
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -945,14 +953,17 @@ export default function InternalPortal() {
                 <td>{new Date(s.created_at).toLocaleDateString()}</td>
                 {(user?.role === 'BOT_USER' || user?.role === 'SYSTEM_ADMIN') && (
                   <td>
-                    <input
-                      type="text"
-                      placeholder="Notes (optional)"
-                      value={notesById[s.id] || ''}
-                      onChange={(e) => setNotesById({ ...notesById, [s.id]: e.target.value })}
-                    />
-                    <button onClick={() => handleReview(s.id, 'APPROVE')}>Approve</button>
-                    <button onClick={() => handleReview(s.id, 'REJECT')}>Reject</button>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
+                      <input
+                        type="text"
+                        placeholder="Notes (optional)"
+                        value={notesById[s.id] || ''}
+                        onChange={(e) => setNotesById({ ...notesById, [s.id]: e.target.value })}
+                        style={{ minWidth: 140 }}
+                      />
+                      <button onClick={() => handleReview(s.id, 'APPROVE')}>Approve</button>
+                      <button onClick={() => handleReview(s.id, 'REJECT')}>Reject</button>
+                    </div>
                   </td>
                 )}
               </tr>
