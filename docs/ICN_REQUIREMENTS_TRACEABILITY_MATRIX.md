@@ -551,3 +551,69 @@ All three compile cleanly alongside the hardening pass's own additions
 (rate limiting, logging, storage abstraction, pagination) with no overlap
 or conflict - confirmed by re-running `py_compile` across the full `app/`
 tree after merging.
+
+
+## Critical finding — CHECK constraints never actually reached the real database
+
+Caught directly from a live database, not a code review: running `\d
+climate_records` in psql against this project's own real, running
+PostgreSQL instance showed every expected column, index, and foreign key -
+but **no "Check constraints:" section at all**. Every financial/climate
+CHECK constraint documented in the eighth review above (amounts ≥ 0, GPS
+bounds, `reporting_period` format, temperature plausibility, valid
+quality_flag/period_type/hazard_severity) existed only as a Python
+`CheckConstraint(...)` declaration in `models.py` - never actually enforced
+by PostgreSQL on the database anyone would actually be running.
+
+**Root cause:** `d2616a6f36ac`'s CHECK constraints are declared as part of
+its own `op.create_table()` calls, which only execute their DDL against a
+genuinely fresh, empty database. `init_db.py`'s legacy-database path calls
+`alembic stamp d2616a6f36ac` for a database whose tables already existed
+from before Alembic did - and `stamp` only records "this revision is
+considered applied" in the `alembic_version` table; it never executes that
+revision's `create_table()` calls, since the tables already exist and
+there is nothing to create. Every constraint that migration was supposed
+to add via `CREATE TABLE` was therefore silently skipped on every database
+that reached this schema via that legacy path - which, since this
+project's own database has existed since before Alembic was introduced, is
+every real deployment of this project to date, including this one.
+
+**Why this was not caught in the eighth review's own verification:** that
+round tested the migration's SQL logic directly against SQLite (proving
+the *constraint conditions themselves* were correct once applied) and
+confirmed `alembic upgrade head` completed without error - both true, and
+neither one exercises the specific stamp-then-upgrade code path a real
+legacy database actually takes. The gap was only visible by inspecting an
+already-migrated, real database's actual constraints - exactly what
+surfaced it here.
+
+**Fix:** a new migration, `9c1852419557` (chained after `8b2f5c1e9a44`, not
+edited into it or into `d2616a6f36ac` - both have already run against real
+deployments, and Alembic tracks "already applied" by revision ID, not by
+re-diffing a file's contents, so editing an applied migration changes
+nothing for a database that already recorded it as done). It re-asserts
+all 25 CHECK constraints, each guarded by an existence check via
+`inspector.get_check_constraints()`, so it is correct whether run against
+a legacy database missing them entirely (the real case) or a hypothetical
+fresh one where `create_table()` already added them (the check finds them
+present and does nothing).
+
+**This requires one more step on any already-running deployment of this
+project, including this one:** `docker compose up` alone re-runs
+`init_db.py`, which calls `alembic upgrade head` - and upgrading from
+`8b2f5c1e9a44` to the new head (`9c1852419557`) is exactly what applies
+this fix. No manual SQL, no `-v`, no data loss - restart normally and the
+next startup log will show `Running upgrade 8b2f5c1e9a44 -> 9c1852419557`.
+Verify with `\d climate_records` afterward: a "Check constraints:" section
+listing all of the above should now be present.
+
+**Honesty note on verification:** this sandbox cannot install Alembic
+(no network access), so this fix could not be run end-to-end here either.
+What was verified: (1) the exact 25 constraint names and condition strings
+were cross-diffed against `d2616a6f36ac`'s own proven-working versions
+with zero discrepancies; (2) both migration files compile cleanly;
+(3) `op.create_check_constraint` and `Inspector.get_check_constraints` are
+documented, standard Alembic/SQLAlchemy operations, not custom SQL. It has
+not been executed against a real PostgreSQL instance by this project -
+the log line and `\d` output above are how to confirm it for real on next
+restart.
