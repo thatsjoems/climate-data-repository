@@ -13,10 +13,9 @@ WORKFLOW / VERSIONING RULES (see docs/SUBMISSION_LIFECYCLE.md for full detail):
 """
 import os
 import re
-import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -31,6 +30,7 @@ from app.services.validation_service import validate_excel_file
 from app.services.template_generator import FIELD_NAMES
 from app.services.audit_service import record_audit
 from app.services.notification_service import notify_roles, notify_user
+from app.services.storage_service import storage
 
 router = APIRouter(prefix="/submissions", tags=["Submissions"])
 
@@ -82,12 +82,10 @@ def upload_submission(
     if file.content_type and file.content_type not in allowed_content_types:
         raise HTTPException(status_code=400, detail=f"Unexpected file content-type: {file.content_type}")
 
-    # Persist the raw file to disk with a generated name (never trust the client's filename for the path)
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    safe_name = f"{uuid.uuid4()}.xlsx"
-    saved_path = os.path.join(settings.UPLOAD_DIR, safe_name)
-    with open(saved_path, "wb") as f:
-        f.write(file_bytes)
+    # Persist the raw file via the storage abstraction (never trust the
+    # client's filename for the path) - see app/services/storage_service.py
+    # for why this is a single narrow call rather than direct os.* here.
+    saved_path = storage.save(file_bytes, "xlsx")
 
     try:
         records, issues = validate_excel_file(
@@ -98,8 +96,7 @@ def upload_submission(
     except Exception as exc:
         # A corrupt/malformed file must never crash the request or take the server down with it.
         # Clean up the orphaned file on disk - a failed upload must not leave permanent debris.
-        if os.path.exists(saved_path):
-            os.remove(saved_path)
+        storage.delete(saved_path)
         raise HTTPException(status_code=400, detail=f"This file could not be processed: {exc}")
 
     # ---- Cross-submission duplicate loan_id check (institution + reporting_period + loan_id) ----
@@ -221,15 +218,36 @@ def upload_submission(
 
 @router.get("", response_model=list[SubmissionOut])
 def list_submissions(
+    response: Response,
+    page: int | None = None,
+    page_size: int = 50,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
 ):
+    """
+    Without `page`, returns every matching submission (unchanged behaviour -
+    the frontend's own history screens call it this way, and today's data
+    volumes make that fine). Pass `page` (1-based) to get a bounded slice
+    instead, with the true total in the X-Total-Count response header -
+    this keeps the response body a plain array either way, so no existing
+    caller breaks, while a future/high-volume caller can opt into paging
+    without a new endpoint.
+    """
     query = db.query(Submission)
     # Data isolation: an institution user only sees submissions belonging to their own institution.
     # institution_id is never taken from the request - only from the authenticated user's own record.
     if current_user.role == RoleEnum.INSTITUTION_USER:
         query = query.filter(Submission.institution_id == current_user.institution_id)
-    return query.order_by(Submission.created_at.desc()).all()
+    query = query.order_by(Submission.created_at.desc())
+
+    if page is None:
+        return query.all()
+
+    page = max(page, 1)
+    page_size = max(1, min(page_size, 200))
+    total = query.count()
+    response.headers["X-Total-Count"] = str(total)
+    return query.offset((page - 1) * page_size).limit(page_size).all()
 
 
 @router.get("/export.csv")

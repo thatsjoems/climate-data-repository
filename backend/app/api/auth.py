@@ -8,11 +8,12 @@ the user signed in without requiring a long-lived JWT that could never be
 revoked before its own expiry if stolen.
 """
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.core.security import (
     verify_password, create_access_token, hash_password,
     generate_refresh_token, hash_refresh_token,
@@ -45,7 +46,8 @@ def _issue_token_pair(db: Session, user: User) -> tuple[str, str]:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)):
     # Generic message for "no such user" vs "wrong password" - never reveal which one it was
     # (prevents username enumeration).
     generic_error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")

@@ -449,3 +449,105 @@ exists before stamping a legacy database at `d2616a6f36ac`; if the tables
 exist but that column doesn't, it raises a clear error and refuses to guess,
 rather than risk a mismatched stamp that later migrations would silently
 build on.
+
+
+## Production-hardening pass — pagination, rate limiting, observability, storage, frontend tests
+
+Following a self-review that named seven concrete production-readiness gaps
+(none of them blocking the ICN's core functionality, all of them real), five
+were addressed directly and two were confirmed to require resources this
+project cannot provide on BOT's behalf:
+
+1. **Pagination.** `GET /submissions` returned every matching row
+   unconditionally. Now backward-compatible: called with no `page` parameter
+   (as both current frontend screens do), it behaves exactly as before;
+   passing `page`/`page_size` returns a bounded slice with the true count in
+   an `X-Total-Count` header. `risk_advisories` was similarly capped at 200
+   rather than left unbounded.
+2. **Rate limiting.** The existing per-account lockout (Module A) stops
+   repeated guesses against ONE username, but nothing previously stopped one
+   IP from trying many different usernames. `slowapi` now enforces a
+   200/minute default across the API and a tighter 10/minute on
+   `/auth/login` specifically, in-memory (no Redis needed at this
+   deployment's scale).
+3. **Structured logging.** `app/core/logging_config.py` gives every log
+   line a consistent shape - JSON in production (for a real log
+   aggregator), readable text in development - and a new request-logging
+   middleware records method/path/status/duration for every request. This
+   is deliberately NOT a Sentry/error-tracker integration, which needs a
+   real account/DSN this project cannot provision; it follows the same
+   optional-activation shape as `email_service.py` elsewhere in this
+   codebase, ready for one to subscribe to later.
+4. **Storage abstraction.** File uploads were saved via direct `os.*` calls
+   inside the submissions endpoint. `app/services/storage_service.py` now
+   sits between them: a `StorageBackend` interface with a `LocalFileStorage`
+   implementation matching today's exact behaviour byte-for-byte (same
+   directory, same UUID naming, same `file_path` semantics the download
+   endpoint already depends on) - so that a future S3-backed implementation
+   is a new class and one config value, not a search-and-replace through
+   every endpoint that touches a file.
+5. **Frontend tests.** Zero existed. Vitest + React Testing Library were
+   added, with tests for `ProtectedRoute` (every branch of the frontend's
+   own role/access-control logic: no user, forced password change, wrong
+   role, correct role, no role restriction) and the API client's token
+   interceptor (Bearer header attached when a token exists, absent when it
+   doesn't) - chosen because both are genuine access-control logic, not
+   incidental UI. The CI workflow now runs `npm test` before the build.
+   **Honesty note:** this sandbox has no network access to install the new
+   npm dependencies, so these tests were verified by careful manual
+   cross-checking against `AuthContext.tsx`'s actual exported shape (every
+   field the tests assume was confirmed present, by name, in the real
+   source) rather than by an actual `npm test` run. Treat them as
+   logically-verified-but-not-yet-executed until run for real.
+
+Confirmed NOT completable by this project on its own:
+- **Real SMTP email delivery** - `email_service.py` already degrades
+  gracefully with no `SMTP_HOST` set (shows credentials to the approving
+  admin instead of silently failing); sending real email needs a real SMTP
+  account BOT would provide, not a code change.
+- **Solution 4 (RTIS/BSIS/QGIS/ArcGIS integration)** - unchanged from every
+  earlier note on this: architected and integration-ready, but requires
+  credentials only BOT can issue.
+
+
+## Tenth review — three independent additions, merged alongside the hardening pass
+
+This review was built from an earlier snapshot of the project (before the
+production-hardening pass immediately above), working in parallel rather
+than reviewing it - most of its file differences were simply that earlier
+snapshot's versions of files this project had since already improved
+independently (pagination, rate limiting - `auth.py`, `submissions.py`,
+`risk_advisories.py`, `ci.yml`, `requirements.txt`, `package.json` all
+matched an older state and were kept as-is, not reverted). Three files
+contained genuinely new, non-overlapping contributions and were merged in:
+
+1. **Streaming audit-log CSV export.** `GET /audit/export.csv` previously
+   loaded every matching row into memory before writing any of the response
+   (`query.all()`, then one `csv.writer` pass) - the same unbounded-query
+   pattern named elsewhere in this project, just in a file this project's
+   own pagination pass hadn't reached yet. Now streams in batches of 1,000
+   rows via a generator, so a large export's memory footprint stays flat
+   regardless of how many audit log rows actually match the filter.
+2. **Non-root container user.** The backend Dockerfile now creates and
+   switches to an unprivileged `cdr` user (uid 10001) before `CMD` runs,
+   with `/app` explicitly `chown`'d to it beforehand. Running the API
+   process as root inside its container was unnecessary exposure - a
+   compromised process gains less if it was never root to begin with. Port
+   8000 needs no special privilege to bind (only ports below 1024 do), so
+   this has no effect on how the container is reached.
+3. **Production seed guard.** `init_db.py` now exits immediately, before
+   touching the database, if `ENVIRONMENT=production` - skipping the demo
+   institutions/users entirely rather than relying on "skip if data already
+   exists." Every demo credential this project uses (`admin`/`Admin@123`
+   and the rest) is published in this project's own README and
+   presentations for training purposes; auto-creating them in a real
+   deployment would be a real credential-exposure risk, not a training
+   convenience. `docker-compose.yml`'s own default
+   (`ENVIRONMENT:-development`) means this is a no-op for this project's
+   actual demo/training use - it only activates when someone explicitly
+   deploys with `ENVIRONMENT=production` set.
+
+All three compile cleanly alongside the hardening pass's own additions
+(rate limiting, logging, storage abstraction, pagination) with no overlap
+or conflict - confirmed by re-running `py_compile` across the full `app/`
+tree after merging.

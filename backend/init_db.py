@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import inspect
+from app.core.config import settings
 from app.core.database import engine, SessionLocal
 from app.core.security import hash_password
 from app.models.models import User, Institution, RoleEnum, InstitutionType, ClimateRecord, ClimateIngestionBatch
@@ -72,6 +73,13 @@ def ensure_schema():
 
 print("Applying database migrations...")
 ensure_schema()
+
+# Production must never auto-create demo users with published credentials
+# (every one of them is documented in this project's own README/presentations).
+# Seeding is intentionally limited to development/training environments.
+if settings.ENVIRONMENT == "production":
+    print("Production environment detected: skipping demo seed data and demo credentials.")
+    raise SystemExit(0)
 
 db = SessionLocal()
 

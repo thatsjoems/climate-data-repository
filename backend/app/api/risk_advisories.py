@@ -49,7 +49,10 @@ def list_risk_advisories(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):
-    notes = db.query(RiskAdvisoryNote).order_by(RiskAdvisoryNote.created_at.desc()).all()
+    # Capped rather than unbounded - years of advisory notes should still load
+    # quickly; the analyst wanting older history can be given a date filter
+    # later if this cap is ever actually reached in practice.
+    notes = db.query(RiskAdvisoryNote).order_by(RiskAdvisoryNote.created_at.desc()).limit(200).all()
     return [_to_out(db, n) for n in notes]
 
 

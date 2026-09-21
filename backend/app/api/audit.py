@@ -73,17 +73,34 @@ def export_audit_logs_csv(
     export scope. No hard row cap; this is a deliberate full export.
     """
     query = _filtered_query(db, action, entity_type, user_id, date_from, date_to)
-    rows = query.order_by(AuditLog.created_at.desc()).all()
+    query = query.order_by(AuditLog.created_at.desc())
 
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(["created_at", "user_id", "action", "entity_type", "entity_id", "details"])
-    for r in rows:
-        writer.writerow([r.created_at.isoformat(), r.user_id or "", r.action, r.entity_type or "", r.entity_id or "", r.details or ""])
+    def generate_csv():
+        header = io.StringIO()
+        writer = csv.writer(header)
+        writer.writerow(["created_at", "user_id", "action", "entity_type", "entity_id", "details"])
+        yield header.getvalue()
+
+        offset = 0
+        while True:
+            rows = query.offset(offset).limit(1000).all()
+            if not rows:
+                break
+            out = io.StringIO()
+            out_writer = csv.writer(out)
+            for r in rows:
+                out_writer.writerow([
+                    r.created_at.isoformat(), r.user_id or "", r.action,
+                    r.entity_type or "", r.entity_id or "", r.details or ""
+                ])
+            yield out.getvalue()
+            offset += len(rows)
+            if len(rows) < 1000:
+                break
 
     filename = f"CDR_Audit_Log_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.csv"
     return StreamingResponse(
-        iter([buffer.getvalue()]),
+        generate_csv(),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )

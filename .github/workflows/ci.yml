@@ -38,6 +38,9 @@ jobs:
       - name: Install dependencies
         working-directory: frontend
         run: npm install
+      - name: Run tests
+        working-directory: frontend
+        run: npm test
       - name: TypeScript build
         working-directory: frontend
         run: npm run build

@@ -14,6 +14,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Run the API as a non-root user. The upload directory is explicitly owned by
+# that user because uploaded files are runtime data, not application code.
+RUN useradd --create-home --uid 10001 cdr && \
+    mkdir -p /app/uploads && \
+    chown -R cdr:cdr /app
+USER cdr
+
 EXPOSE 8000
 
 # On container start: ensure tables exist + demo accounts are seeded, then run the API.
