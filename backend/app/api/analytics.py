@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.models.models import User, RoleEnum
-from app.schemas.schemas import KPISummary, ClimateTrendPoint, HazardExposurePoint, CombinedExposurePoint, RegionMapPoint
+from app.schemas.schemas import KPISummary, ClimateTrendPoint, HazardExposurePoint, CombinedExposurePoint, RegionMapPoint, ExposurePointsOut
 from app.services import analytics_service
 
 router = APIRouter(prefix="/analytics", tags=["Analytics & Dashboard"])
@@ -109,6 +109,27 @@ def region_map_points(
     """
     return analytics_service.get_region_map_points(
         db, institution_id=_scope_for(current_user), validated_only=validated_only,
+        filter_institution_id=filter_institution_id, filter_region=filter_region,
+        filter_reporting_period=filter_reporting_period,
+    )
+
+
+@router.get("/exposure-points", response_model=ExposurePointsOut)
+def exposure_points(
+    filter_institution_id: str | None = Query(default=None),
+    filter_region: str | None = Query(default=None),
+    filter_reporting_period: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
+):
+    """
+    The ACTUAL per-record latitude/longitude an institution entered on the
+    official template - not a region centroid. Same tenant scoping and
+    Dashboard Filters as every other analytics endpoint on this screen - see
+    analytics_service.get_exposure_points() for the full reasoning.
+    """
+    return analytics_service.get_exposure_points(
+        db, institution_id=_scope_for(current_user),
         filter_institution_id=filter_institution_id, filter_region=filter_region,
         filter_reporting_period=filter_reporting_period,
     )

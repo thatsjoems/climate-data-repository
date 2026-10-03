@@ -72,8 +72,39 @@ def deactivate_institution(
     record_audit(db, current_user.id, "INSTITUTION_DEACTIVATED", "Institution", inst.id)
     notify_roles(
         db, [RoleEnum.SYSTEM_ADMIN],
-        message=f"{current_user.full_name} deactivated institution: {inst.name}.",
+        message=f"{current_user.full_name} deactivated institution: {inst.name}. "
+                f"Its users can no longer sign in or use existing sessions.",
         notif_type="INSTITUTION_DEACTIVATED",
+        related_entity_type="Institution",
+        related_entity_id=inst.id,
+        exclude_user_id=current_user.id,
+    )
+    return inst
+
+
+@router.patch("/{institution_id}/activate", response_model=InstitutionOut)
+def activate_institution(
+    institution_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.SYSTEM_ADMIN)),
+):
+    """
+    Reverses a deactivation. Added together with the enforcement of institution
+    deactivation (KG-02): once deactivating an institution really blocks its
+    users, an administrator needs a supported way to restore access, rather than
+    editing the database by hand.
+    """
+    inst = db.query(Institution).filter(Institution.id == institution_id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Institution not found")
+    inst.is_active = True
+    db.commit()
+    db.refresh(inst)
+    record_audit(db, current_user.id, "INSTITUTION_ACTIVATED", "Institution", inst.id)
+    notify_roles(
+        db, [RoleEnum.SYSTEM_ADMIN],
+        message=f"{current_user.full_name} reactivated institution: {inst.name}.",
+        notif_type="INSTITUTION_ACTIVATED",
         related_entity_type="Institution",
         related_entity_id=inst.id,
         exclude_user_id=current_user.id,

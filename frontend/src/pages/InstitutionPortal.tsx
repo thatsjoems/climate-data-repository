@@ -245,7 +245,6 @@ export default function InstitutionPortal() {
 
       <section className="card" id="history-card">
         <h2>🗂️ Recent Submissions</h2>
-        <button onClick={handleExportHistory} style={{ marginBottom: '0.75rem' }}>Export Submission History (CSV)</button>
         <table>
           <thead>
             <tr>
@@ -278,6 +277,7 @@ export default function InstitutionPortal() {
             )}
           </tbody>
         </table>
+        <button onClick={handleExportHistory} style={{ marginTop: '0.9rem' }}>Export Submission History (CSV)</button>
       </section>
 
       {selected && (
@@ -342,7 +342,7 @@ export default function InstitutionPortal() {
             <button onClick={() => handleDownloadSubmission(selected.submission.id, selected.submission.file_name)}>
               Download This File
             </button>
-            <button onClick={() => setSelected(null)}>Close</button>
+            <button className="btn-secondary" onClick={() => setSelected(null)}>Close</button>
           </div>
         </section>
       )}

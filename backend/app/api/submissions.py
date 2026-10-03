@@ -17,6 +17,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.core.config import settings
@@ -39,8 +40,13 @@ router = APIRouter(prefix="/submissions", tags=["Submissions"])
 # duplicate loan_id. Already-superseded or already-rejected submissions don't
 # block anything further.
 ACTIVE_STATUSES = (
-    SubmissionStatus.PENDING, SubmissionStatus.VALID, SubmissionStatus.INVALID, SubmissionStatus.APPROVED,
+    SubmissionStatus.PENDING, SubmissionStatus.VALID, SubmissionStatus.INVALID,
 )
+
+# APPROVED is intentionally excluded from automatic superseding. An approved
+# version remains the authoritative fallback until a replacement itself passes
+# validation and review. This prevents an invalid correction from erasing a
+# previously approved dataset from analytics.
 
 
 @router.post("/upload", response_model=SubmissionDetailOut, status_code=201)
@@ -99,36 +105,11 @@ def upload_submission(
         storage.delete(saved_path)
         raise HTTPException(status_code=400, detail=f"This file could not be processed: {exc}")
 
-    # ---- Cross-submission duplicate loan_id check (institution + reporting_period + loan_id) ----
-    # Catches a loan re-appearing in a *different* upload for the same period, which an
-    # in-file-only check can never see.
-    incoming_loan_ids = {r["loan_id"] for r in records if r.get("loan_id") and r.get("is_valid")}
-    existing_loan_ids: set[str] = set()
-    if incoming_loan_ids:
-        existing_loan_ids = {
-            row[0] for row in (
-                db.query(SubmissionRecord.loan_id)
-                .join(Submission, Submission.id == SubmissionRecord.submission_id)
-                .filter(
-                    Submission.institution_id == current_user.institution_id,
-                    Submission.reporting_period == reporting_period,
-                    Submission.status.in_(ACTIVE_STATUSES),
-                    SubmissionRecord.is_valid == True,  # noqa: E712
-                    SubmissionRecord.loan_id.in_(incoming_loan_ids),
-                )
-                .all()
-            )
-        }
-    if existing_loan_ids:
-        from app.services.validation_service import ValidationIssue
-        for r in records:
-            if r.get("loan_id") in existing_loan_ids:
-                r["is_valid"] = False
-                issues.append(ValidationIssue(
-                    r["row_number"], "loan_id",
-                    f"loan_id '{r['loan_id']}' was already submitted for {reporting_period} "
-                    f"in an earlier active submission from your institution."
-                ))
+    # Cross-version loan IDs are intentionally allowed here: a new upload for
+    # the same institution + reporting period is a correction/replacement
+    # version, not a second exposure. Database-level uniqueness is enforced
+    # within a single submission (submission_id + loan_id), while the
+    # version lineage below determines which version is analytically current.
 
     total = len(records)
     valid_count = sum(1 for r in records if r.get("is_valid"))
@@ -137,6 +118,73 @@ def upload_submission(
     if total == 0:
         overall_status = SubmissionStatus.INVALID
 
+    # Build an explicit version chain for this institution/reporting period.
+    previous = (
+        db.query(Submission)
+        .filter(
+            Submission.institution_id == current_user.institution_id,
+            Submission.reporting_period == reporting_period,
+        )
+        .order_by(Submission.version_number.desc(), Submission.created_at.desc())
+        .first()
+    )
+    next_version = (previous.version_number + 1) if previous else 1
+
+    # ---- Versioning / authoritative-current selection ----
+    # A VALID submission is immediately current only when no APPROVED baseline
+    # exists. If an approved baseline exists, a correction remains provisional
+    # until a reviewer approves it. This prevents an invalid/unapproved
+    # correction from silently replacing authoritative financial exposure.
+    #
+    # Computed and (where it demotes an existing current version) FLUSHED
+    # before the new submission itself is created below - not after, as an
+    # earlier version of this function did. The database enforces "at most
+    # one current submission per institution+period" with a partial unique
+    # index; creating the new is_current=True row before demoting the old
+    # one made both rows current at once for the instant between the two
+    # writes, which that constraint correctly rejected with an
+    # IntegrityError - turning the system's own core "a new correction
+    # supersedes the old one" workflow into a 409 on every second VALID
+    # upload for the same institution+period. Demoting first, in its own
+    # flush, means the new row is never inserted while an old one still
+    # claims to be current.
+    approved_current = (
+        db.query(Submission)
+        .filter(
+            Submission.institution_id == current_user.institution_id,
+            Submission.reporting_period == reporting_period,
+            Submission.status == SubmissionStatus.APPROVED,
+            Submission.is_current == True,  # noqa: E712
+        )
+        .first()
+    )
+    will_be_current = overall_status == SubmissionStatus.VALID and approved_current is None
+
+    if will_be_current:
+        current_versions = (
+            db.query(Submission)
+            .filter(
+                Submission.institution_id == current_user.institution_id,
+                Submission.reporting_period == reporting_period,
+                Submission.is_current == True,  # noqa: E712
+            )
+            .all()
+        )
+        for old in current_versions:
+            old.is_current = False
+            record_audit(
+                db, current_user.id, "SUBMISSION_VERSION_REPLACED", "Submission", old.id,
+                f"Version {old.version_number} replaced by version {next_version} for {reporting_period}",
+                details_json={
+                    "old_version": old.version_number,
+                    "new_version": next_version,
+                    "reporting_period": reporting_period,
+                },
+                commit=False,
+            )
+        if current_versions:
+            db.flush()  # demote the old current version(s) before the new one is ever inserted
+
     submission = Submission(
         institution_id=current_user.institution_id,
         submitted_by_user_id=current_user.id,
@@ -144,12 +192,20 @@ def upload_submission(
         file_path=saved_path,
         reporting_period=reporting_period,
         status=overall_status,
+        version_number=next_version,
+        previous_submission_id=previous.id if previous else None,
+        is_current=will_be_current,
         total_records=total,
         valid_records=valid_count,
         invalid_records=invalid_count,
     )
     db.add(submission)
-    db.flush()  # obtain submission.id before commit
+    try:
+        db.flush()  # obtain submission.id before commit
+    except IntegrityError:
+        db.rollback()
+        storage.delete(saved_path)
+        raise HTTPException(status_code=409, detail="This submission conflicts with another submission already being processed. Please retry.")
 
     for r in records:
         db.add(SubmissionRecord(
@@ -157,6 +213,9 @@ def upload_submission(
             row_number=r["row_number"],
             is_valid=r.get("is_valid", False),
             **{f: r.get(f) for f in FIELD_NAMES},
+            disbursement_date_value=r.get("disbursement_date_value"),
+            maturity_date_value=r.get("maturity_date_value"),
+            collateral_pledged_date_value=r.get("collateral_pledged_date_value"),
         ))
 
     for issue in issues:
@@ -168,35 +227,40 @@ def upload_submission(
             severity=issue.severity,
         ))
 
-    # ---- Versioning: supersede any earlier active submission for the same institution+period ----
-    superseded = (
-        db.query(Submission)
-        .filter(
-            Submission.institution_id == current_user.institution_id,
-            Submission.reporting_period == reporting_period,
-            Submission.id != submission.id,
-            Submission.status.in_(ACTIVE_STATUSES),
+    # Supersede only earlier non-final attempts. An APPROVED baseline is never
+    # automatically superseded by an upload; it is superseded only inside the
+    # successful APPROVE transaction below.
+    if overall_status == SubmissionStatus.VALID:
+        stale_attempts = (
+            db.query(Submission)
+            .filter(
+                Submission.institution_id == current_user.institution_id,
+                Submission.reporting_period == reporting_period,
+                Submission.id != submission.id,
+                Submission.status.in_(ACTIVE_STATUSES),
+            )
+            .all()
         )
-        .all()
-    )
-    for old in superseded:
-        was_approved = old.status == SubmissionStatus.APPROVED
-        old.status = SubmissionStatus.SUPERSEDED
-        record_audit(
-            db, current_user.id, "SUBMISSION_SUPERSEDED", "Submission", old.id,
-            f"Superseded by newer upload '{file.filename}' for {reporting_period}"
-        )
-        if was_approved:
-            notify_roles(
-                db, [RoleEnum.BOT_USER],
-                message=f"An approved submission for {reporting_period} was superseded by a new upload "
-                        f"and needs re-review.",
-                notif_type="SUBMISSION_SUPERSEDED",
-                related_entity_type="Submission",
-                related_entity_id=old.id,
+        for old in stale_attempts:
+            old.status = SubmissionStatus.SUPERSEDED
+            old.is_current = False
+            record_audit(
+                db, current_user.id, "SUBMISSION_SUPERSEDED", "Submission", old.id,
+                f"Superseded by version {submission.version_number} for {reporting_period}",
+                details_json={
+                    "old_version": old.version_number,
+                    "new_version": submission.version_number,
+                    "reporting_period": reporting_period,
+                },
+                commit=False,
             )
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        storage.delete(saved_path)
+        raise HTTPException(status_code=409, detail="This submission conflicts with another submission already being processed. Please retry.")
     db.refresh(submission)
 
     record_audit(
@@ -367,9 +431,59 @@ def review_submission(
                 detail=f"Only a VALID submission can be approved (current status: {submission.status.value}). "
                        f"An INVALID submission must be corrected and resubmitted instead.",
             )
+        # Approving this version atomically makes it the authoritative current
+        # version and retires any prior current version (including an older
+        # approved baseline). The historical rows remain untouched.
+        #
+        # The demotion below is flushed BEFORE this submission's own is_current
+        # is set to True - not combined into one flush at commit time. Without
+        # this, SQLAlchemy's unit-of-work does not guarantee which UPDATE it
+        # emits first: if it happened to write this submission's is_current=True
+        # before writing the old version's is_current=False, both rows would be
+        # is_current=True at once, which the same partial unique index that
+        # protects the upload path (twentieth SRS item) correctly rejects -
+        # turning a routine second approval for an institution+period that
+        # already had an approved baseline into an IntegrityError. Confirmed
+        # by a test that approves two versions of the same submission in
+        # sequence, the first genuine exercise of this exact path.
+        previous_current = (
+            db.query(Submission)
+            .filter(
+                Submission.institution_id == submission.institution_id,
+                Submission.reporting_period == submission.reporting_period,
+                Submission.id != submission.id,
+                Submission.is_current == True,  # noqa: E712
+            )
+            .all()
+        )
+        for old in previous_current:
+            old.is_current = False
+        if previous_current:
+            db.flush()
         submission.status = SubmissionStatus.APPROVED
+        submission.is_current = True
     elif decision == "REJECT":
         submission.status = SubmissionStatus.REJECTED
+        was_current = submission.is_current
+        submission.is_current = False
+        if was_current:
+            db.flush()  # write this demotion before any fallback is promoted (same ordering hazard as the APPROVE branch above)
+            # Restore the newest approved historical version as the fallback
+            # authoritative dataset. This is what prevents a rejected
+            # correction from making analytics empty or double-counted.
+            fallback = (
+                db.query(Submission)
+                .filter(
+                    Submission.institution_id == submission.institution_id,
+                    Submission.reporting_period == submission.reporting_period,
+                    Submission.status == SubmissionStatus.APPROVED,
+                    Submission.id != submission.id,
+                )
+                .order_by(Submission.version_number.desc(), Submission.created_at.desc())
+                .first()
+            )
+            if fallback:
+                fallback.is_current = True
     else:
         raise HTTPException(status_code=400, detail="decision must be APPROVE or REJECT")
 

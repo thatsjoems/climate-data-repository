@@ -5,7 +5,6 @@ Backend entry point (FastAPI application).
 Run: uvicorn app.main:app --reload
 """
 import logging
-import sys
 import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +16,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.rate_limit import limiter
+from app.core.startup_checks import enforce_production_secret, is_production
 from app.core.logging_config import configure_logging
 
 configure_logging()
@@ -27,12 +27,9 @@ from app.api import auth, users, institutions, templates, submissions, analytics
 # ---- Secret management: refuse to start in production with the default secret ----
 # (Module: secure authentication). Development/training use is unaffected - this
 # only fires when ENVIRONMENT=production is explicitly set, e.g. in a real deployment.
-if settings.ENVIRONMENT == "production" and settings.SECRET_KEY == "change-me":
-    sys.exit(
-        "FATAL: SECRET_KEY is still the insecure default ('change-me') while "
-        "ENVIRONMENT=production. Set a long, unique SECRET_KEY in your environment "
-        "before starting the server. Refusing to start."
-    )
+# Rejects the literal default AND the placeholders shipped in docker-compose.yml and
+# .env.docker.example, plus any key under 32 characters (see app/core/startup_checks.py).
+enforce_production_secret(settings.ENVIRONMENT, settings.SECRET_KEY, settings.DATABASE_URL)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -72,7 +69,7 @@ async def security_headers_middleware(request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    if settings.ENVIRONMENT == "production":
+    if is_production(settings.ENVIRONMENT):
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     return response
 
@@ -128,6 +125,18 @@ def health_check():
     """
     Reports 'ok' only if the database is actually reachable - a bare 200 with
     no dependency check would be misleading during an outage.
+
+    The exception itself (which can include hostname, driver or connection
+    details) is logged server-side only and never placed in the response body:
+    this is a public, unauthenticated endpoint, so its payload must never leak
+    internals an attacker could use.
+
+    `environment` is a coarse label only ("development" or "production"), not
+    a secret - the frontend uses it to decide whether the Login page may show
+    demo account credentials (item 7 of the September 2026 external review):
+    the backend already skips seeding demo accounts in production
+    (init_db.py), so the UI should not advertise credentials for accounts
+    that should not exist there either.
     """
     try:
         db = SessionLocal()
@@ -136,8 +145,9 @@ def health_check():
             db_status = "ok"
         finally:
             db.close()
-    except Exception as exc:
-        db_status = f"unreachable: {exc}"
+    except Exception:
+        logging.getLogger("cdr.health").exception("Health check: database unreachable")
+        db_status = "unreachable"
 
     overall = "ok" if db_status == "ok" else "degraded"
-    return {"status": overall, "database": db_status}
+    return {"status": overall, "database": db_status, "environment": settings.ENVIRONMENT}

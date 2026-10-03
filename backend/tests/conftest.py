@@ -16,8 +16,21 @@ from sqlalchemy.pool import StaticPool
 
 from app.main import app
 from app.core.database import Base, get_db
+from app.core.rate_limit import limiter
 from app.core.security import hash_password
 from app.models.models import User, Institution, RoleEnum, InstitutionType
+
+# `limiter` is a module-level singleton (app/core/rate_limit.py), wired into
+# `app` once at import time (main.py: `app.state.limiter = limiter`) and never
+# recreated per test. Every test in the whole session shares its counters -
+# with ~300 login() calls across the suite against the 10/minute login limit,
+# tests later in the run got HTTP 429 instead of the response they were
+# actually testing, cascading into unrelated-looking failures (KeyError on
+# "access_token", then anything built on that token). No test in this suite
+# asserts on 429 itself, so disabling the limiter for the whole session is
+# safe and keeps this fixture set from becoming a second thing every future
+# test has to remember to reset.
+limiter.enabled = False
 
 TEST_ENGINE = create_engine(
     "sqlite://",

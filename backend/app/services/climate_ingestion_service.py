@@ -54,6 +54,13 @@ _MIN_TEMPERATURE_C = -20.0
 _MAX_TEMPERATURE_C = 55.0
 REQUIRED_COLUMNS = ["region", "year"]
 
+# A defence-in-depth ceiling (item 3/4 of the September 2026 external review):
+# a real climate observation file needs roughly a dozen columns (EXPECTED_COLUMNS
+# above); this generous 5x margin catches a maliciously or accidentally very
+# wide file before it is processed row by row, without risking false rejection
+# of any legitimate file.
+MAX_CLIMATE_UPLOAD_COLUMNS = 60
+
 VALID_HAZARD_SEVERITY = {"LOW", "MEDIUM", "HIGH", None}
 CURRENT_YEAR = datetime.utcnow().year
 
@@ -84,6 +91,7 @@ def parse_and_validate_climate_file(
     file_bytes: bytes,
     filename: str,
     existing_keys: set[tuple],
+    max_rows: int = 100000,
 ) -> IngestionResult:
     """
     Parses a CSV or XLSX of climate observations and validates every row.
@@ -93,6 +101,14 @@ def parse_and_validate_climate_file(
 
     Never fabricates a value: a row with an unusable region/year is rejected
     outright rather than guessed at.
+
+    `max_rows` mirrors the ceiling the financial-submission validator enforces
+    (`validate_excel_file`'s own `max_rows`): the file-size check
+    (MAX_CLIMATE_FILE_SIZE_MB in api/climate_data.py) bounds the file on disk,
+    but not the row count a compressed XLSX can decompress to, and pandas has
+    already fully materialized the sheet into memory as a DataFrame by the
+    time this function runs - so a row-count ceiling here is a distinct
+    defence, not a duplicate of the size check.
     """
     result = IngestionResult()
 
@@ -103,6 +119,24 @@ def parse_and_validate_climate_file(
             df = pd.read_excel(io.BytesIO(file_bytes))
     except Exception as exc:
         result.issues.append(IngestionIssue(None, None, f"Could not read the file: {exc}"))
+        result.rejected_count = 1
+        return result
+
+    if len(df.columns) > MAX_CLIMATE_UPLOAD_COLUMNS:
+        result.issues.append(IngestionIssue(
+            None, None,
+            f"This file has {len(df.columns)} columns, which exceeds the maximum of "
+            f"{MAX_CLIMATE_UPLOAD_COLUMNS} expected for a climate observation file. It was not processed.",
+        ))
+        result.rejected_count = 1
+        return result
+
+    if len(df) > max_rows:
+        result.issues.append(IngestionIssue(
+            None, None,
+            f"This file has {len(df)} rows, which exceeds the maximum of {max_rows} allowed "
+            f"per ingestion. Please split it into smaller files. It was not processed.",
+        ))
         result.rejected_count = 1
         return result
 

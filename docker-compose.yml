@@ -10,8 +10,10 @@
 # SECURITY NOTE: the POSTGRES_PASSWORD/SECRET_KEY defaults below are for local
 # training/demo use ONLY. Before any real deployment, create a ".env" file next
 # to this one (see .env.docker.example) with your own values - Docker Compose
-# reads it automatically. The backend refuses to start with the default
-# SECRET_KEY if ENVIRONMENT=production is set (see app/main.py).
+# reads it automatically. With ENVIRONMENT=production the backend refuses to
+# start if SECRET_KEY is empty, shorter than 32 characters, or still a
+# placeholder such as the fallback below or the one in .env.docker.example
+# (see app/core/startup_checks.py).
 
 services:
   db:

@@ -251,26 +251,66 @@ def test_already_reviewed_submission_cannot_be_reviewed_again(client, db_session
 def test_new_upload_supersedes_previous_submission_same_period(client, db_session):
     """
     Acceptance criterion: the same logical exposure must never be double-counted
-    because of a corrected/resubmitted upload for the same institution+period.
+    because of a corrected/resubmitted upload for the same institution+period -
+    including when BOTH the original and its correction have been individually
+    APPROVED at different times (approving version 1, then later approving a
+    corrected version 2, must not leave version 1's now-superseded figures
+    still contributing anything).
     """
     _setup_institution_user(db_session)
     token = login(client, "inst_user").json()["access_token"]
+    make_user(db_session, role=RoleEnum.BOT_USER, username="reviewer1")
+    reviewer_token = login(client, "reviewer1").json()["access_token"]
 
     first = _upload(client, token, [dict(VALID_ROW, loan_id="LN-1")], reporting_period="2026-Q1")
     assert first.json()["status"] == "VALID"
+    approve_first = client.post(
+        f"/api/submissions/{first.json()['id']}/review",
+        json={"decision": "APPROVE"}, headers=auth_header(reviewer_token),
+    )
+    assert approve_first.json()["status"] == "APPROVED"
 
     second = _upload(client, token, [dict(VALID_ROW, loan_id="LN-2")], reporting_period="2026-Q1")
     assert second.status_code == 201
+    assert second.json()["status"] == "VALID"
 
-    # Re-fetch the first submission - it must now show as SUPERSEDED
+    # The first submission is already APPROVED, so the second (merely VALID)
+    # upload does NOT supersede it - only PENDING/VALID/INVALID attempts are
+    # ever auto-superseded (BR-07 in the SRS: an approved baseline is retired
+    # only by another approval, never by a mere upload). It stays APPROVED,
+    # current, and authoritative until the correction is itself approved.
     check = client.get(f"/api/submissions/{first.json()['id']}", headers=auth_header(token))
-    assert check.json()["status"] == "SUPERSEDED"
+    assert check.json()["status"] == "APPROVED"
 
-    # KPI totals must reflect ONLY the latest (second) submission's exposure, not both
-    kpi = client.get("/api/analytics/kpi-summary", headers=auth_header(token))
-    assert kpi.json()["total_loan_exposure_tzs"] == VALID_ROW["loan_amount_tzs"]
-    assert kpi.json()["total_submissions"] == 2  # both rows exist...
-    assert kpi.json()["valid_submissions"] == 1  # ...but only one counts as currently valid/active
+    # Before the correction is approved, KPI totals must still reflect the
+    # first (still APPROVED, still current) version only.
+    kpi_before = client.get("/api/analytics/kpi-summary", headers=auth_header(token))
+    assert kpi_before.json()["total_loan_exposure_tzs"] == VALID_ROW["loan_amount_tzs"]
+
+    approve_second = client.post(
+        f"/api/submissions/{second.json()['id']}/review",
+        json={"decision": "APPROVE"}, headers=auth_header(reviewer_token),
+    )
+    assert approve_second.json()["status"] == "APPROVED"
+
+    # Approving the correction retires the first version (is_current=False) -
+    # its STATUS stays APPROVED (this endpoint never marks a superseded-by-
+    # approval version as SUPERSEDED, only as no-longer-current), which is
+    # exactly why the is_current check in _active_records_query matters: a
+    # second still-APPROVED row for the same institution+period must not be
+    # double-counted alongside the new current one.
+    check_after = client.get(f"/api/submissions/{first.json()['id']}", headers=auth_header(token))
+    assert check_after.json()["status"] == "APPROVED"
+    assert check_after.json()["is_current"] is False
+
+    # After the correction is approved, KPI totals must reflect ONLY the latest
+    # (second) submission's exposure - the now-retired-but-still-APPROVED first
+    # version must never be double-counted alongside it.
+    kpi_after = client.get("/api/analytics/kpi-summary", headers=auth_header(token))
+    assert kpi_after.json()["total_loan_exposure_tzs"] == VALID_ROW["loan_amount_tzs"]
+    assert kpi_after.json()["total_submissions"] == 2  # both rows exist...
+    assert kpi_after.json()["valid_submissions"] == 0  # ...but both are now APPROVED, not VALID
+
 
 
 def test_system_admin_cannot_upload_submissions(client, db_session):

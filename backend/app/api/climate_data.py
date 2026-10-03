@@ -13,7 +13,7 @@ validation logic in climate_ingestion_service.py is expected to persist.
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -83,7 +83,7 @@ async def ingest_climate_file(
     ).all()
     existing_keys = set(existing_rows)
 
-    result = parse_and_validate_climate_file(contents, file.filename, existing_keys)
+    result = parse_and_validate_climate_file(contents, file.filename, existing_keys, max_rows=settings.MAX_UPLOAD_ROWS)
 
     batch = ClimateIngestionBatch(
         source=source,
@@ -146,10 +146,31 @@ async def ingest_climate_file(
 
 @router.get("/ingestions", response_model=list[ClimateIngestionBatchOut])
 def list_ingestion_batches(
+    response: Response,
+    page: int | None = None,
+    page_size: int = 50,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):
-    return db.query(ClimateIngestionBatch).order_by(ClimateIngestionBatch.created_at.desc()).limit(100).all()
+    """
+    Without `page`, returns the 100 most recent batches (unchanged behaviour
+    for the existing dashboard call). Pass `page` (1-based) to page through
+    the full ingestion history instead, with the true total in the
+    X-Total-Count response header - the same optional-pagination shape
+    `GET /submissions` already uses (item 10 of the September 2026 external
+    review: older batches were previously unreachable through this endpoint
+    once more than 100 existed).
+    """
+    query = db.query(ClimateIngestionBatch).order_by(ClimateIngestionBatch.created_at.desc())
+
+    if page is None:
+        return query.limit(100).all()
+
+    page = max(page, 1)
+    page_size = max(1, min(page_size, 200))
+    total = query.count()
+    response.headers["X-Total-Count"] = str(total)
+    return query.offset((page - 1) * page_size).limit(page_size).all()
 
 
 @router.get("/ingestions/{batch_id}", response_model=ClimateIngestionDetailOut)

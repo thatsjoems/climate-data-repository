@@ -422,3 +422,106 @@ def test_ingested_records_are_linked_to_their_batch(client, db_session):
     records = db_session.query(ClimateRecord).filter_by(batch_id=batch_id).all()
     assert len(records) == 2
     assert all(r.batch_id == batch.id for r in records)
+
+
+# ---- Row and column limits (item 3 of the September 2026 external review) --
+
+def test_ingest_rejects_a_file_over_the_row_limit(client, db_session, monkeypatch):
+    """
+    A climate file over the configured row ceiling must be rejected outright,
+    the same way an oversized financial submission is (FR-SUB-02's climate
+    counterpart) - not silently truncated, and not partially ingested.
+    """
+    import app.api.climate_data as climate_data_module
+    monkeypatch.setattr(climate_data_module.settings, "MAX_UPLOAD_ROWS", 5)
+
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    rows = [f"Dodoma,,2026,{m},10.0,25.0,Drought,LOW,REC-{m}" for m in range(1, 13)]  # 12 rows > limit of 5
+    res = client.post(
+        "/api/climate-data/ingest",
+        data={"source": "MANUAL_TMA_FILE"},
+        files={"file": ("big.csv", _csv_bytes(rows), "text/csv")},
+        headers=auth_header(token),
+    )
+    assert res.status_code == 201  # the upload itself succeeds; the FILE is rejected as a batch outcome
+    body = res.json()
+    assert body["records_accepted"] == 0
+    assert body["records_rejected"] == 1
+    assert db_session.query(ClimateRecord).count() == 0  # nothing partially ingested
+
+
+def test_ingest_rejects_a_file_with_too_many_columns(client, db_session):
+    """A pathologically wide file (accidental or adversarial) is rejected before row-by-row processing."""
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    header = ",".join(["region", "year"] + [f"extra_{i}" for i in range(70)])  # 72 columns > the 60-column ceiling
+    csv_bytes = (header + "\nDodoma,2026," + ",".join(["x"] * 70) + "\n").encode()
+    res = client.post(
+        "/api/climate-data/ingest",
+        data={"source": "MANUAL_TMA_FILE"},
+        files={"file": ("wide.csv", csv_bytes, "text/csv")},
+        headers=auth_header(token),
+    )
+    assert res.status_code == 201
+    body = res.json()
+    assert body["records_accepted"] == 0
+    assert body["records_rejected"] == 1
+    assert db_session.query(ClimateRecord).count() == 0
+
+
+def test_ingest_accepts_a_file_within_the_row_limit(client, db_session, monkeypatch):
+    """The row-limit check must not reject legitimate, normally-sized files."""
+    import app.api.climate_data as climate_data_module
+    monkeypatch.setattr(climate_data_module.settings, "MAX_UPLOAD_ROWS", 5)
+
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    rows = [f"Dodoma,,2026,{m},10.0,25.0,Drought,LOW,REC-{m}" for m in range(1, 4)]  # 3 rows, under the limit of 5
+    res = client.post(
+        "/api/climate-data/ingest",
+        data={"source": "MANUAL_TMA_FILE"},
+        files={"file": ("small.csv", _csv_bytes(rows), "text/csv")},
+        headers=auth_header(token),
+    )
+    assert res.status_code == 201
+    assert res.json()["records_accepted"] == 3
+
+
+# ---- Ingestion-batch history pagination (item 10 of the September 2026 external review) ----
+
+def test_ingestion_list_without_page_returns_a_plain_array_unchanged(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    for i in range(3):
+        client.post(
+            "/api/climate-data/ingest",
+            data={"source": "MANUAL_TMA_FILE"},
+            files={"file": (f"b{i}.csv", _csv_bytes([f"Dodoma,,2026,{i+1},10.0,25.0,Drought,LOW,REC-{i}"]), "text/csv")},
+            headers=auth_header(token),
+        )
+    res = client.get("/api/climate-data/ingestions", headers=auth_header(token))
+    assert res.status_code == 200
+    assert isinstance(res.json(), list)
+    assert len(res.json()) == 3
+    assert "X-Total-Count" not in res.headers
+
+
+def test_ingestion_page_parameter_paginates_with_an_accurate_total(client, db_session):
+    make_user(db_session, role=RoleEnum.BOT_USER, username="analyst1")
+    token = login(client, "analyst1").json()["access_token"]
+    for i in range(5):
+        client.post(
+            "/api/climate-data/ingest",
+            data={"source": "MANUAL_TMA_FILE"},
+            files={"file": (f"b{i}.csv", _csv_bytes([f"Dodoma,,2026,{i+1},10.0,25.0,Drought,LOW,REC-{i}"]), "text/csv")},
+            headers=auth_header(token),
+        )
+    res = client.get("/api/climate-data/ingestions?page=1&page_size=2", headers=auth_header(token))
+    assert res.status_code == 200
+    assert len(res.json()) == 2
+    assert res.headers["X-Total-Count"] == "5"
+
+    last_page = client.get("/api/climate-data/ingestions?page=3&page_size=2", headers=auth_header(token))
+    assert len(last_page.json()) == 1
+    assert last_page.headers["X-Total-Count"] == "5"

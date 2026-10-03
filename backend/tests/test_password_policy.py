@@ -6,6 +6,7 @@ from tests.conftest import make_institution, make_user, login, auth_header, DEFA
 
 
 def test_weak_password_rejected_on_user_creation(client, db_session):
+    inst = make_institution(db_session)
     make_user(db_session, role=RoleEnum.SYSTEM_ADMIN, username="admin1")
     token = login(client, "admin1").json()["access_token"]
 
@@ -13,14 +14,21 @@ def test_weak_password_rejected_on_user_creation(client, db_session):
         "/api/users",
         json={
             "full_name": "New Person", "username": "newperson", "email": "n@example.com",
-            "password": "short", "role": "INSTITUTION_USER",
+            "password": "short", "role": "INSTITUTION_USER", "institution_id": inst.id,
         },
         headers=auth_header(token),
     )
     assert res.status_code == 400
+    # A valid institution is supplied above specifically so this 400 can only
+    # be the password-strength check - not the separate (and separately
+    # tested, in test_user_creation_validation.py) role/institution check,
+    # which runs first in create_user() and would otherwise produce the same
+    # status code for an unrelated reason, masking a real regression here.
+    assert "password" in res.json()["detail"].lower()
 
 
 def test_strong_password_accepted_on_user_creation(client, db_session):
+    inst = make_institution(db_session)
     make_user(db_session, role=RoleEnum.SYSTEM_ADMIN, username="admin1")
     token = login(client, "admin1").json()["access_token"]
 
@@ -28,7 +36,7 @@ def test_strong_password_accepted_on_user_creation(client, db_session):
         "/api/users",
         json={
             "full_name": "New Person", "username": "newperson", "email": "n@example.com",
-            "password": "Str0ng!Passw0rd", "role": "INSTITUTION_USER",
+            "password": "Str0ng!Passw0rd", "role": "INSTITUTION_USER", "institution_id": inst.id,
         },
         headers=auth_header(token),
     )

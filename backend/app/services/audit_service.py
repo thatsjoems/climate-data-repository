@@ -2,6 +2,7 @@
 MODULE: Audit Logging - recording important system events.
 """
 from sqlalchemy.orm import Session
+from typing import Any
 from app.models.models import AuditLog
 
 
@@ -12,6 +13,7 @@ def record_audit(
     entity_type: str | None = None,
     entity_id: str | None = None,
     details: str | None = None,
+    details_json: dict[str, Any] | None = None,
     commit: bool = True,
 ):
     log = AuditLog(
@@ -20,6 +22,7 @@ def record_audit(
         entity_type=entity_type,
         entity_id=entity_id,
         details=details,
+        details_json=details_json,
     )
     db.add(log)
     if commit:

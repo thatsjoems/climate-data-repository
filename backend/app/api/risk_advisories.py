@@ -10,9 +10,7 @@ is the Analyst's distinctive professional function, entirely separate from
 SYSTEM_ADMIN's identity/access-management function. SYSTEM_ADMIN's dashboard
 deliberately has no visibility into climate/submission data at all.
 """
-import json
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -46,13 +44,32 @@ def _to_out(db: Session, note: RiskAdvisoryNote) -> RiskAdvisoryOut:
 
 @router.get("", response_model=list[RiskAdvisoryOut])
 def list_risk_advisories(
+    response: Response,
+    page: int | None = None,
+    page_size: int = 50,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):
-    # Capped rather than unbounded - years of advisory notes should still load
-    # quickly; the analyst wanting older history can be given a date filter
-    # later if this cap is ever actually reached in practice.
-    notes = db.query(RiskAdvisoryNote).order_by(RiskAdvisoryNote.created_at.desc()).limit(200).all()
+    """
+    Without `page`, returns the 200 most recent notes (unchanged behaviour for
+    the existing dashboard call). Pass `page` (1-based) to page through the
+    full history instead, with the true total in the X-Total-Count response
+    header - the same optional-pagination shape `GET /submissions` already
+    uses, so the response body stays a plain array either way and no existing
+    caller breaks (item 9 of the September 2026 external review: a 201st
+    advisory was previously unreachable through this endpoint at all).
+    """
+    query = db.query(RiskAdvisoryNote).order_by(RiskAdvisoryNote.created_at.desc())
+
+    if page is None:
+        notes = query.limit(200).all()
+        return [_to_out(db, n) for n in notes]
+
+    page = max(page, 1)
+    page_size = max(1, min(page_size, 200))
+    total = query.count()
+    response.headers["X-Total-Count"] = str(total)
+    notes = query.offset((page - 1) * page_size).limit(page_size).all()
     return [_to_out(db, n) for n in notes]
 
 
@@ -88,7 +105,7 @@ def create_risk_advisory(
         risk_level=payload.risk_level,
         narrative=payload.narrative,
         recommendation=payload.recommendation,
-        data_snapshot=json.dumps(snapshot),
+        data_snapshot=snapshot,
         created_by_user_id=current_user.id,
     )
     db.add(note)

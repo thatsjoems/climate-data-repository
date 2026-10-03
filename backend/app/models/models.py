@@ -13,7 +13,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, String, Integer, Float, Boolean, DateTime, Date, ForeignKey, Text, Enum as SAEnum,
-    Index, CheckConstraint
+    Index, CheckConstraint, Numeric, JSON, text
 )
 from sqlalchemy.orm import relationship
 
@@ -139,6 +139,13 @@ class Submission(Base):
 
     status = Column(SAEnum(SubmissionStatus), default=SubmissionStatus.PENDING, nullable=False, index=True)
 
+    # Explicit immutable version lineage. A correction is a new submission;
+    # previous_submission_id records the immediately preceding version.
+    # is_current means the version currently eligible for live analytics.
+    version_number = Column(Integer, nullable=False, default=1)
+    previous_submission_id = Column(String, ForeignKey("submissions.id"), nullable=True, index=True)
+    is_current = Column(Boolean, nullable=False, default=False, index=True)
+
     total_records = Column(Integer, default=0)
     valid_records = Column(Integer, default=0)
     invalid_records = Column(Integer, default=0)
@@ -158,7 +165,17 @@ class Submission(Base):
         Index("ix_submissions_institution_period_status", "institution_id", "reporting_period", "status"),
         Index("ix_submissions_submitted_by_user", "submitted_by_user_id"),
         Index("ix_submissions_reviewed_by_user", "reviewed_by_user_id"),
+        Index("ix_submissions_version_lookup", "institution_id", "reporting_period", "version_number"),
+        Index(
+            "uq_submissions_one_current_per_institution_period",
+            "institution_id", "reporting_period",
+            unique=True,
+            postgresql_where=text("is_current = true"),
+            sqlite_where=text("is_current = 1"),
+        ),
         CheckConstraint("length(reporting_period) = 7 AND substr(reporting_period, 5, 2) = '-Q' AND substr(reporting_period, 7, 1) IN ('1','2','3','4')", name="ck_submissions_reporting_period_format"),
+        CheckConstraint("version_number >= 1", name="ck_submissions_version_number_positive"),
+        CheckConstraint("valid_records >= 0 AND invalid_records >= 0 AND total_records >= 0 AND valid_records + invalid_records <= total_records", name="ck_submissions_record_counts_consistent"),
     )
 
 
@@ -187,16 +204,20 @@ class SubmissionRecord(Base):
     branch_name = Column(String(255), nullable=True)
     client_type = Column(String(50), nullable=True)          # Corporations, Individuals, Non-salaried, Staff
     business_size = Column(String(50), nullable=True)        # Large, Medium, Micro, Small
-    annual_turnover_tzs = Column(Float, nullable=True)
+    annual_turnover_tzs = Column(Numeric(20, 2), nullable=True)
 
     # ---- B. Loan details ----
     loan_id = Column(String(100), nullable=True, index=True)  # "Loan number" in the official template
-    disbursement_date = Column(String(30), nullable=True)     # kept as text - BOT's own sample data is not ISO-clean
+    # Raw source strings are retained for backward compatibility; the parsed
+    # Date columns below are the canonical database values for date logic.
+    disbursement_date = Column(String(30), nullable=True)
+    disbursement_date_value = Column(Date, nullable=True, index=True)
     maturity_date = Column(String(30), nullable=True)
+    maturity_date_value = Column(Date, nullable=True, index=True)
     currency = Column(String(10), nullable=True)              # TZS, USD, Other
-    loan_amount_tzs = Column(Float, nullable=True)             # "TZS Disbursed Amount"
-    outstanding_principal_tzs = Column(Float, nullable=True)
-    annual_interest_rate = Column(Float, nullable=True)
+    loan_amount_tzs = Column(Numeric(20, 2), nullable=True)             # "TZS Disbursed Amount"
+    outstanding_principal_tzs = Column(Numeric(20, 2), nullable=True)
+    annual_interest_rate = Column(Numeric(8, 4), nullable=True)
     loan_type = Column(String(50), nullable=True)              # Business, Mortgage, Personal
     loan_economic_activity = Column(String(100), nullable=True)
     loan_purpose = Column(String(255), nullable=True)
@@ -213,8 +234,9 @@ class SubmissionRecord(Base):
     # ---- D. Collateral details + its own location ----
     collateral_type = Column(String(150), nullable=True)        # "Collateral Pledged" - 21 official categories
     collateral_pledged_date = Column(String(30), nullable=True)
-    collateral_value_tzs = Column(Float, nullable=True)         # "TZS Market value of the collateral"
-    collateral_forced_sale_value_tzs = Column(Float, nullable=True)
+    collateral_pledged_date_value = Column(Date, nullable=True, index=True)
+    collateral_value_tzs = Column(Numeric(20, 2), nullable=True)         # "TZS Market value of the collateral"
+    collateral_forced_sale_value_tzs = Column(Numeric(20, 2), nullable=True)
     collateral_economic_activity = Column(String(100), nullable=True)
     collateral_region = Column(String(100), nullable=True)
     collateral_district = Column(String(100), nullable=True)
@@ -227,7 +249,7 @@ class SubmissionRecord(Base):
     insurance_coverage = Column(String(10), nullable=True)      # YES / NO
     insurance_policy_type = Column(String(150), nullable=True)
     insurance_provider_name = Column(String(255), nullable=True)
-    insurance_value_protected_tzs = Column(Float, nullable=True)
+    insurance_value_protected_tzs = Column(Numeric(20, 2), nullable=True)
 
     # Legacy field - the official template has no borrower-name field (only
     # customer_id), so this is never populated by new uploads. Kept nullable
@@ -240,8 +262,24 @@ class SubmissionRecord(Base):
     __table_args__ = (
         Index("ix_submission_records_submission_loan", "submission_id", "loan_id"),
         Index("ix_submission_records_submission_valid_loan", "submission_id", "is_valid", "loan_id"),
+        Index("uq_submission_records_submission_loan", "submission_id", "loan_id", unique=True,
+              # Scoped to genuinely valid rows only (twentieth SRS item). A file with a
+              # duplicate loan_id is meant to be storable as an INVALID submission - the
+              # application already flags the repeated row (validation_service.py), and
+              # FR-SUB-07 requires every submitted row to be persisted for the reviewer to
+              # see, including that one. An earlier, unscoped version of this index blocked
+              # the very INSERT that stores such a row, turning the intended "upload
+              # accepted, marked INVALID, duplicate row visible for review" outcome into an
+              # unconditional HTTP 409 with no row-level feedback at all - on every
+              # duplicate-loan-id upload, not only a genuine bug. Scoping to is_valid=true
+              # keeps the constraint doing its real job: catching a defect that lets two rows
+              # BOTH marked valid share a loan_id, which validation is supposed to prevent
+              # and never should happen.
+              postgresql_where=text("loan_id IS NOT NULL AND is_valid = true"),
+              sqlite_where=text("loan_id IS NOT NULL AND is_valid = 1")),
         CheckConstraint("loan_amount_tzs IS NULL OR loan_amount_tzs >= 0", name="ck_submission_records_loan_amount_nonnegative"),
         CheckConstraint("outstanding_principal_tzs IS NULL OR outstanding_principal_tzs >= 0", name="ck_submission_records_outstanding_nonnegative"),
+        CheckConstraint("loan_amount_tzs IS NULL OR outstanding_principal_tzs IS NULL OR outstanding_principal_tzs <= loan_amount_tzs", name="ck_submission_records_outstanding_le_loan"),
         CheckConstraint("collateral_value_tzs IS NULL OR collateral_value_tzs >= 0", name="ck_submission_records_collateral_value_nonnegative"),
         CheckConstraint("collateral_forced_sale_value_tzs IS NULL OR collateral_forced_sale_value_tzs >= 0", name="ck_submission_records_forced_sale_nonnegative"),
         CheckConstraint("insurance_value_protected_tzs IS NULL OR insurance_value_protected_tzs >= 0", name="ck_submission_records_insurance_nonnegative"),
@@ -341,6 +379,7 @@ class ClimateRecord(Base):
     __table_args__ = (
         Index("ix_climate_records_region_period_quality", "region", "reporting_period", "quality_flag"),
         CheckConstraint("month IS NULL OR (month >= 1 AND month <= 12)", name="ck_climate_records_month"),
+        CheckConstraint("reporting_period IS NULL OR (length(reporting_period) = 7 AND substr(reporting_period, 5, 2) = '-Q' AND substr(reporting_period, 7, 1) IN ('1','2','3','4'))", name="ck_climate_records_reporting_period_format"),
         CheckConstraint("rainfall_mm IS NULL OR rainfall_mm >= 0", name="ck_climate_records_rainfall_nonnegative"),
         CheckConstraint("avg_temperature_c IS NULL OR (avg_temperature_c >= -90 AND avg_temperature_c <= 70)", name="ck_climate_records_avg_temperature_plausible"),
         CheckConstraint("temperature_min_c IS NULL OR (temperature_min_c >= -90 AND temperature_min_c <= 70)", name="ck_climate_records_min_temperature_plausible"),
@@ -398,7 +437,7 @@ class RiskAdvisoryNote(Base):
     narrative = Column(Text, nullable=False)               # analyst's assessment in their own words
     recommendation = Column(Text, nullable=True)            # analyst's recommendation to BOT decision-makers
 
-    data_snapshot = Column(Text, nullable=True)             # JSON string: real figures the note was based on; kept Text for SQLite/PostgreSQL compatibility
+    data_snapshot = Column(JSON, nullable=True)             # Structured JSON snapshot; supported by PostgreSQL and SQLite JSON1-compatible storage
 
     created_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -539,6 +578,7 @@ class AuditLog(Base):
     entity_type = Column(String(100), nullable=True)  # e.g. Submission, User
     entity_id = Column(String, nullable=True)
     details = Column(Text, nullable=True)
+    details_json = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     __table_args__ = (

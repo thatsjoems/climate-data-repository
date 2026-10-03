@@ -5,8 +5,19 @@ MOST IMPORTANT ACCEPTANCE CRITERION covered here: Institution A must never be
 able to see Institution B's data through any endpoint, and a client-supplied
 institution_id must never override server-side authorization.
 """
+import itertools
+
 from app.models.models import RoleEnum, Submission, SubmissionRecord, SubmissionStatus
 from tests.conftest import make_institution, make_user, login, auth_header
+
+# Gives every _seed_submission_for() call its own username, even across
+# several calls for the SAME institution within one test (several tests in
+# this suite call it twice, e.g. once per region, to compare two submissions
+# - the previous `submitter_{institution.code}` name collided as soon as a
+# second call reused the same institution, raising a UNIQUE-constraint
+# IntegrityError on users.username rather than the assertion the test
+# actually meant to check).
+_seed_counter = itertools.count(1)
 
 
 def test_institution_user_cannot_create_institution(client, db_session):
@@ -47,22 +58,80 @@ def test_bot_user_cannot_view_password_reset_requests(client, db_session):
     assert res.status_code == 403
 
 
-def _seed_submission_for(db_session, institution, region="Dodoma", district="Chamwino", amount=1_000_000.0):
+def _seed_submission_for(db_session, institution, region="Dodoma", district="Chamwino", amount=1_000_000.0,
+                          status=SubmissionStatus.APPROVED):
+    """
+    Seeds one loan record of real exposure for `institution`, in region+2026-Q1.
+
+    `status` defaults to APPROVED: design decision confirmed directly by the
+    user building this system - a submission's figures are never aggregated,
+    charted, or reported on until a BOT Analyst approves them, however well
+    the file itself validated. `get_kpi_summary`, `get_hazard_exposure`,
+    `get_combined_climate_financial_exposure`, `get_exposure_snapshot` and the
+    map-points endpoints all now count APPROVED only - there is no longer a
+    separate "provisional/early-signal" analytics mode. Pass an explicit
+    `status` (e.g. `SubmissionStatus.VALID`) for a test that specifically
+    proves such data stays OUT of analytics until approved.
+
+    Built directly against the DB (bypassing the upload API), so unlike a real
+    upload this cannot rely on the endpoint's own version-chain logic - the
+    fields below intentionally mirror what that logic would produce.
+
+    Calling this more than once for the SAME institution does not create a
+    second, competing Submission: a real institution reports all of its
+    regions in the SAME quarterly file (one Submission, one row per loan),
+    and the database enforces at most one is_current=True row per
+    institution+period (fourteenth SRS item) - two directly-constructed
+    "current" Submission rows for the same institution+period would violate
+    that constraint exactly as a real duplicate upload attempt would. So a
+    second call for an institution that already has a current submission for
+    2026-Q1 adds another SubmissionRecord row to that SAME submission
+    instead, which is both the realistic shape and what every existing
+    caller's assertions (summed exposure, not submission counts) actually
+    need. The second call's own `status` is ignored in that case - the
+    existing submission's status is left as it already is.
+    """
+    existing = (
+        db_session.query(Submission)
+        .filter(
+            Submission.institution_id == institution.id,
+            Submission.reporting_period == "2026-Q1",
+            Submission.is_current == True,  # noqa: E712
+        )
+        .first()
+    )
+    n = next(_seed_counter)
+    if existing:
+        existing.total_records += 1
+        existing.valid_records += 1
+        db_session.add(SubmissionRecord(
+            submission_id=existing.id, row_number=existing.total_records + 1, loan_id=f"LN-{institution.code}-{n}",
+            borrower_name="Borrower", loan_amount_tzs=amount, collateral_value_tzs=amount,
+            region=region, district=district, is_valid=True,
+        ))
+        db_session.commit()
+        return existing
+
     submitter = make_user(db_session, role=RoleEnum.INSTITUTION_USER, institution=institution,
-                           username=f"submitter_{institution.code}")
+                           username=f"submitter_{institution.code}_{n}")
     submission = Submission(
         institution_id=institution.id,
         submitted_by_user_id=submitter.id,
         file_name="test.xlsx",
         file_path="uploads/test.xlsx",
         reporting_period="2026-Q1",
-        status=SubmissionStatus.VALID,
+        status=status,
         total_records=1, valid_records=1, invalid_records=0,
+        # is_current defaults to False on the model - set explicitly here.
+        # Only VALID and APPROVED are ever current (BR-06 in the SRS); a test
+        # passing status=PENDING/INVALID/REJECTED/SUPERSEDED here wants a row
+        # that must NOT be current, matching what the real endpoint would do.
+        is_current=status in (SubmissionStatus.VALID, SubmissionStatus.APPROVED),
     )
     db_session.add(submission)
     db_session.flush()
     db_session.add(SubmissionRecord(
-        submission_id=submission.id, row_number=2, loan_id=f"LN-{institution.code}",
+        submission_id=submission.id, row_number=2, loan_id=f"LN-{institution.code}-{n}",
         borrower_name="Borrower", loan_amount_tzs=amount, collateral_value_tzs=amount,
         region=region, district=district, is_valid=True,
     ))

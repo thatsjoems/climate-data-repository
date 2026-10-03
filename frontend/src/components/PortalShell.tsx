@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import NotificationBell from './NotificationBell'
 import botLogo from '../assets/bot_logo.png'
+import coatOfArms from '../assets/tanzania_coat_of_arms.jpg'
 
 export interface SidebarItem {
   key: string
@@ -33,47 +34,56 @@ export default function PortalShell({
 }: PortalShellProps) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  const [collapsed, setCollapsed] = useState(false)
+  // Off-canvas menu, matching the pattern on bot.go.tz: hidden by default
+  // (not a persistent, always-visible sidebar) - the hamburger in the
+  // navbar below slides it in as an overlay on top of the content, with a
+  // dark backdrop behind it; the backdrop, the "x" inside the menu, or
+  // choosing a navigation item all close it again, also like the real site.
+  const [menuOpen, setMenuOpen] = useState(false)
 
   function handleLogout() {
     logout()
     navigate('/login')
   }
 
+  function handleNavItemClick(onClick: () => void) {
+    onClick()
+    setMenuOpen(false)
+  }
+
   return (
     <div className={`portal-shell theme-${theme}`}>
-      <aside className={`portal-sidebar ${collapsed ? 'collapsed' : ''}`}>
-        <div className="sidebar-brand">
-          <img src={botLogo} alt="Bank of Tanzania" className="sidebar-brand-logo" />
-          <button className="sidebar-toggle" onClick={() => setCollapsed(!collapsed)} aria-label="Toggle sidebar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-          </button>
-        </div>
+      {menuOpen && <div className="sidebar-backdrop" onClick={() => setMenuOpen(false)} />}
 
+      <aside className={`portal-sidebar ${menuOpen ? 'open' : ''}`}>
+        <div className="sidebar-close-row">
+          <img src={botLogo} alt="Bank of Tanzania" className="sidebar-bot-logo" />
+          <button className="sidebar-close" onClick={() => setMenuOpen(false)} aria-label="Close menu">&times;</button>
+        </div>
         <nav className="sidebar-nav">
-          {!collapsed && <div className="sidebar-section-label">Navigation</div>}
+          <div className="sidebar-section-label">Navigation</div>
           {items.map((item) => (
             <button
               key={item.key}
               className={`sidebar-item ${item.active ? 'active' : ''}`}
-              onClick={item.onClick}
+              onClick={() => handleNavItemClick(item.onClick)}
               title={item.label}
             >
               <span className="sidebar-icon">{item.icon}</span>
-              {!collapsed && <span className="sidebar-label">{item.label}</span>}
+              <span className="sidebar-label">{item.label}</span>
             </button>
           ))}
-          <button className="sidebar-item" onClick={() => navigate('/change-password')} title="Change Password">
+          <button className="sidebar-item" onClick={() => handleNavItemClick(() => navigate('/change-password'))} title="Change Password">
             <span className="sidebar-icon">🔒</span>
-            {!collapsed && <span className="sidebar-label">Change Password</span>}
+            <span className="sidebar-label">Change Password</span>
           </button>
-          <button className="sidebar-item" onClick={handleLogout} title="Log Out">
+          <button className="sidebar-item" onClick={() => handleNavItemClick(handleLogout)} title="Log Out">
             <span className="sidebar-icon">🚪</span>
-            {!collapsed && <span className="sidebar-label">Log Out</span>}
+            <span className="sidebar-label">Log Out</span>
           </button>
         </nav>
 
-        {platforms && platforms.length > 0 && !collapsed && (
+        {platforms && platforms.length > 0 && (
           <div className="sidebar-platform-list">
             <div className="sidebar-section-label" style={{ padding: '0 0 0.4rem' }}>Integrated Platforms</div>
             {platforms.map((p) => (
@@ -95,24 +105,57 @@ export default function PortalShell({
       </aside>
 
       <div className="portal-main">
-        <header className="portal-topbar">
-          <div className="portal-topbar-title">
-            <h1>{pageTitle}</h1>
-            {pageSubtitle && <span>{pageSubtitle}</span>}
-          </div>
-          <div className="portal-topbar-right">
-            <NotificationBell />
-            <div className="navbar-user-info">
-              <span className="navbar-avatar" style={{ color: 'var(--color-text)', background: 'rgba(0,0,0,0.06)', border: '1px solid var(--color-border)' }}>
-                {user?.full_name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase()}
-              </span>
-              <span className="navbar-user-text" style={{ color: 'inherit' }}>
-                <strong>{user?.full_name}</strong>
-                <em>{user?.role === 'INSTITUTION_USER' ? 'Institution User' : user?.role === 'BOT_USER' ? 'BOT Analyst' : 'System Admin'}</em>
-              </span>
+        {/*
+          Two-tier header per the supplied design spec.
+          Tier 1 (.top-header): gold gradient, Coat of Arms (left) / title
+          (center) / BOT emblem (right), 3px dark-gold bottom border.
+          tanzania_coat_of_arms.jpg (user-supplied) is the real national
+          Coat of Arms - shown as a round white "medallion" badge
+          (.coat-of-arms-badge) since the source file itself has a plain
+          white background. Its use here is official/internal (a Bank of
+          Tanzania system), which is squarely the kind of use Tanzania's
+          National Emblems Act (Cap. 10) is written to allow - unlike the
+          Act's actual target (commercial/trade or unauthorised personal
+          use) - but confirm with BOT's own compliance process if this
+          goes into a public-facing deployment, since that Act still
+          requires the Home Affairs Minister's authorisation for use
+          outside government itself.
+          Tier 2 (.navbar): dark bar, hamburger (left, opens the off-canvas
+          menu - see the slide-in pattern on bot.go.tz, requested as the
+          model: hidden by default, overlays the content when opened rather
+          than sitting in the layout permanently) and the signed-in user's
+          role (right). The
+          page title/subtitle and the notification bell were already part
+          of this shell before this redesign and aren't in the supplied
+          spec; rather than drop them, they're placed here too (title next
+          to the hamburger, bell just before the role text) so nothing that
+          worked before is silently lost - remove either if not wanted.
+        */}
+        <header className="top-header">
+          <span className="coat-of-arms-badge">
+            <img src={coatOfArms} alt="Coat of Arms of the United Republic of Tanzania" className="coat-of-arms-img" />
+          </span>
+          <h1 className="top-header-title">Bank of Tanzania</h1>
+          <img src={botLogo} alt="Bank of Tanzania" className="top-header-bot-logo" />
+        </header>
+
+        <nav className="navbar">
+          <div className="navbar-left">
+            <button className="hamburger-menu" onClick={() => setMenuOpen(!menuOpen)} aria-label="Open menu">
+              &#9776;
+            </button>
+            <div className="navbar-page-title">
+              <span>{pageTitle}</span>
+              {pageSubtitle && <em>{pageSubtitle}</em>}
             </div>
           </div>
-        </header>
+          <div className="navbar-right">
+            <NotificationBell />
+            <span className="user-role">
+              {user?.role === 'INSTITUTION_USER' ? 'Institution User' : user?.role === 'BOT_USER' ? 'BOT Analyst (internal)' : 'System Admin'}
+            </span>
+          </div>
+        </nav>
 
         <main className="portal-content">{children}</main>
 

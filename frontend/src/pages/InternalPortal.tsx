@@ -1,8 +1,9 @@
-import { useEffect, useState, FormEvent } from 'react'
+import { useEffect, useRef, useState, FormEvent, CSSProperties } from 'react'
 import apiClient from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import PortalShell, { SidebarItem, PlatformStatus } from '../components/PortalShell'
 import HazardMap, { RegionMapPoint } from '../components/HazardMap'
+import { HAZARD_COLORS, HAZARD_NONE_COLOR } from '../data/hazardColors'
 
 interface KPI {
   total_institutions: number
@@ -26,6 +27,28 @@ interface Submission {
   valid_records: number
   invalid_records: number
   created_at: string
+  review_notes?: string
+}
+
+interface ValidationErrorItem {
+  row_number: number | null
+  column_name: string | null
+  error_description: string
+  severity: string
+}
+
+interface SubmissionRecordItem {
+  row_number: number
+  customer_id: string | null
+  loan_id: string | null
+  loan_amount_tzs: number | null
+  collateral_type: string | null
+  collateral_value_tzs: number | null
+  region: string | null
+  district: string | null
+  ward: string | null
+  climate_hazard_exposure: string | null
+  is_valid: boolean
 }
 
 interface HazardExposure {
@@ -67,11 +90,46 @@ function formatTZS(n: number) {
   return new Intl.NumberFormat('en-TZ', { maximumFractionDigits: 0 }).format(n) + ' TZS'
 }
 
+/**
+ * Renders a KPI figure exactly like a plain `<span className="kpi-number">`
+ * when it fits its card - same single-line, fixed-size, bold look as
+ * before. Only when the real pixel width of the text is wider than the
+ * card actually allows does it measure the overflow and slide the text
+ * left just far enough to reveal the hidden end, then back, on a loop -
+ * so a very large TZS figure is always fully readable without shrinking
+ * the font or breaking the one-line layout for every other (shorter) card.
+ */
+function SlidingKpiNumber({ text }: { text: string }) {
+  const wrapRef = useRef<HTMLSpanElement>(null)
+  const numberRef = useRef<HTMLSpanElement>(null)
+  const [overflowPx, setOverflowPx] = useState(0)
+
+  useEffect(() => {
+    function measure() {
+      const wrap = wrapRef.current, num = numberRef.current
+      if (!wrap || !num) return
+      const diff = num.scrollWidth - wrap.clientWidth
+      setOverflowPx(diff > 2 ? diff : 0)
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [text])
+
+  return (
+    <span
+      ref={wrapRef}
+      className={`kpi-number-wrap${overflowPx > 0 ? ' is-overflowing' : ''}`}
+      style={overflowPx > 0 ? ({ '--kpi-slide-distance': `-${overflowPx + 4}px` } as CSSProperties) : undefined}
+    >
+      <span ref={numberRef} className="kpi-number">{text}</span>
+    </span>
+  )
+}
+
 function scrollTo(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
-
-const PIE_COLORS = ['#0A0A0A', '#0FA47F', '#E28413', '#C0362C', '#7F77DD', '#94A3B8']
 
 function buildConicGradient(segments: { label: string; value: number; color: string }[]) {
   const total = segments.reduce((sum, s) => sum + s.value, 0)
@@ -163,6 +221,7 @@ export default function InternalPortal() {
   const [mapPoints, setMapPoints] = useState<RegionMapPoint[]>([])
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [notesById, setNotesById] = useState<Record<string, string>>({})
+  const [selectedSubmission, setSelectedSubmission] = useState<{ submission: Submission; errors: ValidationErrorItem[]; records: SubmissionRecordItem[] } | null>(null)
   const [reportGenerating, setReportGenerating] = useState(false)
   const [reportMessage, setReportMessage] = useState<string | null>(null)
   const [riskAdvisories, setRiskAdvisories] = useState<RiskAdvisory[]>([])
@@ -425,7 +484,22 @@ export default function InternalPortal() {
       decision,
       notes: notesById[submissionId] || '',
     })
+    setSelectedSubmission(null)
     loadAll()
+  }
+
+  // Lets the analyst actually SEE the individual rows (customer, loan amount,
+  // region...) before deciding Approve/Reject - not just the automated
+  // valid/total counts. Automated validation can only catch what it was
+  // told to check for (malformed GPS, missing fields, duplicate loan_id
+  // within the file); it cannot catch a row that is well-formed but
+  // fabricated or forged. This is exactly what "maker-checker" is supposed
+  // to close - a technically-VALID submission is not the same claim as an
+  // ANALYST-REVIEWED one, and until this button existed, the checker had no
+  // way to actually check the content, only trust the machine's own pass/fail.
+  async function viewSubmissionDetails(submissionId: string) {
+    const res = await apiClient.get(`/submissions/${submissionId}`)
+    setSelectedSubmission({ submission: res.data, errors: res.data.errors, records: res.data.records })
   }
 
   const filteredSubmissions =
@@ -433,10 +507,10 @@ export default function InternalPortal() {
 
   const statusSegments = kpi ? [
     { label: 'Pending', value: kpi.pending_submissions, color: '#94A3B8' },
-    { label: 'Valid', value: kpi.valid_submissions, color: '#0FA47F' },
-    { label: 'Invalid', value: kpi.invalid_submissions, color: '#C0362C' },
-    { label: 'Approved', value: kpi.approved_submissions, color: '#0A0A0A' },
-    { label: 'Rejected', value: kpi.rejected_submissions, color: '#7F2C2C' },
+    { label: 'Valid', value: kpi.valid_submissions, color: '#10B981' },
+    { label: 'Invalid', value: kpi.invalid_submissions, color: '#F59E0B' },
+    { label: 'Approved', value: kpi.approved_submissions, color: '#002B49' },
+    { label: 'Rejected', value: kpi.rejected_submissions, color: '#EF4444' },
   ] : []
 
   const hazardTotals: Record<string, number> = {}
@@ -444,8 +518,13 @@ export default function InternalPortal() {
     const key = h.hazard_type || 'None'
     hazardTotals[key] = (hazardTotals[key] || 0) + h.exposed_loan_amount_tzs
   })
-  const hazardSegments = Object.entries(hazardTotals).map(([label, value], i) => ({
-    label, value, color: PIE_COLORS[i % PIE_COLORS.length],
+  // Colors come from ../data/hazardColors - the single shared source with
+  // the Geospatial Overview's Hazard layer (HazardMap.tsx), so a hazard's
+  // color can never drift apart between the two screens. "None" is grey
+  // specifically (HAZARD_NONE_COLOR, not cycled from the generic palette),
+  // so an untagged/no-hazard slice reads as "nothing", not an arbitrary color.
+  const hazardSegments = Object.entries(hazardTotals).map(([label, value]) => ({
+    label, value, color: label === 'None' ? HAZARD_NONE_COLOR : HAZARD_COLORS[label] || '#94A3B8',
   }))
 
   const platforms: PlatformStatus[] = [
@@ -457,13 +536,16 @@ export default function InternalPortal() {
 
   const sidebarItems: SidebarItem[] = [
     { key: 'overview', icon: '📊', label: 'Overview', active: true, onClick: () => scrollTo('top-anchor') },
+    { key: 'filters', icon: '🔍', label: 'Dashboard Filters', onClick: () => scrollTo('dashboard-filters') },
     { key: 'loan', icon: '💰', label: 'Loan Data', onClick: () => scrollTo('kpi-section') },
     { key: 'collateral', icon: '🛡️', label: 'Collateral Data', onClick: () => scrollTo('kpi-section') },
     { key: 'climate', icon: '🌦️', label: 'Climate & Hazard Data', onClick: () => scrollTo('hazard-section') },
     { key: 'quality', icon: '📋', label: 'Climate Data Quality', onClick: () => scrollTo('quality-section') },
+    { key: 'status-dist', icon: '📊', label: 'Submission Status Distribution', onClick: () => scrollTo('status-distribution-section') },
     { key: 'combined', icon: '🔗', label: 'Combined Climate-Financial', onClick: () => scrollTo('combined-section') },
     { key: 'risk', icon: '🧭', label: 'Risk Advisory Reports', onClick: () => scrollTo('risk-advisory-section') },
     { key: 'submissions', icon: '📄', label: 'Submission Status', onClick: () => scrollTo('monitoring-section') },
+    { key: 'regional', icon: '🌍', label: 'Exposure by Region', onClick: () => scrollTo('regional-exposure-section') },
     { key: 'map', icon: '🗺️', label: 'Geospatial Map', onClick: () => scrollTo('map-section') },
     { key: 'export', icon: '⬇️', label: 'Download / Export', onClick: () => scrollTo('reports-section') },
   ]
@@ -488,7 +570,7 @@ export default function InternalPortal() {
           — the same figures shown on this dashboard, ready to file or share instead of copying
           numbers manually.
         </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
           <button className="btn-accent" onClick={handleGenerateReport} disabled={reportGenerating}>
             {reportGenerating ? 'Generating...' : 'Generate Summary Report (PDF)'}
           </button>
@@ -535,18 +617,24 @@ export default function InternalPortal() {
 
       {kpi && (
         <section className="kpi-grid-v2" id="kpi-section">
+          <p className="alert-info" style={{ gridColumn: '1 / -1', fontWeight: 600 }}>
+            ✅ These figures reflect BOT-APPROVED submissions only. A submission that has
+            passed automated validation but is still awaiting review does not appear here or
+            anywhere else in these figures until a BOT Analyst approves it - see Submission
+            Monitoring for its review status in the meantime.
+          </p>
           <div className="kpi-card-v2">
             <div className="kpi-icon-box" style={{ background: '#FDF0DC' }}>💰</div>
             <div className="kpi-card-v2-text">
               <span className="kpi-label">Total Loan Value</span>
-              <span className="kpi-number">{formatTZS(kpi.total_loan_exposure_tzs)}</span>
+              <SlidingKpiNumber text={formatTZS(kpi.total_loan_exposure_tzs)} />
             </div>
           </div>
           <div className="kpi-card-v2">
             <div className="kpi-icon-box" style={{ background: '#E6F1FB' }}>🛡️</div>
             <div className="kpi-card-v2-text">
               <span className="kpi-label">Total Collateral Value</span>
-              <span className="kpi-number">{formatTZS(kpi.total_collateral_value_tzs)}</span>
+              <SlidingKpiNumber text={formatTZS(kpi.total_collateral_value_tzs)} />
             </div>
           </div>
           <div className="kpi-card-v2">
@@ -575,7 +663,12 @@ export default function InternalPortal() {
           circle for details.
         </p>
         {mapPoints.length > 0 ? (
-          <HazardMap points={mapPoints} />
+          <HazardMap
+            points={mapPoints}
+            filterRegion={filterRegion}
+            filterInstitutionId={filterInstitutionId}
+            filterReportingPeriod={filterReportingPeriod}
+          />
         ) : (
           <div className="placeholder-panel">
             <span className="placeholder-icon">🗺️</span>
@@ -613,7 +706,7 @@ export default function InternalPortal() {
         {climateQualityError && (
           <div className="alert-error">
             ⚠️ {climateQualityError}
-            <button style={{ marginLeft: '0.75rem' }} onClick={loadClimateQuality}>Retry</button>
+            <button className="btn-secondary btn-sm" style={{ marginLeft: '0.75rem' }} onClick={loadClimateQuality}>Retry</button>
           </div>
         )}
         {dataQuality && (
@@ -696,11 +789,11 @@ export default function InternalPortal() {
                   />
                 </td>
                 <td>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                    <button onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'VALIDATED')}>
+                  <div className="button-row">
+                    <button className="btn-sm btn-success" onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'VALIDATED')}>
                       ✓ Validate
                     </button>
-                    <button onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'FLAGGED')}>
+                    <button className="btn-sm btn-danger" onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'FLAGGED')}>
                       ✕ Flag as Bad Data
                     </button>
                   </div>
@@ -731,7 +824,7 @@ export default function InternalPortal() {
         </table>
       </section>
 
-      <section className="card">
+      <section className="card" id="status-distribution-section">
         <h2>📊 Submission Status Distribution</h2>
         <PieChart segments={statusSegments.length ? statusSegments : [{ label: 'No data yet', value: 1, color: '#EDEBE3' }]} />
       </section>
@@ -948,22 +1041,31 @@ export default function InternalPortal() {
               <tr key={s.id}>
                 <td>{s.file_name}</td>
                 <td>{s.reporting_period}</td>
-                <td><span className={`badge badge-${s.status.toLowerCase()}`}>{s.status}</span></td>
+                <td><span className={`badge badge-${s.status.toLowerCase()}`}>{s.status === 'APPROVED' ? 'Approved✅' : s.status === 'REJECTED' ? 'Rejected❌' : s.status}</span></td>
                 <td>{s.valid_records}/{s.total_records}</td>
                 <td>{new Date(s.created_at).toLocaleDateString()}</td>
                 {(user?.role === 'BOT_USER' || user?.role === 'SYSTEM_ADMIN') && (
                   <td>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
-                      <input
-                        type="text"
-                        placeholder="Notes (optional)"
-                        value={notesById[s.id] || ''}
-                        onChange={(e) => setNotesById({ ...notesById, [s.id]: e.target.value })}
-                        style={{ minWidth: 140 }}
-                      />
-                      <button onClick={() => handleReview(s.id, 'APPROVE')}>Approve</button>
-                      <button onClick={() => handleReview(s.id, 'REJECT')}>Reject</button>
-                    </div>
+                    {['APPROVED', 'REJECTED', 'SUPERSEDED'].includes(s.status) ? (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                        <button className="btn-sm" onClick={() => viewSubmissionDetails(s.id)}>View Details</button>
+                        <span className="note" style={{ fontStyle: 'italic', gridColumn: '2 / 3' }}>
+                          Already {s.status === 'APPROVED' ? 'Approved✅' : s.status === 'REJECTED' ? 'Rejected❌' : s.status.toLowerCase()} - final.
+                        </span>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                        <button className="btn-sm" onClick={() => viewSubmissionDetails(s.id)}>View Details</button>
+                        <button className="btn-sm" onClick={() => handleReview(s.id, 'APPROVE')}>Approve</button>
+                        <input
+                          type="text"
+                          placeholder="Notes (optional)"
+                          value={notesById[s.id] || ''}
+                          onChange={(e) => setNotesById({ ...notesById, [s.id]: e.target.value })}
+                        />
+                        <button className="btn-sm" onClick={() => handleReview(s.id, 'REJECT')}>Reject</button>
+                      </div>
+                    )}
                   </td>
                 )}
               </tr>
@@ -975,7 +1077,96 @@ export default function InternalPortal() {
         </table>
       </section>
 
-      <section className="card">
+      {selectedSubmission && (
+        <section className="card">
+          <h2>Submission Details: {selectedSubmission.submission.file_name}</h2>
+          <p className="note">
+            Row-level content of this submission - what the analyst is actually approving or
+            rejecting, not just the automated valid/total counts above. Automated checks catch
+            malformed data; they cannot judge whether a well-formed row is genuine.
+          </p>
+          {selectedSubmission.submission.review_notes && (
+            <p><strong>Previous Reviewer Notes:</strong> {selectedSubmission.submission.review_notes}</p>
+          )}
+
+          <h3 style={{ fontSize: '0.88rem', marginBottom: '0.3rem' }}>Submitted Records</h3>
+          {selectedSubmission.records.length === 0 ? (
+            <p className="note">No records were found in this submission.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Row</th><th>Customer ID</th><th>Loan ID</th><th>Loan Amount</th>
+                    <th>Collateral Type</th><th>Collateral Value</th><th>Region</th><th>District</th><th>Ward</th><th>Hazard</th><th>Valid?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedSubmission.records.map((r) => (
+                    <tr key={r.row_number}>
+                      <td>{r.row_number}</td>
+                      <td>{r.customer_id ?? '-'}</td>
+                      <td>{r.loan_id ?? '-'}</td>
+                      <td>{r.loan_amount_tzs?.toLocaleString() ?? '-'}</td>
+                      <td>{r.collateral_type ?? '-'}</td>
+                      <td>{r.collateral_value_tzs?.toLocaleString() ?? '-'}</td>
+                      <td>{r.region ?? '-'}</td>
+                      <td>{r.district ?? '-'}</td>
+                      <td>{r.ward ?? '-'}</td>
+                      <td>{r.climate_hazard_exposure ?? '-'}</td>
+                      <td>{r.is_valid ? '✅' : '❌'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.3rem' }}>Validation Errors</h3>
+          {selectedSubmission.errors.length === 0 ? (
+            <p>No errors were found.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr><th>Row</th><th>Column</th><th>Error</th><th>Severity</th></tr>
+              </thead>
+              <tbody>
+                {selectedSubmission.errors.map((err, idx) => (
+                  <tr key={idx}>
+                    <td>{err.row_number ?? '-'}</td>
+                    <td>{err.column_name ?? '-'}</td>
+                    <td>{err.error_description}</td>
+                    <td>{err.severity}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+            {['APPROVED', 'REJECTED', 'SUPERSEDED'].includes(selectedSubmission.submission.status) ? (
+              <span className="note" style={{ fontStyle: 'italic' }}>
+                Already {selectedSubmission.submission.status === 'APPROVED' ? 'Approved✅' : selectedSubmission.submission.status === 'REJECTED' ? 'Rejected❌' : selectedSubmission.submission.status.toLowerCase()} - this decision is final and cannot be changed.
+              </span>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  placeholder="Notes (optional)"
+                  value={notesById[selectedSubmission.submission.id] || ''}
+                  onChange={(e) => setNotesById({ ...notesById, [selectedSubmission.submission.id]: e.target.value })}
+                  style={{ minWidth: 180 }}
+                />
+                <button className="btn-success" onClick={() => handleReview(selectedSubmission.submission.id, 'APPROVE')}>Approve</button>
+                <button className="btn-danger" onClick={() => handleReview(selectedSubmission.submission.id, 'REJECT')}>Reject</button>
+              </>
+            )}
+            <button className="btn-secondary" onClick={() => setSelectedSubmission(null)}>Close</button>
+          </div>
+        </section>
+      )}
+
+      <section className="card" id="regional-exposure-section">
         <h2>🌍 Climate & Financial Exposure by Region</h2>
         <p className="note">
           Loan value in regions/periods where this hazard was the most-frequently recorded climate

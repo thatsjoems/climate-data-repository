@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
+from app.core.account_status import authentication_block_reason
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.core.security import hash_password
@@ -52,7 +53,9 @@ def submit_password_reset_request(payload: PasswordResetRequestCreate, db: Sessi
         or_(User.username == identifier, User.email == identifier)
     ).first()
 
-    if user and user.is_active:
+    # An account that cannot sign in (deactivated, or its institution deactivated) gets the
+    # same generic response but no request - there is nothing for an administrator to reset.
+    if user and authentication_block_reason(user) is None:
         existing_pending = db.query(PasswordResetRequest).filter(
             PasswordResetRequest.user_id == user.id,
             PasswordResetRequest.status == AccessRequestStatus.PENDING,
@@ -78,7 +81,9 @@ def list_password_reset_requests(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.SYSTEM_ADMIN)),
 ):
-    requests = db.query(PasswordResetRequest).order_by(PasswordResetRequest.created_at.desc()).all()
+    # Capped rather than unbounded - a SYSTEM_ADMIN reviewing pending/past
+    # requests needs recent history, not every request since this project began.
+    requests = db.query(PasswordResetRequest).order_by(PasswordResetRequest.created_at.desc()).limit(200).all()
     return [_to_out(r, db.query(User).filter(User.id == r.user_id).first()) for r in requests]
 
 

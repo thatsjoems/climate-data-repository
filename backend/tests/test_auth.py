@@ -40,6 +40,45 @@ def test_account_locks_after_max_failed_attempts(client, db_session):
     assert "locked" in res.json()["detail"].lower()
 
 
+# ---- Username enumeration via lockout status (item 8 of the September 2026 external review) ----
+
+def test_a_wrong_password_on_a_locked_account_gives_the_generic_message_not_a_lock_notice(client, db_session):
+    """
+    Before this fix, ANY password against a locked account revealed the lock
+    (403) - so an attacker could learn a username was valid, and currently
+    locked, without ever supplying its correct password. A wrong password
+    must always look identical whether the account is locked or not.
+    """
+    make_user(db_session, username="bob")
+    for _ in range(5):
+        assert login(client, "bob", password="wrong-password").status_code == 401
+    # Account is now locked. A further WRONG password must still be the generic 401 - not 403.
+    res = login(client, "bob", password="still-wrong")
+    assert res.status_code == 401
+    assert res.json()["detail"] == "Incorrect username or password"
+
+
+def test_the_correct_password_is_required_before_lock_status_is_revealed(client, db_session):
+    """The 403 lock notice is reachable only with the account's own correct password."""
+    make_user(db_session, username="carol")
+    for _ in range(5):
+        login(client, "carol", password="wrong-password")
+    res = login(client, "carol", password=DEFAULT_PASSWORD)
+    assert res.status_code == 403
+    assert "locked" in res.json()["detail"].lower()
+
+
+def test_locked_and_unknown_usernames_are_indistinguishable_under_a_wrong_password(client, db_session):
+    """The 401 body for a wrong password must be identical whether the username exists and is locked, or does not exist at all."""
+    make_user(db_session, username="dora")
+    for _ in range(5):
+        login(client, "dora", password="wrong-password")
+    locked_user_response = login(client, "dora", password="another-wrong-one")
+    unknown_user_response = login(client, "no-such-user-at-all", password="anything")
+    assert locked_user_response.status_code == unknown_user_response.status_code == 401
+    assert locked_user_response.json()["detail"] == unknown_user_response.json()["detail"]
+
+
 def test_deactivated_account_cannot_login(client, db_session):
     user = make_user(db_session, username="alice")
     user.is_active = False

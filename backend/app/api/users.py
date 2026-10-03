@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.deps import require_roles, get_current_user
 from app.core.security import hash_password
 from app.core.password_policy import validate_password_strength
-from app.models.models import User, RoleEnum
+from app.models.models import User, RoleEnum, Institution
 from app.schemas.schemas import UserCreate, UserOut
 from app.services.audit_service import record_audit
 from app.services.notification_service import notify_user, notify_roles
@@ -34,6 +34,18 @@ def create_user(
         raise HTTPException(status_code=400, detail="This username is already taken")
     if db.query(User).filter(User.email == payload.email).first():
         raise HTTPException(status_code=400, detail="This email is already in use")
+
+    # Role and institution must agree (found during an admin-side review): an
+    # INSTITUTION_USER with no institution has no tenant scope and can never
+    # see or upload anything - a silently broken account. A BOT_USER or
+    # SYSTEM_ADMIN is never institution-scoped, so carrying one is misleading
+    # even though nothing currently reads it for those roles.
+    if payload.role == RoleEnum.INSTITUTION_USER and not payload.institution_id:
+        raise HTTPException(status_code=400, detail="An Institution User must be assigned an institution.")
+    if payload.role != RoleEnum.INSTITUTION_USER and payload.institution_id:
+        raise HTTPException(status_code=400, detail="Only an Institution User may be assigned an institution.")
+    if payload.institution_id and not db.query(Institution).filter(Institution.id == payload.institution_id).first():
+        raise HTTPException(status_code=400, detail="The selected institution does not exist.")
 
     problems = validate_password_strength(payload.password)
     if problems:
@@ -67,9 +79,28 @@ def deactivate_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.SYSTEM_ADMIN)),
 ):
+    """
+    KG-03 (SRS Section 7.2): an administrator must never be able to lock
+    every administrator out of the system by deactivating their own account.
+
+    Self-deactivation is the only check needed to guarantee this: whoever is
+    making this request is themselves necessarily active right now (a
+    deactivated account is rejected by the per-request authentication check
+    - see account_status.py - before any endpoint body ever runs), so
+    refusing self-deactivation alone guarantees at least one active
+    administrator (the caller) survives every call to this endpoint. An
+    earlier version of this fix also queried for "other active
+    administrators" before allowing a fellow admin to be deactivated - that
+    branch was proven unreachable in review (the caller always satisfies its
+    own count) and removed rather than left as dead code.
+    """
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account.")
+
     user.is_active = False
     db.commit()
     db.refresh(user)

@@ -2,7 +2,7 @@
 Pydantic Schemas - validate data going into and coming out of the API.
 """
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 from pydantic import BaseModel, EmailStr, ConfigDict
 
 from app.models.models import RoleEnum, SubmissionStatus, InstitutionType, RiskLevel
@@ -170,6 +170,9 @@ class SubmissionOut(BaseModel):
     file_name: str
     reporting_period: str
     status: SubmissionStatus
+    version_number: int = 1
+    previous_submission_id: Optional[str] = None
+    is_current: bool = False
     total_records: int
     valid_records: int
     invalid_records: int
@@ -233,8 +236,20 @@ class RegionMapPoint(BaseModel):
     latitude: float
     longitude: float
     total_exposure_tzs: float
+    total_collateral_tzs: float
     record_count: int
     dominant_hazard: str
+
+
+class ExposurePointOut(BaseModel):
+    latitude: float
+    longitude: float
+    amount_tzs: float
+
+
+class ExposurePointsOut(BaseModel):
+    loan_points: list[ExposurePointOut]
+    collateral_points: list[ExposurePointOut]
 
 
 # ---------- CLIMATE DATA INGESTION ----------
@@ -321,7 +336,7 @@ class RiskAdvisoryOut(BaseModel):
     risk_level: RiskLevel
     narrative: str
     recommendation: Optional[str] = None
-    data_snapshot: Optional[str] = None
+    data_snapshot: Optional[dict[str, Any]] = None
     created_by_user_id: str
     created_by_name: str = "Analyst"
     created_at: datetime

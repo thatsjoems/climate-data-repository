@@ -1,6 +1,7 @@
-import { useState, FormEvent } from 'react'
+import { useState, FormEvent, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import apiClient from '../api/client'
 import botLogo from '../assets/bot_logo.png'
 
 export default function Login() {
@@ -8,6 +9,19 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const { login, isLoading, error } = useAuth()
   const navigate = useNavigate()
+  // Demo credentials must never be advertised in production (item 7 of the
+  // September 2026 external review): the backend already skips SEEDING them
+  // there (init_db.py), so showing them here regardless of environment would
+  // invite exactly the credential-guessing the login rate limit exists to
+  // slow down. Defaults to hidden until /api/health confirms it is safe to
+  // show them, rather than defaulting to shown and hiding late.
+  const [showDemoHint, setShowDemoHint] = useState(false)
+
+  useEffect(() => {
+    apiClient.get('/health')
+      .then((res) => setShowDemoHint(res.data?.environment !== 'production'))
+      .catch(() => setShowDemoHint(false))
+  }, [])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -60,19 +74,21 @@ export default function Login() {
              institutions only. All activities are monitored and recorded.</p>
         </div>
 
-        <div className="demo-hint">
-          <strong>DEMO accounts (after running init_db.py):</strong>
-          <ul>
-            <li>Admin: <code>admin</code> / <code>Admin@123</code></li>
-            <li>BOT Analyst: <code>bot_analyst</code> / <code>Analyst@123</code></li>
-            <li>Institution (Bank A): <code>bankA_user</code> / <code>BankA@123</code></li>
-          </ul>
-          <p style={{ marginTop: '0.5rem', fontSize: '0.72rem' }}>
-            ⚠️ Climate observations in this environment are <strong>SYNTHETIC demo data</strong> —
-            not official TMA readings. See the "Climate Data Quality" section on the Analyst
-            dashboard for exactly which records are synthetic vs validated.
-          </p>
-        </div>
+        {showDemoHint && (
+          <div className="demo-hint">
+            <strong>DEMO accounts (after running init_db.py):</strong>
+            <ul>
+              <li>Admin: <code>admin</code> / <code>Admin@123</code></li>
+              <li>BOT Analyst: <code>bot_analyst</code> / <code>Analyst@123</code></li>
+              <li>Institution (Bank A): <code>bankA_user</code> / <code>BankA@123</code></li>
+            </ul>
+            <p style={{ marginTop: '0.5rem', fontSize: '0.72rem' }}>
+              ⚠️ Climate observations in this environment are <strong>SYNTHETIC demo data</strong> —
+              not official TMA readings. See the "Climate Data Quality" section on the Analyst
+              dashboard for exactly which records are synthetic vs validated.
+            </p>
+          </div>
+        )}
 
         <p className="login-footer">© 2026 Bank of Tanzania. All rights reserved.</p>
       </form>

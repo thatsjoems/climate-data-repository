@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
+from app.core.account_status import authentication_block_reason, ACCOUNT_DEACTIVATED, INSTITUTION_DEACTIVATED
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.rate_limit import limiter
@@ -56,8 +57,34 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
     if not user:
         raise generic_error
 
-    # ---- Brute-force lockout ----
-    if user.locked_until and user.locked_until > datetime.utcnow():
+    is_locked = bool(user.locked_until and user.locked_until > datetime.utcnow())
+
+    # Password is checked BEFORE the lockout status is revealed (item 8 of the
+    # September 2026 external review). The lockout message used to be raised
+    # here, before the password was even looked at - so a caller who supplied
+    # any password at all for a locked-but-otherwise-unknown-to-them username
+    # got a distinct 403 "this account is locked" response, while an unknown
+    # username always got the generic 401. That difference told an attacker
+    # a username was valid without ever supplying its correct password,
+    # defeating the "never reveal which one it was" comment above. Checking
+    # the password FIRST means only someone who already knows the correct
+    # password can learn that the account is currently locked.
+    if not verify_password(payload.password, user.hashed_password):
+        if not is_locked:
+            user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+            if user.failed_login_attempts >= settings.MAX_FAILED_LOGIN_ATTEMPTS:
+                user.locked_until = datetime.utcnow() + timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
+                record_audit(db, user.id, "LOGIN_LOCKED", "User", user.id,
+                             f"Account locked after {user.failed_login_attempts} failed attempts")
+            else:
+                record_audit(db, user.id, "LOGIN_FAILED", "User", user.id,
+                             f"Failed attempt {user.failed_login_attempts}/{settings.MAX_FAILED_LOGIN_ATTEMPTS}")
+            db.commit()
+        # Wrong password: always the same generic message, locked or not -
+        # nothing here may differ based on lock status.
+        raise generic_error
+
+    if is_locked:
         minutes_left = max(1, int((user.locked_until - datetime.utcnow()).total_seconds() // 60) + 1)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -65,20 +92,17 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
                    f"Try again in about {minutes_left} minute(s), or use Forgot Password.",
         )
 
-    if not verify_password(payload.password, user.hashed_password):
-        user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
-        if user.failed_login_attempts >= settings.MAX_FAILED_LOGIN_ATTEMPTS:
-            user.locked_until = datetime.utcnow() + timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
-            record_audit(db, user.id, "LOGIN_LOCKED", "User", user.id,
-                         f"Account locked after {user.failed_login_attempts} failed attempts")
-        else:
-            record_audit(db, user.id, "LOGIN_FAILED", "User", user.id,
-                         f"Failed attempt {user.failed_login_attempts}/{settings.MAX_FAILED_LOGIN_ATTEMPTS}")
-        db.commit()
-        raise generic_error
-
-    if not user.is_active:
+    # Reached only after the password has been verified, so telling the user WHY they
+    # are blocked cannot be used to discover which usernames exist.
+    block = authentication_block_reason(user)
+    if block == ACCOUNT_DEACTIVATED:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account has been deactivated")
+    if block == INSTITUTION_DEACTIVATED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access for your institution has been deactivated. "
+                   "Please contact the Bank of Tanzania administrator.",
+        )
 
     # Successful login: reset lockout counters
     user.failed_login_attempts = 0
@@ -110,7 +134,7 @@ def refresh_access_token(payload: RefreshRequest, db: Session = Depends(get_db))
         raise invalid_error
 
     user = db.query(User).filter(User.id == stored.user_id).first()
-    if not user or not user.is_active:
+    if not user or authentication_block_reason(user) is not None:
         raise invalid_error
 
     # Rotate: consume this token, issue a new pair

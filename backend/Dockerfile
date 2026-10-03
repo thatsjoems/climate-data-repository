@@ -16,13 +16,24 @@ COPY . .
 
 # Run the API as a non-root user. The upload directory is explicitly owned by
 # that user because uploaded files are runtime data, not application code.
+# NOTE: uploads/ is a mounted named volume (see docker-compose.yml's
+# cdr_uploads), not a plain image directory - a volume's on-disk ownership
+# is whatever it already had (root, for any volume created before this user
+# existed) and is NOT affected by this Dockerfile's own chown, since that
+# only touches the image layer, before the volume is ever mounted on top of
+# it. The fix has to happen at container START, not build time - see CMD
+# below, which chowns the actual mounted volume, then drops to cdr to run
+# the app itself. `useradd`/`mkdir`/the first `chown` below still matter:
+# they cover every OTHER path under /app on a brand-new container with no
+# pre-existing volume.
 RUN useradd --create-home --uid 10001 cdr && \
     mkdir -p /app/uploads && \
     chown -R cdr:cdr /app
-USER cdr
 
 EXPOSE 8000
 
-# On container start: ensure tables exist + demo accounts are seeded, then run the API.
-# init_db.py is safe to re-run - it skips seeding if data already exists.
-CMD ["sh", "-c", "python init_db.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# On container start: fix the mounted uploads volume's ownership (root at
+# this point, before USER ever applies - see note above), then run
+# everything else as the unprivileged cdr user. init_db.py is safe to
+# re-run - it skips seeding if data already exists.
+CMD ["sh", "-c", "chown -R cdr:cdr /app/uploads && su cdr -s /bin/sh -c 'python init_db.py && exec uvicorn app.main:app --host 0.0.0.0 --port 8000'"]

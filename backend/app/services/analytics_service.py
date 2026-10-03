@@ -10,13 +10,12 @@ for SYSTEM_ADMIN/BOT_USER. This module never decides who is allowed to see what 
 it only applies whatever scope it is given - so the actual authorization
 decision lives in one place (the API layer) rather than being duplicated here.
 
-DOUBLE-COUNTING: every monetary/record aggregate excludes SubmissionRecord rows
-that failed row-level validation (is_valid == False) AND rows belonging to a
-Submission that is REJECTED or SUPERSEDED. A submission is marked SUPERSEDED
-automatically when the same institution uploads a newer submission for the same
-reporting_period (see app/api/submissions.py) - so only the latest attempt per
-institution+period ever contributes to analytics, preventing the same loan from
-being counted twice because of a resubmission or correction.
+DOUBLE-COUNTING: every monetary/record aggregate excludes invalid rows and
+uses only Submission.is_current versions with VALID or APPROVED status. A new
+VALID correction becomes current; an INVALID/REJECTED correction does not erase
+an older APPROVED baseline, which is restored automatically after rejection.
+This explicit version-selection rule prevents duplicate exposure across
+correction attempts.
 """
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -40,9 +39,24 @@ def _active_records_query(
     filter_reporting_period: str | None = None,
 ):
     """
-    Base query: valid rows belonging to a submission that has passed file validation\n    (VALID) or has been approved (APPROVED). Pending, invalid, rejected, and\n    superseded submissions must never contribute to official exposure analytics.
+    Base query: valid rows belonging to the current, BOT-APPROVED submission for
+    their institution and reporting period. Pending, invalid, rejected,
+    superseded, and merely-VALID-but-not-yet-approved submissions never
+    contribute to any exposure analytics - approval is the single, explicit
+    decision that promotes an institution's reported figures into anything
+    this system calculates, displays, or exports (design decision: financial
+    figures may appear in submission tracking as soon as they are VALID, but
+    are never aggregated, charted, or reported on until a BOT Analyst has
+    approved them - there is no separate "provisional analytics" mode).
     Always joins Submission so institution scoping and status exclusion are
     enforced in exactly one place.
+
+    `is_current` is still required alongside `status == APPROVED`: approving a
+    corrected version retires the previous version (`is_current = False`) but
+    does not change that previous version's own status away from APPROVED, so
+    without this check a superseded-but-still-APPROVED submission would be
+    double-counted alongside the new current one for the same institution and
+    period.
 
     `institution_id` is the mandatory SECURITY scope (an INSTITUTION_USER's own
     tenant - enforced by the API layer, never optional for that role).
@@ -55,8 +69,11 @@ def _active_records_query(
     query = (
         db.query(SubmissionRecord)
         .join(Submission, Submission.id == SubmissionRecord.submission_id)
-        .filter(SubmissionRecord.is_valid == True)  # noqa: E712
-        .filter(Submission.status.notin_(EXCLUDED_STATUSES))
+        .filter(
+            SubmissionRecord.is_valid == True,  # noqa: E712
+            Submission.is_current == True,  # noqa: E712
+            Submission.status == SubmissionStatus.APPROVED,
+        )
     )
     if institution_id:
         query = query.filter(Submission.institution_id == institution_id)
@@ -199,6 +216,7 @@ def get_hazard_exposure(
             SubmissionRecord.region,
             Submission.reporting_period,
             func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0).label("total_loan"),
+            func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0).label("total_collateral"),
             func.count(SubmissionRecord.id).label("record_count"),
         )
         .group_by(SubmissionRecord.region, Submission.reporting_period)
@@ -240,11 +258,60 @@ def get_hazard_exposure(
 
         key = (combo.region, dominant_hazard)
         if key not in aggregated:
-            aggregated[key] = {"region": combo.region, "hazard_type": dominant_hazard, "exposed_loan_amount_tzs": 0.0, "record_count": 0}
+            aggregated[key] = {"region": combo.region, "hazard_type": dominant_hazard, "exposed_loan_amount_tzs": 0.0, "exposed_collateral_value_tzs": 0.0, "record_count": 0}
         aggregated[key]["exposed_loan_amount_tzs"] += float(combo.total_loan or 0.0)
+        aggregated[key]["exposed_collateral_value_tzs"] += float(combo.total_collateral or 0.0)
         aggregated[key]["record_count"] += combo.record_count
 
     return list(aggregated.values())
+
+
+def get_exposure_points(
+    db: Session, institution_id: str | None = None,
+    filter_institution_id: str | None = None, filter_region: str | None = None,
+    filter_reporting_period: str | None = None, limit: int = 20000,
+) -> dict:
+    """
+    Individual loan/collateral point coordinates - the ACTUAL latitude/
+    longitude an institution entered on each row of the official template
+    (loan_latitude/loan_longitude, collateral_latitude/collateral_longitude
+    on submission_records), not the region-level centroid every other map
+    layer uses. Uses the exact same institution/tenant scoping and status
+    filtering as every other analytics function (_active_records_query) - a
+    point never appears here that would not also count in the Combined
+    Exposure figures.
+
+    Returns two separate lists (loan, collateral) rather than one combined
+    list, since a single record legitimately has TWO different locations
+    (the loan's own location and, often elsewhere, its collateral's
+    location) - collapsing them into one list would either lose one
+    location per record or wrongly imply they are always the same place.
+
+    `limit` caps each list independently - a genuine map, not a data
+    export; this is a safety bound against an unbounded response, not a
+    claim about how much exposure exists (Combined Exposure's totals are
+    the authoritative figures either way).
+    """
+    query = _active_records_query(
+        db, institution_id, filter_institution_id=filter_institution_id,
+        filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+    )
+    loan_rows = (
+        query.filter(SubmissionRecord.loan_latitude.isnot(None), SubmissionRecord.loan_longitude.isnot(None))
+        .with_entities(SubmissionRecord.loan_latitude, SubmissionRecord.loan_longitude, SubmissionRecord.loan_amount_tzs)
+        .limit(limit)
+        .all()
+    )
+    collateral_rows = (
+        query.filter(SubmissionRecord.collateral_latitude.isnot(None), SubmissionRecord.collateral_longitude.isnot(None))
+        .with_entities(SubmissionRecord.collateral_latitude, SubmissionRecord.collateral_longitude, SubmissionRecord.collateral_value_tzs)
+        .limit(limit)
+        .all()
+    )
+    return {
+        "loan_points": [{"latitude": r[0], "longitude": r[1], "amount_tzs": float(r[2] or 0.0)} for r in loan_rows],
+        "collateral_points": [{"latitude": r[0], "longitude": r[1], "amount_tzs": float(r[2] or 0.0)} for r in collateral_rows],
+    }
 
 
 def get_region_map_points(
@@ -291,6 +358,7 @@ def get_region_map_points(
                 "latitude": coords[0],
                 "longitude": coords[1],
                 "total_exposure_tzs": 0.0,
+                "total_collateral_tzs": 0.0,
                 "record_count": 0,
                 "hazards": {},
             }
@@ -298,6 +366,7 @@ def get_region_map_points(
         if entry is None:
             continue
         entry["total_exposure_tzs"] += row["exposed_loan_amount_tzs"]
+        entry["total_collateral_tzs"] += row.get("exposed_collateral_value_tzs", 0.0)
         entry["record_count"] += row["record_count"]
         hazard_label = row["hazard_type"] or "None"
         entry["hazards"][hazard_label] = entry["hazards"].get(hazard_label, 0.0) + row["exposed_loan_amount_tzs"]
@@ -311,6 +380,7 @@ def get_region_map_points(
             "latitude": entry["latitude"],
             "longitude": entry["longitude"],
             "total_exposure_tzs": entry["total_exposure_tzs"],
+            "total_collateral_tzs": entry["total_collateral_tzs"],
             "record_count": entry["record_count"],
             "dominant_hazard": dominant_hazard,
         })
@@ -333,8 +403,13 @@ def get_exposure_snapshot(
     which default to "everything except FLAGGED" with an optional VALIDATED-
     only toggle), a Risk Advisory Note is a formal, archived document - so
     climate data here is ALWAYS restricted to quality_flag == VALIDATED, with
-    no toggle. If no VALIDATED reading exists, `climate_data_note` explains
-    this plainly instead of silently attaching a SYNTHETIC/UNVALIDATED one.
+    no toggle. Financial data is restricted to APPROVED submissions only, the
+    same as every other analytics function now that dashboards no longer have
+    a separate provisional/"early signal" mode - so a published advisory's
+    snapshot rests on numbers a human has actually confirmed, exactly as the
+    dashboard the analyst was looking at when they wrote it did. If no
+    VALIDATED reading exists, `climate_data_note`
+    explains this plainly instead of silently attaching a SYNTHETIC/UNVALIDATED one.
 
     reporting_period (optional): when the analyst scopes the advisory to a
     specific period, financial exposure AND the attached climate reading are

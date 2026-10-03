@@ -56,6 +56,22 @@ def _clean_str(val) -> str:
     return "" if s.lower() == "nan" else s
 
 
+def _parse_date_value(val):
+    """Return a canonical Python date or None for an empty value.
+
+    Source workbooks are allowed to contain Excel dates or common textual date
+    forms. Invalid non-empty dates are rejected rather than silently stored as
+    ambiguous strings in the canonical date column.
+    """
+    if val is None or _clean_str(val) == "":
+        return None, True
+    try:
+        parsed = pd.to_datetime(val, errors="raise")
+        return parsed.date(), True
+    except (TypeError, ValueError, OverflowError):
+        return None, False
+
+
 def _clean_float(val):
     if val is None or (isinstance(val, float) and pd.isna(val)) or _clean_str(val) == "":
         return None
@@ -275,6 +291,19 @@ def validate_excel_file(
 
         record["disbursement_date"] = _clean_str(get(row, "disbursement_date")) or None
         record["maturity_date"] = _clean_str(get(row, "maturity_date")) or None
+        disb_date, disb_ok = _parse_date_value(get(row, "disbursement_date"))
+        mat_date, mat_ok = _parse_date_value(get(row, "maturity_date"))
+        record["disbursement_date_value"] = disb_date
+        record["maturity_date_value"] = mat_date
+        if not disb_ok:
+            issues.append(ValidationIssue(row_number, "disbursement_date", "Disbursement date is not a valid date"))
+            row_is_valid = False
+        if not mat_ok:
+            issues.append(ValidationIssue(row_number, "maturity_date", "Maturity date is not a valid date"))
+            row_is_valid = False
+        if disb_date and mat_date and mat_date < disb_date:
+            issues.append(ValidationIssue(row_number, "maturity_date", "Maturity date cannot be earlier than disbursement date"))
+            row_is_valid = False
 
         val, ok = validate_dropdown(row, "currency", CURRENCIES, row_number, required=False, severity="WARNING")
         record["currency"] = val or None
@@ -319,6 +348,11 @@ def validate_excel_file(
         record["collateral_type"] = val or None
         row_is_valid = row_is_valid and ok
         record["collateral_pledged_date"] = _clean_str(get(row, "collateral_pledged_date")) or None
+        pledged_date, pledged_ok = _parse_date_value(get(row, "collateral_pledged_date"))
+        record["collateral_pledged_date_value"] = pledged_date
+        if not pledged_ok:
+            issues.append(ValidationIssue(row_number, "collateral_pledged_date", "Collateral pledged date is not a valid date"))
+            row_is_valid = False
         record["collateral_economic_activity"] = _clean_str(get(row, "collateral_economic_activity")) or None
 
         c_region, c_district, c_ward, c_village, c_lat, c_lon, coll_loc_ok = validate_location(

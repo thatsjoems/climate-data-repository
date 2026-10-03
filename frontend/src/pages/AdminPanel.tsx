@@ -149,8 +149,32 @@ export default function AdminPanel() {
 
   async function toggleUserActive(u: UserItem) {
     const action = u.is_active ? 'deactivate' : 'activate'
-    await apiClient.patch(`/users/${u.id}/${action}`)
-    loadAll()
+    setMessage(null)
+    try {
+      await apiClient.patch(`/users/${u.id}/${action}`)
+      loadAll()
+    } catch (err: any) {
+      setMessage(err?.response?.data?.detail || `Failed to ${action} this user.`)
+    }
+  }
+
+  async function toggleInstitutionActive(i: InstitutionItem) {
+    const action = i.is_active ? 'deactivate' : 'activate'
+    if (i.is_active) {
+      const affectedCount = users.filter((u) => u.institution_id === i.id && u.is_active).length
+      const confirmMessage = affectedCount > 0
+        ? `Deactivate ${i.name}? ${affectedCount} active user${affectedCount === 1 ? '' : 's'} of ${i.name} will ` +
+          `immediately be unable to log in or use an existing session until it is reactivated.`
+        : `Deactivate ${i.name}? It currently has no active users, so nobody will be immediately affected.`
+      if (!window.confirm(confirmMessage)) return
+    }
+    setMessage(null)
+    try {
+      await apiClient.patch(`/institutions/${i.id}/${action}`)
+      loadAll()
+    } catch (err: any) {
+      setMessage(err?.response?.data?.detail || `Failed to ${action} this institution.`)
+    }
   }
 
   function scrollTo(id: string) {
@@ -168,6 +192,7 @@ export default function AdminPanel() {
     { key: 'resets', icon: '🔑', label: 'Password Resets', active: true, onClick: () => scrollTo('password-resets-card') },
     { key: 'institutions', icon: '🏢', label: 'Institutions', onClick: () => scrollTo('institutions-card') },
     { key: 'users', icon: '👥', label: 'Users', onClick: () => scrollTo('users-card') },
+    { key: 'audit', icon: '🧾', label: 'Audit Log', onClick: () => scrollTo('audit-card') },
   ]
 
   return (
@@ -218,9 +243,9 @@ export default function AdminPanel() {
                 <td>{r.username}</td>
                 <td><span className="badge badge-pending">Pending</span></td>
                 <td>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                    <button onClick={() => handleApprovePasswordReset(r.id)}>Approve</button>
-                    <button onClick={() => handleRejectPasswordReset(r.id)}>Reject</button>
+                  <div className="button-row">
+                    <button className="btn-sm btn-success" onClick={() => handleApprovePasswordReset(r.id)}>Approve</button>
+                    <button className="btn-sm btn-danger" onClick={() => handleRejectPasswordReset(r.id)}>Reject</button>
                   </div>
                 </td>
               </tr>
@@ -230,6 +255,25 @@ export default function AdminPanel() {
             )}
           </tbody>
         </table>
+        {passwordResets.some((r) => r.status !== 'PENDING') && (
+          <details style={{ marginTop: '0.75rem' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--color-muted)' }}>
+              Recently decided requests ({passwordResets.filter((r) => r.status !== 'PENDING').length})
+            </summary>
+            <table style={{ marginTop: '0.5rem' }}>
+              <thead><tr><th>User</th><th>Username</th><th>Decision</th></tr></thead>
+              <tbody>
+                {passwordResets.filter((r) => r.status !== 'PENDING').map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.full_name}</td>
+                    <td>{r.username}</td>
+                    <td><span className={`badge ${r.status === 'APPROVED' ? 'badge-approved' : 'badge-rejected'}`}>{r.status === 'APPROVED' ? 'Approved' : 'Rejected'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        )}
       </section>
 
       <section className="card">
@@ -262,44 +306,70 @@ export default function AdminPanel() {
           <label>Initial Password</label>
           <input type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} required />
           <label>Role</label>
-          <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}>
+          <select
+            value={newUser.role}
+            onChange={(e) => setNewUser({ ...newUser, role: e.target.value, institution_id: e.target.value === 'INSTITUTION_USER' ? newUser.institution_id : '' })}
+          >
             <option value="INSTITUTION_USER">Institution User</option>
             <option value="BOT_USER">BOT User (Internal)</option>
             <option value="SYSTEM_ADMIN">System Admin</option>
           </select>
-          <label>Institution (for Institution User)</label>
-          <select value={newUser.institution_id} onChange={(e) => setNewUser({ ...newUser, institution_id: e.target.value })}>
-            <option value="">-- None --</option>
-            {institutions.map((i) => (
-              <option key={i.id} value={i.id}>{i.name}</option>
-            ))}
-          </select>
+          {newUser.role === 'INSTITUTION_USER' && (
+            <>
+              <label>Institution (required for an Institution User)</label>
+              <select value={newUser.institution_id} onChange={(e) => setNewUser({ ...newUser, institution_id: e.target.value })} required>
+                <option value="">-- Select institution --</option>
+                {institutions.map((i) => (
+                  <option key={i.id} value={i.id}>{i.name}</option>
+                ))}
+              </select>
+            </>
+          )}
           <button type="submit">Add User</button>
         </form>
       </section>
 
       <section className="card">
         <h2>👥 Users</h2>
-        <table>
-          <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th></th></tr></thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id}>
-                <td>{u.full_name}</td>
-                <td>{u.username}</td>
-                <td>{u.role}</td>
-                <td>{u.is_active ? 'Active' : 'Deactivated'}</td>
-                <td><button onClick={() => toggleUserActive(u)}>{u.is_active ? 'Deactivate' : 'Activate'}</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {(() => {
+          const inactiveInstitutionIds = new Set(institutions.filter((i) => !i.is_active).map((i) => i.id))
+          return (
+            <table>
+              <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                {users.map((u) => {
+                  const blockedByInstitution = u.is_active && u.institution_id && inactiveInstitutionIds.has(u.institution_id)
+                  return (
+                    <tr key={u.id}>
+                      <td>{u.full_name}</td>
+                      <td>{u.username}</td>
+                      <td>{u.role}</td>
+                      <td>
+                        {u.is_active ? 'Active' : 'Deactivated'}
+                        {blockedByInstitution && (
+                          <span
+                            className="badge badge-medium"
+                            style={{ marginLeft: '0.4rem' }}
+                            title="This account itself is active, but its institution is deactivated - the user cannot currently log in."
+                          >
+                            ⚠️ Institution Deactivated
+                          </span>
+                        )}
+                      </td>
+                      <td><button className={`btn-sm ${u.is_active ? 'btn-danger' : 'btn-success'}`} onClick={() => toggleUserActive(u)}>{u.is_active ? 'Deactivate' : 'Activate'}</button></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )
+        })()}
       </section>
 
       <section className="card">
         <h2>🏢 Institutions</h2>
         <table>
-          <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Status</th></tr></thead>
+          <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Status</th><th></th></tr></thead>
           <tbody>
             {institutions.map((i) => (
               <tr key={i.id}>
@@ -307,6 +377,7 @@ export default function AdminPanel() {
                 <td>{i.name}</td>
                 <td>{i.type}</td>
                 <td>{i.is_active ? 'Active' : 'Deactivated'}</td>
+                <td><button className={`btn-sm ${i.is_active ? 'btn-danger' : 'btn-success'}`} onClick={() => toggleInstitutionActive(i)}>{i.is_active ? 'Deactivate' : 'Activate'}</button></td>
               </tr>
             ))}
           </tbody>
@@ -314,7 +385,7 @@ export default function AdminPanel() {
       </section>
 
       <section className="card">
-        <h2>🧾 Audit Log</h2>
+        <h2 id="audit-card">🧾 Audit Log</h2>
         <p className="note">System-wide record of important actions, for accountability and oversight.</p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center', marginBottom: '0.5rem' }}>
           <input

@@ -100,14 +100,37 @@ def upgrade() -> None:
         for table in tables
         if table in {"submissions", "climate_records", "submission_records"}
     }
+    # Grouped by table and applied inside op.batch_alter_table(): PostgreSQL
+    # supports ALTER TABLE ADD CONSTRAINT directly and batch mode is a no-op
+    # wrapper for it there, but SQLite does NOT support adding a CHECK
+    # constraint to an existing table via ALTER TABLE at all - Alembic's
+    # batch mode is what makes this migration actually run against a legacy
+    # SQLite database (it recreates the table with the constraint included,
+    # copies the data across, and swaps it in), rather than only working
+    # against this project's production PostgreSQL target.
+    by_table: dict[str, list[tuple[str, str]]] = {}
     for table, name, condition in CHECK_CONSTRAINTS:
-        if table in tables and name not in existing_checks.get(table, set()):
-            op.create_check_constraint(name, table, condition)
+        by_table.setdefault(table, []).append((name, condition))
+
+    for table, constraints in by_table.items():
+        if table not in tables:
+            continue
+        to_add = [(name, cond) for name, cond in constraints if name not in existing_checks.get(table, set())]
+        if not to_add:
+            continue
+        with op.batch_alter_table(table) as batch_op:
+            for name, condition in to_add:
+                batch_op.create_check_constraint(name, condition)
 
 
 def downgrade() -> None:
+    by_table: dict[str, list[str]] = {}
     for table, name, _ in CHECK_CONSTRAINTS:
-        try:
-            op.drop_constraint(name, table, type_="check")
-        except Exception:
-            pass
+        by_table.setdefault(table, []).append(name)
+    for table, names in by_table.items():
+        with op.batch_alter_table(table) as batch_op:
+            for name in names:
+                try:
+                    batch_op.drop_constraint(name, type_="check")
+                except Exception:
+                    pass

@@ -123,6 +123,16 @@ Further technical detail:
   be built due to lack of access (RTIS, BSIS, QGIS, ArcGIS, TMA, PMO).
 - `backend/README.md` and `frontend/README.md` — component-level technical documentation.
 
+## Rate Limiting
+
+Enforced via `slowapi` (`backend/app/core/rate_limit.py`):
+- **Default (every endpoint):** 200 requests/minute per IP address.
+- **`POST /auth/login`:** 10 requests/minute per IP address — tighter, to slow down
+  password-guessing attempts specifically, independent of the global default above.
+
+A request over the limit receives HTTP 429. These are per-IP, not per-user, and reset on a
+rolling one-minute window.
+
 This is an 8-week EASTC training prototype demonstrating the complete core workflow
 (login → template → upload → validation → storage → review → dashboard) using sample data.
 Production use by the Bank of Tanzania would require: real TMA/PMO data, RTIS/BSIS/QGIS/ArcGIS

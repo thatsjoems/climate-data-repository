@@ -10,7 +10,7 @@ FLAGGED is excluded outright, reporting_period is matched directly when
 present, and the composition of what WAS used is always visible.
 """
 from datetime import date
-from app.models.models import RoleEnum, ClimateRecord
+from app.models.models import RoleEnum, ClimateRecord, SubmissionStatus
 from app.services.analytics_service import get_combined_climate_financial_exposure
 from tests.conftest import make_institution, make_user, login, auth_header
 from tests.test_rbac_and_isolation import _seed_submission_for
@@ -104,6 +104,9 @@ def test_exposure_snapshot_excludes_flagged_as_latest_reading(client, db_session
 def test_exposure_snapshot_hazard_filter_uses_real_climate_data(client, db_session):
     """hazard_type filtering must resolve via real ClimateRecord.hazard_type, not the dead self-reported field."""
     inst = make_institution(db_session)
+    # _seed_submission_for() now defaults to APPROVED (the only status any
+    # analytics function - including get_exposure_snapshot() - ever counts),
+    # so no separate status override is needed here any more.
     _seed_submission_for(db_session, inst, region="Dodoma", amount=1_000_000.0)
     _seed_submission_for(db_session, inst, region="Mbeya", amount=2_000_000.0)
 

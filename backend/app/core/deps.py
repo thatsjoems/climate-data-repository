@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
+from app.core.account_status import authentication_block_reason
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models.models import User, RoleEnum
@@ -26,7 +27,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if user_id is None:
         raise credentials_exception
     user = db.query(User).filter(User.id == user_id).first()
-    if user is None or not user.is_active:
+    # Rejects a deactivated account AND any user of a deactivated institution (KG-02),
+    # so already-issued access tokens stop working as soon as access is withdrawn.
+    if user is None or authentication_block_reason(user) is not None:
         raise credentials_exception
     return user
 
