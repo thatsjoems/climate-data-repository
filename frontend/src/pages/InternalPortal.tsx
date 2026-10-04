@@ -536,9 +536,10 @@ export default function InternalPortal() {
 
   const sidebarItems: SidebarItem[] = [
     { key: 'overview', icon: '📊', label: 'Overview', active: true, onClick: () => scrollTo('top-anchor') },
+    { key: 'automated-reports', icon: '📑', label: 'Automated Reports', onClick: () => scrollTo('reports-section') },
     { key: 'filters', icon: '🔍', label: 'Dashboard Filters', onClick: () => scrollTo('dashboard-filters') },
-    { key: 'loan', icon: '💰', label: 'Loan Data', onClick: () => scrollTo('kpi-section') },
-    { key: 'collateral', icon: '🛡️', label: 'Collateral Data', onClick: () => scrollTo('kpi-section') },
+    { key: 'summary-figures', icon: '🔢', label: 'Summary Figures', onClick: () => scrollTo('kpi-section') },
+    { key: 'map', icon: '🗺️', label: 'Geospatial Map', onClick: () => scrollTo('map-section') },
     { key: 'climate', icon: '🌦️', label: 'Climate & Hazard Data', onClick: () => scrollTo('hazard-section') },
     { key: 'quality', icon: '📋', label: 'Climate Data Quality', onClick: () => scrollTo('quality-section') },
     { key: 'status-dist', icon: '📊', label: 'Submission Status Distribution', onClick: () => scrollTo('status-distribution-section') },
@@ -546,8 +547,6 @@ export default function InternalPortal() {
     { key: 'risk', icon: '🧭', label: 'Risk Advisory Reports', onClick: () => scrollTo('risk-advisory-section') },
     { key: 'submissions', icon: '📄', label: 'Submission Status', onClick: () => scrollTo('monitoring-section') },
     { key: 'regional', icon: '🌍', label: 'Exposure by Region', onClick: () => scrollTo('regional-exposure-section') },
-    { key: 'map', icon: '🗺️', label: 'Geospatial Map', onClick: () => scrollTo('map-section') },
-    { key: 'export', icon: '⬇️', label: 'Download / Export', onClick: () => scrollTo('reports-section') },
   ]
 
   return (
@@ -584,7 +583,7 @@ export default function InternalPortal() {
       <section className="card" id="dashboard-filters">
         <h2>🔍 Dashboard Filters</h2>
         <p className="note">
-          Narrow the KPI cards, Hazard Exposure, and Combined Exposure below by institution,
+          Narrow the Summary Figures, Hazard Exposure, and Combined Exposure below by institution,
           region, and/or reporting period. Filters only ever narrow the sector-wide view - they
           never widen access.
         </p>
@@ -617,6 +616,7 @@ export default function InternalPortal() {
 
       {kpi && (
         <section className="kpi-grid-v2" id="kpi-section">
+          <h2 className="section-title" style={{ gridColumn: '1 / -1' }}>🔢 Summary Figures</h2>
           <p className="alert-info" style={{ gridColumn: '1 / -1', fontWeight: 600 }}>
             ✅ These figures reflect BOT-APPROVED submissions only. A submission that has
             passed automated validation but is still awaiting review does not appear here or

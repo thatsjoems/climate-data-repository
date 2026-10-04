@@ -13,19 +13,46 @@
   --color-primary: #2B353A;
   --color-primary-dark: #1C2326;
   --color-primary-light: #3E4D54;
-  /* Matches the top-header's gold gradient exactly (#EFECE1 cream edges,
-     #D4B843 metallic gold center, #9E7B1A dark-gold border) so every
-     gold-coloured button/accent elsewhere now shares the same gold family
-     as the header, instead of the older, slightly different yellow-gold.
-     --color-gold-light is a proportional lighter variant of the base
-     (same 1.2x scaling method used for the charcoal-green dark/light
-     variants earlier), not part of the header's own three given colours -
-     it is needed for accents (e.g. an active sidebar item's left border)
-     that sit against the gold background itself and need more contrast
-     than the header's own pale cream edge would give. */
+  /* The FLAT golds: used for text, borders, focus rings, the notification dot,
+     the chart bars and decorative shapes. They are no longer meant to match
+     the header exactly - the banner and every gold BOX use --gold-gradient
+     (defined just below), whose centre is #D9BD59 against the flat #D4B843
+     here. --color-gold-light is a proportional lighter variant of the base
+     (the same 1.2x scaling used for the charcoal-green dark/light variants);
+     it is for accents that sit against a gold box and need more contrast than
+     the gradient's pale cream edge gives, e.g. an active sidebar item's left
+     border. */
   --color-gold: #D4B843;
   --color-gold-dark: #9E7B1A;
   --color-gold-light: #FEDD50;
+  /* The gold used for BOXES (the header banner, buttons, the active sidebar
+     item, the login button): pale at the edges, gold in the middle. Text,
+     borders, focus rings, the notification dot and the chart bars keep using
+     the flat --color-gold* values above - a gradient makes no sense on a
+     1-line border or an 8px dot, and the bars encode data. The hover variant is
+     the same three stops darkened 10%. */
+  --gold-gradient: linear-gradient(to right, #E8E3CE 0%, #D9BD59 50%, #EAE8E3 100%);
+  --gold-gradient-hover: linear-gradient(to right, #D1CCB9 0%, #C3AA50 50%, #D3D1CC 100%);
+  /* The same pale-edge look as the gold buttons, in the green and red the
+     success/danger buttons already have. The CENTRE stop is exactly the existing
+     colour (--color-success / --color-danger; the hover centres are the existing
+     hover colours #0D9668 / #DC2626), so the colours themselves are unchanged.
+     The pale ends are white blended with 15% (left) and 8% (right) of that
+     colour - the same left/right asymmetry as the gold buttons' ends - and the
+     hover ends are those darkened 10%. */
+  --success-fade: linear-gradient(to right, #DBF4EC 0%, var(--color-success) 50%, #ECF9F5 100%);
+  --success-fade-hover: linear-gradient(to right, #C5DCD4 0%, #0D9668 50%, #D4E0DC 100%);
+  --danger-fade: linear-gradient(to right, #FDE3E3 0%, var(--color-danger) 50%, #FEF0F0 100%);
+  --danger-fade-hover: linear-gradient(to right, #E4CCCC 0%, #DC2626 50%, #E5D8D8 100%);
+  /* The line along the bottom edge of every dashboard card (.portal-content .card):
+     colour and thickness are set here, in one place. A flat 2px dark green. A
+     background-image layer needs an image, so the flat colour is written as a
+     one-colour gradient; change --card-bottom-line-color to recolour it. */
+  --card-bottom-line-color: #0B3D2E;
+  --card-bottom-line: linear-gradient(var(--card-bottom-line-color), var(--card-bottom-line-color));
+  --card-bottom-line-h: 2px;
+  /* Column headings (<th>) in every table. */
+  --table-heading-color: #1C2326;
   --color-success: #10B981;
   --color-bg: #F8F9FA;
   --color-card: #ffffff;
@@ -303,6 +330,10 @@ label, .label, small { font-size: 0.8rem; color: var(--color-muted); font-weight
   background: none; border: none; color: var(--color-gold-dark);
   font-size: 0.76rem; font-weight: 600; cursor: pointer; padding: 0;
 }
+/* A text link has no hover rule of its own, so it was inheriting the generic
+   `button:hover` background - which used to be gold-dark on gold-dark text
+   (the label vanished) and would now be a gradient chip behind a small link. */
+.link-button:hover { background: none; text-decoration: underline; }
 .notification-list { overflow-y: auto; max-height: 360px; }
 .notification-empty { padding: 2rem 1rem; text-align: center; color: var(--color-muted); font-size: 0.85rem; }
 .notification-item {
@@ -340,15 +371,40 @@ label, .label, small { font-size: 0.8rem; color: var(--color-muted); font-weight
   margin-bottom: 1.5rem;
   box-shadow: var(--shadow-sm);
 }
-.card h2 {
+/* A 2px dark-green line along the bottom edge of every card in the portals
+   (BOT, Institution and Admin dashboards - the boxes the sidebar items lead to).
+   Colour and thickness (--card-bottom-line-color, --card-bottom-line-h) are in
+   :root.
+   Drawn as a background layer rather than `border-bottom` + `border-image`:
+   border-image would replace the card's whole 1px border (top and sides too)
+   and ignores border-radius, so the line would poke out square past the
+   rounded corners. As a background it is clipped to the rounded shape, needs no
+   `position` change on the card, and changes no sizes. The card's bottom border
+   is 1px and is made transparent, so the line sits on the card's outer edge: it
+   covers that 1px border and the 1px of the card's padding above it. Standalone
+   pages outside .portal-content (e.g. Change Password) are not affected. */
+.portal-content .card {
+  border-bottom-color: transparent;
+  background-image: var(--card-bottom-line);
+  background-repeat: no-repeat;
+  background-position: left bottom;
+  background-size: 100% var(--card-bottom-line-h);
+  background-origin: border-box;
+}
+.card h2,
+.section-title {
   margin-top: 0; font-size: 1.02rem; font-weight: 700; color: var(--color-primary-dark);
   display: flex; align-items: center; gap: 0.5rem;
 }
+/* A section title that is not inside a card - today the Summary Figures tiles,
+   which are themselves cards, so wrapping them in another card would nest boxes.
+   Same look as a card title; the grid's own gap supplies the spacing below. */
+.section-title { margin-bottom: 0; }
 .note { color: var(--color-muted); font-size: 0.85rem; }
 
 table { width: 100%; border-collapse: collapse; margin-top: 0.9rem; font-size: 0.86rem; }
 th, td { text-align: left; padding: 0.65rem 0.7rem; border-bottom: 1px solid var(--color-border); }
-th { color: var(--color-muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px; }
+th { color: var(--table-heading-color); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px; }
 tbody tr:hover { background: #FAF8F2; }
 
 .badge { padding: 0.2rem 0.65rem; border-radius: 999px; font-size: 0.72rem; font-weight: 700; color: white; letter-spacing: 0.2px; }
@@ -444,17 +500,17 @@ tbody tr:hover { background: #FAF8F2; }
 .upload-form button { margin-top: 0.9rem; align-self: flex-start; }
 
 button {
-  background: var(--color-gold);
+  background: var(--gold-gradient);
   color: var(--color-primary); border: none;
   padding: 10px 20px; border-radius: 6px;
   cursor: pointer; font-size: 0.84rem; font-weight: 600;
   transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
 }
-button:hover { background: var(--color-gold-dark); }
+button:hover { background: var(--gold-gradient-hover); }
 button:active { transform: translateY(1px); }
 button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
-button.btn-gold { background: var(--color-gold); color: var(--color-primary); }
-button.btn-gold:hover { background: var(--color-gold-dark); }
+button.btn-gold { background: var(--gold-gradient); color: var(--color-primary); }
+button.btn-gold:hover { background: var(--gold-gradient-hover); }
 
 /* Professional button system: every button on screen should signal its own
    weight and intent at a glance - a supervisory tool (BOT-facing) especially
@@ -470,15 +526,20 @@ button.btn-secondary {
 }
 button.btn-secondary:hover { background: #F1F5F9; border-color: var(--color-primary); color: var(--color-primary); }
 
-/* Success - Approve, Validate. Confirms/moves a workflow forward. */
-button.btn-success { background: var(--color-success); color: white; }
-button.btn-success:hover { background: #0d9668; }
+/* Success - Approve, Validate, Activate. Confirms/moves a workflow forward.
+   Every green and red button now has the same pale-edged look as the gold ones:
+   pale at both ends, the colour in the middle (--success-fade / --danger-fade in
+   :root). The green and red themselves are unchanged - they are the centre stop,
+   and the hover centres are the old hover colours #0D9668 / #DC2626. The text is
+   dark, not white: white would vanish on the pale ends (1.1-1.2 : 1). */
+button.btn-success { background: var(--success-fade); color: var(--color-primary-dark); }
+button.btn-success:hover { background: var(--success-fade-hover); }
 
-/* Danger - Reject, Flag as Bad Data, Delete. Always the visually "louder"
+/* Danger - Reject, Flag as Bad Data, Deactivate, Delete. Always the visually "louder"
    choice next to its Approve/Validate sibling, so a reviewer's eye is drawn
-   to the consequence before the click, not after. */
-button.btn-danger { background: var(--color-danger); color: white; }
-button.btn-danger:hover { background: #dc2626; }
+   to the consequence before the click, not after. Same pale-edged look as above. */
+button.btn-danger { background: var(--danger-fade); color: var(--color-primary-dark); }
+button.btn-danger:hover { background: var(--danger-fade-hover); }
 
 /* Compact - inline actions inside a table row or a dense list, where a
    full-size button would visually overpower the row it sits in. */
@@ -533,11 +594,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .login-submit {
   margin-top: 1.5rem; padding: 0.75rem; font-size: 0.9rem;
-  background: linear-gradient(120deg, var(--color-gold) 0%, var(--color-gold-dark) 100%);
-  color: white; font-weight: 700;
+  background: var(--gold-gradient);
+  color: var(--color-primary-dark); font-weight: 700;   /* was white: 1.2-1.9 : 1 on this gradient */
   box-shadow: 0 4px 14px rgba(187, 123, 2, 0.35);
 }
-.login-submit:hover { background: linear-gradient(120deg, var(--color-gold-dark) 0%, var(--color-gold) 100%); }
+.login-submit:hover { background: var(--gold-gradient-hover); }
 
 .login-notice {
   margin-top: 1.3rem; padding: 0.75rem 0.9rem; border-radius: 8px;
@@ -582,6 +643,35 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .sidebar-backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,0.5);
   z-index: 1000; cursor: pointer;
+}
+
+/* Left-edge menu opener (mouse devices). A thin zone fixed to the viewport's left
+   edge: hovering it shows a "Menu" tab at the cursor's height and a soft shade along
+   the edge; clicking opens the sidebar wherever the page is scrolled to. It sits below
+   the backdrop and sidebar (z-index 900 vs 1000/1001) and is not rendered while the
+   menu is open. Hidden on touch devices, which have no hover - there an invisible
+   strip would only swallow taps. */
+.nav-edge-trigger { position: fixed; left: 0; top: 0; bottom: 0; width: 14px; z-index: 900; cursor: pointer; }
+.nav-edge-trigger::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0;
+  background: linear-gradient(to right, rgba(26,26,26,0.30), rgba(26,26,26,0));
+  transition: opacity 0.15s ease;
+}
+.nav-edge-tab {
+  position: absolute; left: 0; top: 50%;
+  display: flex; align-items: center; gap: 0.45rem;
+  padding: 0.6rem 0.95rem 0.6rem 0.75rem;
+  background: #1A1A1A; color: #FFFFFF; font-size: 0.8rem; font-weight: 600;
+  white-space: nowrap; user-select: none;
+  border: 1px solid rgba(255,255,255,0.28); border-left: none; border-radius: 0 8px 8px 0;
+  transform: translate(-100%, -50%); opacity: 0; pointer-events: none;
+  transition: transform 0.16s ease, opacity 0.16s ease;
+}
+.nav-edge-trigger:hover::before { opacity: 1; }
+.nav-edge-trigger:hover .nav-edge-tab { transform: translate(0, -50%); opacity: 1; pointer-events: auto; }
+@media (hover: none) { .nav-edge-trigger { display: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .nav-edge-trigger::before, .nav-edge-tab { transition: none; }
 }
 
 /* The logo is centered in this row regardless of the close button, which
@@ -644,57 +734,146 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 /* ---- Main column ---- */
 .portal-main { display: flex; flex-direction: column; min-height: 100vh; min-width: 0; }
 
-/* ---- Two-tier header (gold gradient + dark navbar) ---- */
+/* ---- Two-strip header: gold banner over a dark strip ----
+   Strip heights are fixed pixel values. They started from measurements of the
+   Bank of Tanzania site supplied by the project owner (banner 110px desktop /
+   80px phone; nav strip 45px / 50px; Coat of Arms 85x100px / 50x60px; BOT
+   emblem 95px / 55px - none of it measured here). The BANNER, both emblems and
+   the title were then reduced twice on request: slightly (banner -5px / -4px),
+   then by a further 10% (banner, emblems and title all x0.9). After that, the
+   Coat of Arms was cut another 10% in height - and in width with it, so the
+   national emblem keeps its proportions rather than being squashed. The nav
+   strip was left as measured. Current values:
+     desktop (1920px wide):  banner 94.5px, nav strip 45px
+        -> banner 1920:94.5 = 20.32 : 1,  nav 1920:45 = 42.67 : 1,
+           banner : nav = 2.10 : 1  (banner is ~68% of the combined height)
+        Coat of Arms 68.85 x 81px (17 : 20),  BOT emblem 85.5 x 85.5px (1 : 1)
+     phone (375px wide, i.e. <= 768px):  banner 68.4px, nav strip 50px
+        -> banner 375:68.4 = 5.48 : 1,  nav 375:50 = 7.5 : 1,
+           banner : nav = 1.37 : 1
+        Coat of Arms 40.5 x 48.6px (5 : 6),  BOT emblem 49.5 x 49.5px (1 : 1)
+   FLOOR: the banner cannot go much thinner without also shrinking the emblems.
+   Its content area is the height minus the 4px bottom line (it was 3px before
+   the flag-coloured line). The tallest emblem is the BOT emblem (85.5px
+   desktop, 49.5px phone), so desktop needs >= 89.5px (94.5px leaves 2.5px above
+   and below it) and phones >= 53.5px.
+   Heights are set directly rather than through `aspect-ratio`: with an explicit
+   width AND height, aspect-ratio has no effect, so the ratios above are simply
+   what those heights produce at those widths. Between the two measured widths
+   the heights stay at the nearest state's value; they do not scale.
+   NOTE: the original measurements had the Coat of Arms ~1.05x TALLER than the
+   BOT emblem. After the extra cut it is the other way round: the BOT emblem is
+   now 1.06x taller (85.5 : 81) and 1.24x wider (85.5 : 68.85) on desktop, and
+   about equal in height on phones (49.5 : 48.6). Both strips use the same
+   horizontal padding, which lines the hamburger's left edge up with the Coat
+   of Arms. */
+:root {
+  --header-top-h: 94.5px;
+  --header-bottom-h: 45px;
+  --header-coat-w: 68.85px;
+  --header-coat-h: 81px;
+  --header-bot-size: 85.5px;
+  --header-pad-x: clamp(14px, 2vw, 28px);
+}
+@media (max-width: 768px) {
+  :root {
+    --header-top-h: 68.4px;
+    --header-bottom-h: 50px;
+    --header-coat-w: 40.5px;
+    --header-coat-h: 48.6px;
+    --header-bot-size: 49.5px;
+  }
+}
+
 .top-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;   /* title stays truly centred even though the two emblems differ in width */
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 24px;
-  background: linear-gradient(90deg, #EFECE1 0%, #D4B843 50%, #EFECE1 100%);
-  border-bottom: 3px solid #9E7B1A;
+  height: var(--header-top-h);
+  padding: 0 var(--header-pad-x);
 }
-/* The source image (tanzania_coat_of_arms.jpg) has a plain white background
-   (it's a detailed illustration, not a flat logo, so colour-keying the
-   white out risks also erasing white details inside the artwork itself -
-   e.g. the wave pattern on the shield - so it is left untouched). A round
-   white "medallion" badge - a common, deliberate treatment for an emblem
-   placed on a coloured background - makes that white edge look intentional
-   instead of like an unstyled box. */
-.coat-of-arms-badge {
-  width: 48px; height: 48px; flex-shrink: 0; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  background: #FFFFFF; box-shadow: 0 1px 3px rgba(26,35,40,0.35);
-  overflow: hidden;
+/* Supplied classes, applied to the banner element together with .top-header. */
+.strip-background {
+  background: var(--gold-gradient);   /* = linear-gradient(to right, #E8E3CE 0%, #D9BD59 50%, #EAE8E3 100%) */
 }
-.coat-of-arms-img { width: 100%; height: 100%; object-fit: cover; }
+/* A line in the Tanzanian flag's green, black and blue. The 4px counts inside
+   the banner's fixed height (border-box), so the banner's content area is 1px
+   shorter than it was with the previous 3px line. */
+.strip-bottom-border {
+  border-bottom: 4px solid;
+  border-image: linear-gradient(to right, #1EB53A, #000000, #00A3E0) 1;
+}
+/* A 17 : 20 box (5 : 6 on phones). The artwork's own ratio is 329 : 383 =
+   0.859, a hair wider than 0.85, so `contain` draws it at the full box width
+   and ~1% short of the box height (68.85 x 80px; 40.5 x 47px on phones) -
+   undistorted and invisible at this size. No frame, no shadow: the PNG's own
+   transparency lets the gradient show through. */
+.top-header-coat {
+  width: var(--header-coat-w); height: var(--header-coat-h);
+  justify-self: start; object-fit: contain; display: block;
+}
+/* An exact 1 : 1 box. bot_logo_square_pale.png is the emblem trimmed of its
+   empty margins, padded to a square, and tinted 45% toward a pale gold
+   (#ECD696) - its mean colour went from #E4AA54 to #E8BE72; the artwork
+   itself is wider than tall
+   (~1.26 : 1), so it fills the box's width and sits ~80% of its height. */
+.top-header-bot-logo {
+  width: var(--header-bot-size); height: var(--header-bot-size);
+  justify-self: end; object-fit: contain; display: block;
+}
 .top-header-title {
-  margin: 0; color: #1A2328; font-size: 22px; font-weight: 800;
-  text-transform: uppercase; letter-spacing: 0.3px; text-align: center; flex: 1;
+  margin: 0; justify-self: center;
+  color: #0B2540; font-weight: 600; text-transform: uppercase;   /* was 800 */
+  letter-spacing: 0.04em; line-height: 1; text-align: center; white-space: nowrap;
+  font-size: clamp(0.945rem, 2.34vw, 1.8rem);   /* was clamp(1.05rem, 2.6vw, 2rem), x0.9 */
 }
-/* Exactly matches .coat-of-arms-badge's 48x48px (was 52px, slightly larger
-   than it) so the two emblems on either side of the title are the same
-   size, not just similar. */
-.top-header-bot-logo { width: 48px; height: 48px; object-fit: contain; flex-shrink: 0; }
+@media (max-width: 480px) {
+  .top-header-title { white-space: normal; line-height: 1.1; }
+}
 
 .navbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
-  background-color: #1E1E1E;
+  gap: 1rem;
+  height: var(--header-bottom-h);
+  padding: 0 var(--header-pad-x);
+  background-color: #1A1A1A;
 }
+/* min-width: 0 on the flex children is what lets the long tagline shrink and
+   truncate with an ellipsis instead of pushing the bell and role off-screen. */
 .navbar-left { display: flex; align-items: center; gap: 0.9rem; min-width: 0; }
-.hamburger-menu {
-  background: transparent; border: none; cursor: pointer;
-  color: #FFFFFF; font-size: 24px; line-height: 1; padding: 0.2rem;
-  border-radius: 6px; flex-shrink: 0;
+.navbar-page-title { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.navbar-page-title span {
+  color: #FFFFFF; font-size: 0.95rem; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.hamburger-menu:hover { background: rgba(255,255,255,0.1); }
-.navbar-page-title { display: flex; flex-direction: column; overflow: hidden; white-space: nowrap; }
-.navbar-page-title span { color: #FFFFFF; font-size: 0.95rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
-.navbar-page-title em { color: rgba(255,255,255,0.7); font-size: 0.74rem; font-style: normal; overflow: hidden; text-overflow: ellipsis; }
+.navbar-page-title em {
+  color: rgba(255,255,255,0.72); font-size: 0.74rem; font-style: normal;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .navbar-right { display: flex; align-items: center; gap: 1rem; flex-shrink: 0; }
 .user-role { color: #FFFFFF; font-size: 14px; font-weight: 500; white-space: nowrap; }
+/* The bell's own styling is for a light background; on the dark strip it needs
+   the light-on-dark treatment (this applies to every portal, since the strip is
+   the same colour in all of them). */
+.navbar .bell-trigger { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.22); color: #FFFFFF; }
+.navbar .bell-trigger:hover { background: rgba(255,255,255,0.18); }
+.navbar .bell-badge { border-color: #1A1A1A; }
+/* Below ~560px there is no room for the role label next to the bell AND the
+   full title (at 500px the title would already start to truncate); the bell
+   and title are kept. */
+@media (max-width: 560px) {
+  .user-role { display: none; }
+}
+/* 24 x 24 white icon inside a thin white dotted box with minimal padding. */
+.hamburger-menu {
+  display: flex; align-items: center; justify-content: center;
+  padding: 4px; margin: 0; background: transparent;
+  border: 1px dotted #FFFFFF; border-radius: 0; cursor: pointer; line-height: 0;
+}
+.hamburger-menu svg { width: 24px; height: 24px; display: block; }
+.hamburger-menu:hover { background: rgba(255,255,255,0.12); }
 
 .portal-content {
   flex: 1;
@@ -721,14 +900,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .theme-institution .sidebar-item { color: var(--color-text); }
 .theme-institution .sidebar-item:hover { background: rgba(0,0,0,0.045); color: var(--color-heading); }
 .theme-institution .sidebar-item.active {
-  background: var(--color-gold);
+  background: var(--gold-gradient);
   border-left-color: var(--color-gold-light);
-  color: white;
+  color: var(--color-primary-dark);   /* was white: unreadable on the gradient's pale ends */
   font-weight: 700;
 }
 .theme-institution .portal-content { background: var(--color-bg); }
-.theme-institution .btn-accent { background: var(--color-gold); color: var(--color-primary); font-weight: 700; }
-.theme-institution .btn-accent:hover { background: var(--color-gold-dark); }
+.theme-institution .btn-accent { background: var(--gold-gradient); color: var(--color-primary); font-weight: 700; }
+.theme-institution .btn-accent:hover { background: var(--gold-gradient-hover); }
 .theme-institution .portal-footer { background: var(--color-primary-dark); color: rgba(255,255,255,0.8); }
 
 /* ---- THEME: BOT (Bank of Tanzania dark green / gold, per ICN mockup) ---- */
@@ -739,13 +918,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .theme-bot .sidebar-item { color: var(--color-text); }
 .theme-bot .sidebar-item:hover { background: rgba(0,0,0,0.045); color: var(--color-heading); }
-.theme-bot .sidebar-item.active { background: var(--color-gold); border-left-color: var(--color-gold-light); color: white; font-weight: 700; }
-.theme-bot .bell-trigger { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: white; }
-.theme-bot .bell-trigger:hover { background: rgba(255,255,255,0.18); }
-.theme-bot .bell-badge { border-color: var(--color-primary); }
+.theme-bot .sidebar-item.active { background: var(--gold-gradient); border-left-color: var(--color-gold-light); color: var(--color-primary-dark); font-weight: 700; }
 .theme-bot .portal-content { background: #FBFAF6; }
-.theme-bot .btn-accent { background: var(--color-gold); color: var(--color-primary); font-weight: 700; }
-.theme-bot .btn-accent:hover { background: var(--color-gold-dark); }
+.theme-bot .btn-accent { background: var(--gold-gradient); color: var(--color-primary); font-weight: 700; }
+.theme-bot .btn-accent:hover { background: var(--gold-gradient-hover); }
 .theme-bot .portal-footer { background: var(--color-primary-dark); color: rgba(255,255,255,0.8); }
 .theme-bot .portal-footer { background: #14201A; color: rgba(255,255,255,0.85); }
 

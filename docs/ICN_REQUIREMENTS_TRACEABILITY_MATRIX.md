@@ -2504,3 +2504,800 @@ after the edit; CSS brace balance (261/261); backend compile unaffected
 (CSS-only change). **Not executed:** no browser available in this sandbox
 - rebuild the frontend and confirm the two emblems read as the same size
 on either side of the title.
+
+
+## Forty-third item — header rebuilt to a proportion-driven two-strip spec
+
+A detailed spec replaced the earlier header: a gold banner over a dark
+strip with fixed proportions, an unframed Coat of Arms, a square BOT
+emblem, and a hamburger-only dark strip. This supersedes the thirty-fifth,
+thirty-sixth, thirty-ninth and forty-second items' header details (round
+medallion badge, 48px emblems, #1E1E1E strip, #D4B843 gradient).
+
+**Proportions are formula-driven, not hard-coded.** `--header-top-h:
+clamp(80px, 9vw, 112px)`; the bottom strip is `0.65 x` it, both emblems
+`0.85 x` it. Computed at eight widths (360-1920px): bottom/top = 0.65 and
+logo/top = 0.85 at every one. Width:height is 11.1:1 at 1000-1244px; above
+that the 112px cap makes it 12-17:1 (12.9:1 at 1440px). The spec's "roughly
+11:1" and "compact" conflict on large screens (strict 11:1 would be 131px at
+1440px and 175px at 1920px, before the dark strip), so the cap is a judgment
+call - raise the 112px in the clamp to taste.
+
+**Colours per spec:** gradient #F5F3ED -> #E1C352 -> #F5F3ED; divider 3px
+#9E7B27; title #0B2540; dark strip #1A1A1A. The project-wide accent gold
+variables (--color-gold etc., from the thirty-eighth item) were NOT changed
+and remain #D4B843-based, so buttons are now slightly different from the
+header's gold; flagged rather than changed unasked.
+
+**Assets.** (1) *Coat of Arms*: the supplied JPG had a white background, and
+the spec forbids the round frame that had hidden it. Background removed by a
+flood fill from the image border (only white connected to the edge becomes
+transparent, so white inside the artwork survives), plus removal of the four
+large enclosed gaps between the tusks and shield, told apart from the ivory
+tusks by position because their colour is identical (~253,253,253). Checked
+on gold, cream and black: tusks, shield waves and the UHURU NA UMOJA ribbon
+intact. Saved as tanzania_coat_of_arms.png; the JPG was deleted. (2) *BOT
+emblem*: bot_logo.png is 235x115 but its artwork is only 123x98 inside
+transparent margins, which is why it always looked small in square boxes
+(~25px of artwork in a 48px box). Trimmed and padded to an exact square as
+bot_logo_square.png, used only in the header; the original stays for the
+sidebar and login. Its colour (mean RGB 228,170,84) is already gold/amber,
+so it was not recoloured. The spec's "1:0.85" was read as height:width,
+which matches the artwork's natural ~1:0.86, so the aspect is preserved.
+
+**Structure.** `.top-header` is a 3-column grid (`1fr auto 1fr`) so the
+title is centred exactly although the two emblems differ in width. The
+hamburger is a 24x24 SVG in a 1px white dotted box; both strips share
+`--header-pad-x`, aligning it with the Coat of Arms' left edge.
+
+**Removed from the dark strip, relocated rather than deleted.** The spec
+leaves the strip's right side empty and its left as the hamburger only, but
+the page title/subtitle, the notification bell and the role label were
+working features. They moved to a `.page-header-row` at the top of the
+content area. The bell's `.theme-bot` overrides (white on translucent, for
+the dark strip) were removed since they would have made it invisible on the
+light content background.
+
+**Verified here:** the proportion maths at eight widths; the image
+processing, visually on three backgrounds; a pixel-value mock of the header
+at 1244px rendered with the real assets (the available wkhtmltoimage engine
+cannot run CSS grid/clamp()/var(), so this checks the design, NOT the
+stylesheet itself); brace/paren balance (`PortalShell.tsx` 47/47, 45/45;
+`index.css` 258/258, 280/280); no frontend test references the changed
+UI; backend compile unaffected. **Not executed:** the real CSS in a real
+browser - rebuild and check the header at a few window widths, the
+hamburger still opening the menu, and the bell opening from its new place.
+
+
+## Forty-fourth item — header strip heights changed to the supplied exact pixel values
+
+The project owner replaced the forty-third item's proportions (bottom strip
+0.65x the top, sized by `clamp(80px, 9vw, 112px)`) with measurements of the
+Bank of Tanzania site: at 1920px wide, banner 110px and nav strip 45px; at
+375px wide, banner 80px and nav strip 50px, with a 768px breakpoint. These
+numbers come from the owner and were not independently measured here.
+
+**Implementation (`index.css`):** `--header-top-h` / `--header-bottom-h` are
+now fixed - 110px / 45px, overridden to 80px / 50px inside
+`@media (max-width: 768px)`. The emblems remain 0.85x the banner height
+(carried over from the earlier spec; the new measurements do not mention
+them), i.e. 93.5px desktop and 68px phone. A `@media (max-width: 480px)` rule
+lets the title wrap instead of colliding with the emblems on very narrow
+phones; at 375px it still fits on one line.
+
+**The supplied CSS used `aspect-ratio` alongside an explicit width and
+height; it was not copied.** With both dimensions set, `aspect-ratio` has no
+effect, so it would only have implied a behaviour the code does not have.
+The ratios are documented in a comment as what those fixed heights produce
+at those widths. Between the two measured widths the heights do not scale -
+they hold the nearest state's value (so a 1024px window gets the 110px
+banner, a 9.3:1 shape).
+
+**Verified here:** computed at 1920px and 375px, the CSS values reproduce
+every supplied figure exactly, including the exact fractions (192/11,
+128/3, 75/16, 15/2), the 2.44 : 1 and 1.6 : 1 strip ratios and the ~71%
+banner share on desktop; the breakpoint was checked at 768px/769px; the
+emblem-fit check shows the side columns hold the emblems at every width
+from 360px up, and at 320px the title wraps (the <=480px rule) instead; two
+pixel-value mocks (1920px and 375px) rendered with the real image assets.
+As before, the available wkhtmltoimage engine cannot run CSS grid/var(), so
+the mocks check the design, not the stylesheet itself. Brace/paren balance:
+`index.css` 262/262, 280/280; `PortalShell.tsx` 47/47, 46/46; backend
+compile unaffected. **Not executed:** the real stylesheet in a real browser
+- rebuild and check the header at a desktop width and at phone width (the
+browser's device toolbar at 375px is enough).
+
+
+## Forty-fifth item — header emblems set to the supplied fixed sizes
+
+The project owner supplied approximate emblem measurements from the Bank of
+Tanzania site: desktop (1920px) Coat of Arms 85x100px (17:20) and BOT
+emblem 95x95px (1:1); phone (375px) 50x60px (5:6) and 55x55px (1:1). These
+replace the forty-fourth item's "0.85x the banner height" sizing (93.5px
+desktop / 68px phone for both). The figures are approximate in the source
+("~85px") and were used as exact; they were not independently measured here.
+
+**Implementation (`index.css`):** `--header-logo-h` removed; new variables
+`--header-coat-w`, `--header-coat-h`, `--header-bot-size` with a 768px
+override, consumed by `.top-header-coat` (explicit width and height,
+`object-fit: contain`) and `.top-header-bot-logo` (square box). As in the
+forty-fourth item, the supplied CSS's `aspect-ratio` was not copied: it has
+no effect when width and height are both set.
+
+**Verified here (computed from the real image files):** the boxes equal the
+supplied ratios (17/20, 5/6, 1:1); desktop the Coat of Arms is 1.05x taller
+than the BOT emblem and the emblem 1.12x wider, as supplied. The Coat of
+Arms artwork is 329x383 (0.859), so `contain` draws it 85x99px and 50x58px
+- about 1% short of its box height, undistorted. (An earlier comment in the
+stylesheet said ~0.862/~1.3%; corrected.) Both emblems fit inside the
+banner's content height (107px desktop, 77px phone; the 3px border is
+inside the banner), with margins of 3.5px (Coat of Arms) and 6px (BOT) on
+desktop. Horizontal fit holds from 320px up with the title on one line; the
+<=480px wrap rule only matters below that. Mocks at 1920px and 375px
+rendered with the real assets - computed pixel values in wkhtmltoimage,
+which cannot run CSS grid/var(), so they check the design, not the
+stylesheet itself.
+
+**Worth knowing:** the BOT file's artwork is wider than tall (123x98, ~1.26:1)
+even though it is shown in a 1:1 box, so it fills the box's width and about
+80% of its height - it will look a little smaller than a full-height square
+logo. If the BOT site's own logo is a squarer artwork than the file we have,
+supplying that file is the real fix; stretching this one would distort it.
+
+Brace/paren balance: `index.css` 262/262, 285/285; `PortalShell.tsx` 47/47,
+47/47; backend compile unaffected. **Not executed:** the real stylesheet in
+a real browser - rebuild and check desktop and a 375px viewport.
+
+
+## Forty-sixth item — top banner made slightly thinner
+
+On request ("reduce the thickness of the top banner very slightly"), the
+banner height went from 110px to 105px on desktop and from 80px to 76px at
+<= 768px (about 4.5% and 5%). The dark strip (45px / 50px) and the emblem
+sizes were deliberately left as supplied: the request named only the banner.
+Consequences: banner : strip is now 2.33 : 1 on desktop (was 2.44) and 1.52 : 1
+on phones (was 1.6); the banner is 18.29 : 1 at 1920px and 4.93 : 1 at 375px.
+
+**There is a floor, and this is close to it.** The banner's content height is
+its height minus the 3px bottom border (102px desktop, 73px phone) and the
+Coat of Arms is 100px / 60px tall, so desktop cannot go below 103px without
+also shrinking the Coat of Arms. At 105px it has 1px above and below; the BOT
+emblem (95px) has 3.5px. Compared side by side in a mock at real pixel size,
+110px versus 105px: nothing clipped, but the Coat of Arms now sits close to
+the banner's top edge. Going thinner than this needs smaller emblems, which
+the supplied sizes do not allow.
+
+`--header-top-h` (105px, and 76px inside the 768px media query) is the single
+value to change. The explanatory comment in `index.css` and the one in
+`PortalShell.tsx` were updated to say the banner was trimmed from the measured
+values, and to record the new ratios and the fit floor.
+
+**Verified here:** the new ratios computed; the fit floor derived from the
+actual emblem heights; a before/after mock with the real image assets (the
+wkhtmltoimage engine cannot run CSS grid/var(), so this checks the look, not
+the stylesheet itself); brace/paren balance (`index.css` 262/262, 288/288;
+`PortalShell.tsx` 47/47, 47/47); backend compile unaffected. **Not executed:**
+the real stylesheet in a real browser - rebuild and look at the Coat of Arms'
+clearance at the banner's top and bottom edges.
+
+
+## Forty-seventh item — page title, notification bell and role label returned to the dark strip
+
+On request, the dark strip now shows the page title and subtitle immediately
+after the hamburger and, on its right, the notification bell followed by the
+role label. This supersedes the earlier hamburger-only / empty-right spec
+and the interim arrangement (forty-third item) that had moved these three
+things into a row at the top of the content area; that row and its CSS were
+removed.
+
+**What "Climate Data Repository" and its tagline are.** They are not
+hard-coded in the shared header: they are the `pageTitle` / `pageSubtitle`
+props, and only `InternalPortal.tsx` passes those exact words ("Climate Data
+Repository" / "Reliable climate data. Informed decisions. Resilient financial
+sector."). The other two portals pass their own - "System Administration" /
+"Identity, access, and institution management" and "Overview" / "Your
+institution's reporting dashboard" - so each portal shows its own title in the
+strip. Changing the other two to say "Climate Data Repository" would be a
+one-line edit per page, but was not done unasked.
+
+**Layout (`index.css`, `PortalShell.tsx`):** `.navbar` is a flex row with
+`justify-content: space-between`; `.navbar-left` holds the hamburger and the
+two-line title block, `.navbar-right` the bell and role. `min-width: 0` on the
+flex children plus `text-overflow: ellipsis` let the long tagline truncate
+instead of pushing the bell and role off-screen. The bell's styling was
+written for a light background, so `.navbar .bell-trigger/.bell-badge` now
+give it the light-on-dark treatment - scoped to `.navbar` rather than to one
+portal theme, since the strip is the same colour in every portal. (The
+earlier `.theme-bot`-only overrides had been deleted in the forty-third item
+when the bell moved onto the light content area.)
+
+**Narrow screens.** Estimated at ~215px for the bell and role and ~190px for
+the title, the role label cannot fit beside a readable title below roughly
+520px, so it is hidden at `max-width: 560px` (an initial 480px threshold would
+have started truncating the title at 481-520px). The bell and title stay; the
+tagline truncates with an ellipsis. So at phone width the role label from the
+request is NOT shown - flagged, not silent.
+
+**Verified here:** the title, tagline, bell, badge and role arrangement in a
+mock at 1366px and 375px using the real image assets (the available
+wkhtmltoimage engine cannot run CSS grid/var(); the mock uses explicit
+pixels and approximate text widths from a different font, so it checks the
+arrangement, not the stylesheet); grep confirms no `page-header` leftovers;
+brace/paren balance (`index.css` 268/268, 291/291; `PortalShell.tsx` 47/47,
+48/48); backend compile unaffected. **Not executed:** the real stylesheet in
+a real browser; also not tested: the notification panel opening from its
+restored position (it is absolutely positioned under the bell with its own
+background and text colour, so it should be unaffected, but this was
+reasoned, not run).
+
+
+## Forty-eighth item — banner, emblems and title each reduced by 10%
+
+On request: "reduce the size of the top banner strip by 10%, the logos by 10%,
+and the words BANK OF TANZANIA by 10%". Applied as x0.9 to each:
+
+| | before | after |
+|---|---|---|
+| Banner height, desktop | 105px | 94.5px |
+| Banner height, phone (<= 768px) | 76px | 68.4px |
+| Coat of Arms, desktop / phone | 85x100 / 50x60px | 76.5x90 / 45x54px |
+| BOT emblem, desktop / phone | 95 / 55px square | 85.5 / 49.5px square |
+| Title font | clamp(1.05rem, 2.6vw, 2rem) | clamp(0.945rem, 2.34vw, 1.8rem) |
+
+**Interpretation, stated rather than assumed.** The request says "ukubwa wa
+ulalo wa strip" ("the size of the horizontal [aspect] of the strip"), which is
+ambiguous. It was read as the strip's height/thickness, consistent with the
+previous request about the banner's thickness; a full-width banner cannot be
+made narrower without leaving gaps at its sides. The dark nav strip (45px /
+50px) was not touched - the request named the top banner only.
+
+**Resulting ratios** (the comment above `--header-top-h` in `index.css` was
+rewritten, including the history of the two reductions): desktop 1920:94.5 =
+20.32 : 1, banner : nav strip 2.10 : 1 (was 2.33); phone 375:68.4 = 5.48 : 1,
+1.37 : 1 (was 1.52). The aspect ratios of the emblem boxes are unchanged
+(0.850 and 0.833; BOT 1 : 1), and on desktop the Coat of Arms is still 1.05x
+taller and the BOT emblem 1.12x wider than the other.
+
+**Fit.** Banner content height is the height minus the 3px border: 91.5px
+desktop, 65.4px phone. The Coat of Arms artwork is drawn at 76.5x89px
+(desktop; 45x52px phone), leaving ~1.2px above and below it on desktop (was
+~1.5px) and 6.5px on phones; the BOT emblem has 3px / 7.95px. The floor is
+~93px (desktop) and ~57px (phone). Because the emblems scale with the banner,
+this clearance stays about as tight as before; it is not worse, but it is not
+roomy either.
+
+**Verified here:** the arithmetic and clearances from the real image
+dimensions; a before/after mock at 1366px and an after mock at 375px with the
+real assets (the wkhtmltoimage engine cannot run CSS grid/var()/clamp(), so it
+checks the look using explicit pixels, not the stylesheet itself); brace/paren
+balance (`index.css` 268/268, 293/293; `PortalShell.tsx` 47/47, 47/47);
+backend compile unaffected. **Not executed:** the real stylesheet in a real
+browser.
+
+
+## Forty-ninth item — Coat of Arms 10% shorter, BOT emblem paler, title less bold
+
+Three requests: cut the Coat of Arms' height by 10%; make the BOT emblem's
+very deep colour "a little pale gold"; reduce how bold "BANK OF TANZANIA" is.
+
+**Provenance, stated plainly.** When this pass started, the working tree
+already contained all three changes (a new `bot_logo_square_pale.png`, the
+Coat of Arms at 68.85x81px, the title at weight 600) with comments written in
+this project's usual style, but they were not in this session's visible step
+history, so it cannot be said where they came from. The previously delivered
+ZIP had none of them (title weight 800, original-colour emblem, Coat of Arms
+76.5x90). Rather than redo or blindly trust them, each was audited against the
+files; the results below are from that audit.
+
+**1. Coat of Arms.** 90 -> 81px tall on desktop and 54 -> 48.6px on phones, with
+the width following (76.5 -> 68.85px; 45 -> 40.5px) so the box stays 17:20
+(5:6) and the artwork is not distorted or left floating off the hamburger's
+left edge. Drawn artwork ~68.85x80px. Side effect: the Coat of Arms is now
+shorter than the BOT emblem (85.5 : 81, i.e. the emblem is 1.06x taller and
+1.24x wider; about equal in height on phones), the reverse of the original
+measurements. The comment's fit floor was updated: the tallest emblem is now
+the BOT one, so the banner needs >= 88.5px desktop / 52.5px phone, and the
+Coat of Arms has ~5.7px clearance above and below (was ~1.2px).
+
+**2. BOT emblem colour.** A new file, `bot_logo_square_pale.png`, is the
+square emblem with each pixel's RGB moved 45% of the way toward #ECD696.
+Audited: alpha channel identical to the original (max difference 0); the
+colour change reproduces exactly as that blend (mean error 0.25/255); mean
+colour #E4AA54 -> #E8BE72, matching the stylesheet comment. It was compared
+visually against four independent CSS-filter candidates (saturate/brightness/
+hue-rotate, computed with the filter-spec formulas): it is paler than all of
+them. Cost: contrast against the banner's cream end (#F2EBD4 where the emblem
+sits) falls from 1.94 to 1.56 (median emblem colour) and 2.66 to 1.85 (darker
+pixels) - still visible in mocks, fainter than before, and decorative rather
+than text. `bot_logo_square.png` is kept and unused, so reverting is a one-
+import change in `PortalShell.tsx`; the sidebar and login page still use the
+unmodified `bot_logo.png`. Making it slightly less pale means regenerating the
+file at a smaller percentage.
+
+**3. Title weight.** `font-weight: 800 -> 600` on `.top-header-title`.
+`index.html` loads Inter from Google Fonts at weights 400-800, so 600
+(SemiBold) is a real face when online; offline the stack falls back to the
+system font (Segoe UI SemiBold on Windows). Letter-spacing and size unchanged.
+
+**Verified here:** the asset audit above; syntax balance (`index.css` 268/268,
+296/296; `PortalShell.tsx` 47/47, 48/48); a before/after mock at 1366px and an
+after mock at 375px with the real assets; no stale numbers left in the header
+comments (the one remaining mention of 85x100 is the history of the original
+measurements); backend compile unaffected. **Not verifiable here:** the title's
+weight change - the mock engine has one bold face only, so it cannot show 600
+versus 800; and the real stylesheet in a real browser.
+
+
+## Fiftieth item — new banner gradient, flag-coloured line, and the same gold gradient on every gold box
+
+Supplied CSS: `.strip-background` (`linear-gradient(to right, #E8E3CE 0%,
+#D9BD59 50%, #EAE8E3 100%)`) and `.strip-bottom-border` (`4px solid` with
+`border-image: linear-gradient(to right, #1EB53A, #000000, #00A3E0) 1`, the
+Tanzanian flag's green, black and blue), plus the instruction that every gold
+box use that same gradient.
+
+**Banner.** Both supplied classes were added and applied to the header element
+together with `.top-header`, whose own `background` and `border-bottom` were
+removed so nothing conflicts. The gradient lives once in `--gold-gradient`
+(`:root`) and `.strip-background` uses it - identical to the supplied rule.
+The line is 4px instead of 3px; because the banner has a fixed border-box
+height, its content area is 1px shorter (90.5px desktop, 64.4px phone), leaving
+the BOT emblem 2.5px above and below on desktop (7.45px on phones). Comments
+in `index.css` and `PortalShell.tsx` that quoted the old gradient, colours and
+3px line were updated.
+
+**Gold boxes now using the gradient** (hover = the same stops darkened 10%,
+`--gold-gradient-hover`): the generic `button` rule (every button without a
+variant class, including a lone `btn-sm`), `button.btn-gold`, `.btn-accent`
+(both portal themes), `.login-submit`, and the active sidebar item (both
+themes). The variant buttons (`btn-secondary`, `btn-success`, `btn-danger`)
+use the `background` shorthand, which discards the generic gradient entirely,
+so they are unaffected; there is no `background-color` anywhere that could let
+the gradient show through underneath.
+
+**Deliberately NOT changed, because they are not boxes or they encode data:**
+text and border colours that use the flat gold variables, focus rings, the
+login card's top border, the notification dot (8px), the chart bar fills
+(`.bar-viz-fill`, which encode amounts), the login page's blurred decorative
+circles, and the map's highlighted-region label in `HazardMap.tsx` (map data
+annotation). Unused leftovers from the old `.sidebar` class family
+(`.sidebar-brand-icon`, `.badge-count`) also still use flat gold; nothing
+renders them.
+
+**Text colour had to change on two boxes.** The login button and the active
+sidebar item had WHITE text on gold. On this gradient white measures 1.29 /
+1.85 / 1.22 : 1 (left edge / centre / right edge), i.e. unreadable at the pale
+ends, so their text is now `--color-primary-dark` (12.4 / 8.6 / 13.0 : 1). The
+default button text (`--color-primary`, 9.8 / 6.8 / 10.3 : 1) was already dark.
+
+**One incidental fix.** `.link-button` ("Mark all as read") had no hover of its
+own, so it inherited `button:hover`: previously a gold-dark background behind
+gold-dark text (the label disappeared on hover - an existing bug), and it would
+have become a gradient chip behind a small text link. It now has
+`.link-button:hover { background: none; text-decoration: underline; }`. Every
+other button class in the TSX files was checked for its own hover rule.
+
+**Consequences worth knowing.** (1) The gradient is pale at both ends, so a gold
+button's left and right edges are close to the page background (#FBFAF6): the
+shape is defined mostly by its darker centre and, on the login button, its
+shadow. The active sidebar item likewise fades toward the sidebar's near-white
+background on its right. A thin border would define them; not added unasked.
+(2) The new gradient's right end (#EAE8E3) is slightly darker than the old one
+(#F5F3ED), so the pale BOT emblem (forty-ninth item) now has ~1.46 : 1 contrast
+against the banner behind it (median emblem colour; 1.56 on the old gradient;
+1.94 before the emblem was paled). (3) `button`'s `transition: background`
+cannot animate a gradient, so the hover change is instant.
+
+**Verified here:** the contrast figures computed from the actual colours;
+every remaining flat-gold background listed and accounted for; a button-class
+inventory against their hover/background rules; brace/paren balance
+(`index.css` 271/271, 302/302; `PortalShell.tsx` 47/47, 49/49); backend compile
+unaffected; a mock at 1366px of the banner, line, buttons, login button and
+active item. **Not verifiable here:** the flag-coloured line as a real
+`border-image` - the mock engine does not support it, so the line in the mock
+is a separate 4px gradient strip standing in for it; and the real stylesheet in
+a real browser.
+
+
+## Fifty-first item — gradient line under every item in the navigation list
+
+Request: apply a supplied snippet (`.kipengele-cha-dashboard`: a 4px
+transparent bottom border with `border-image: linear-gradient(to right,
+#00A3E0, #33CCFF) 1`) to every item in the navigation list.
+
+**What "every item" is.** The three kinds of button in the sidebar's nav list -
+the page's own items, Change Password and Log Out - all use the single class
+`.sidebar-item`, so one rule covers them (confirmed in `PortalShell.tsx`). The
+"Navigation" section label is not an item and has no line.
+
+**Not applied literally, and why.** `border-image` replaces an element's whole
+regular border. Every `.sidebar-item` already has `border-left: 3px solid
+transparent`, and the active item recolours it (`border-left-color`) as its
+accent. The supplied snippet would therefore have painted that left border blue
+(the gradient's first colour) on every item and removed the active accent
+altogether. The same visual - a 4px gradient line along the bottom of each item
+- is drawn instead with `.sidebar-item::after` (absolutely positioned, inside
+the item, `pointer-events: none`), with `position: relative` added to
+`.sidebar-item`. It sits inside the item's box, so item heights do not change.
+`border-image` remains used only by the banner's flag-coloured line, where there
+is no competing border.
+
+**Taken from the snippet vs left out.** Taken: the line itself - 4px, colours
+`#00A3E0 -> #33CCFF`, now held in `--nav-item-line` in `:root`. Left out: the
+`background-color: #ffffff`, `padding: 15px` and `border-radius: 8px`, which the
+snippet itself labels as an example of the box's own look and "optional" - the
+nav items keep their existing background, padding and square corners.
+
+**Colour note.** The snippet's comment calls this "the Tanzanian flag gradient",
+but its two colours are both blues, so that is what was implemented; the
+banner's line is the green-black-blue one.
+
+**Layout detail.** `left: 0` on the absolutely positioned line is measured from
+the item's padding box, i.e. inside its 3px left border, so the line starts 3px
+in from the item's outer left edge (visible next to the active item's accent).
+It cannot be extended under the border: the item has `overflow: hidden`, which
+clips at the padding box.
+
+**Verified here:** one rule covers all three buttons (grep of the TSX); only my
+`::after` and `--nav-item-line` were added, `border-image` appears only on the
+banner; brace/paren balance (`index.css` 272/272, 306/306); backend compile
+unaffected; a mock of the sidebar with five items rendered with a real
+`:after` rule on an `overflow: hidden`, `position: relative` flex-like item -
+the active item kept its left accent and gold gradient, every item showed the
+line. (The mock engine does not support `var()`, so the gradient colours are
+written inline there.) **Not verified here:** the real stylesheet in a real
+browser. A first attempt at this edit failed an anchor match and wrote
+nothing; this was caught by confirming the lines were actually present
+before continuing.
+
+
+## Fifty-second item — gradient line moved from the sidebar items to the dashboard cards; Automated Reports added to the sidebar
+
+The fifty-first item misread the request. Its sidebar line was removed, and the
+sidebar's item styling is back exactly as before (the `.sidebar-item` rule
+region was diffed against an older delivered ZIP: 19 lines, identical). The
+`--nav-item-line` variable became `--card-bottom-line` (same
+`#00A3E0 -> #33CCFF`).
+
+**Corrected reading.** "The navigation list" is the set of dashboard sections
+the sidebar items lead to, and "jedwali" (table) is the white box. This fits
+the supplied snippet's own class name (`.kipengele-cha-dashboard`, "dashboard
+element") and its white background, padding and rounded corners, which describe
+a card; and the "Automated Reports" box the request names is a card of buttons,
+not a table - it contains no `<table>`. So the line is applied to every card in
+the portals: `.portal-content .card`, i.e. 20 cards (11 on the BOT dashboard, 2
+Institution, 7 Admin). Left out: the standalone Change Password card (outside
+`.portal-content`), the KPI tiles, `action-card`s and the login card. The real
+`<table>` elements were NOT touched; if tables were meant, that is a separate,
+small change.
+
+**How the line is drawn, and why not as supplied.** `.card` has a 1px border and
+`border-radius: var(--radius)`. `border-image` replaces the whole border (the top
+and sides too) and ignores border-radius, so the line would poke out square past
+the rounded corners. Instead it is a background layer: `background-image:
+var(--card-bottom-line)`, 100% x 4px, anchored bottom-left, `background-origin:
+border-box`, with `border-bottom-color: transparent` so it shows through the 1px
+bottom border and meets the card's outer edge. Backgrounds are clipped to the
+rounded shape, so it follows the corners; it needs no `position` change on the
+card (which could have shifted absolutely positioned descendants) and changes no
+sizes - it occupies the bottom 4px of the card's own padding. The selector's
+higher specificity (`.portal-content .card`) beats the card's `background:`
+shorthand regardless of order. Checked first: no card has an inline background,
+none is nested inside another (one Admin card has an inline `borderLeft` only,
+which does not interfere).
+
+**Sidebar addition.** `InternalPortal.tsx` gained `{ key: 'automated-reports',
+label: 'Automated Reports' }` scrolling to `#reports-section`, placed second,
+after Overview - the Automated Reports card is the first card on the page (line
+566, right after the top anchor), and the sidebar is ordered like the page. The
+existing last item "Download / Export" ALSO scrolls to `#reports-section`, so
+two sidebar entries now lead to the same card; nothing was removed or renamed
+unasked. BOT-only: the Institution and Admin portals have no automated reports
+(RBAC tests: institution users cannot generate them).
+
+**Verified here:** every edit confirmed present (and the removed ones confirmed
+gone) by grep before continuing - the fifty-first item's first attempt had once
+silently written nothing; `border-image` now appears only on the banner; the
+sidebar rule region identical to the older ZIP; sidebar item order listed against
+the page's section order; brace/paren balance (`index.css` 272/272, 308/308;
+`InternalPortal.tsx` 545/545, 539/539); backend compile unaffected; before/after
+mock of the Automated Reports card, including a zoom on the rounded corner (the
+mock engine has no `var()`, so the gradient is inline there). **Not verified
+here:** the real stylesheet in a real browser.
+
+
+## Fifty-third item — card bottom line made very thin (1px) and light green
+
+The owner confirmed the line is on the right elements (the dashboard cards) and
+asked for it to be much narrower - "leave a quarter of the current thickness" -
+and light green. Thickness went from 4px to 1px (4 x 0.25) and the colour from
+`#00A3E0 -> #33CCFF` (blue) to `#7FDB85 -> #A6EBA2` (two light greens, kept as a
+gentle left-to-right gradient like the earlier lines rather than a flat colour).
+
+Colour and thickness now live in two `:root` variables (`--card-bottom-line`,
+`--card-bottom-line-h`) and the rule reads `background-size: 100% var(
+--card-bottom-line-h)`, so either is a one-place change. Comments describing a
+"4px" line were updated. A side benefit of 1px: the card's bottom border is 1px
+and already transparent (so the line shows through it), so the line now fills
+exactly that border and sits on the card's outer edge instead of overlapping the
+card's padding.
+
+**It is subtle, as a consequence of "very narrow" plus "light".** Contrast
+against the white card above it is 1.70 : 1 at the left end and 1.40 : 1 at the
+right (the right end is paler), and 1.62 / 1.34 : 1 against the page background
+below. In a before/after mock at real size the 1px line on one card was hard to
+distinguish from the card's shadow just beneath it; at 4x zoom it was clearly
+green on both cards. A slightly deeper green, or 2px, would make it read at a
+glance - both are single-value edits.
+
+**Verified here:** candidate greens' contrast computed; edits confirmed present
+and the old blue / `100% 4px` values confirmed gone by grep; brace/paren balance
+(`index.css` 272/272, 312/312); backend compile unaffected; before/after mock at
+real size and a 4x zoom of two stacked cards (the mock engine has no `var()`, so
+the values are inline there). **Not verified here:** the real stylesheet in a
+real browser, where 1px lines on displays with fractional pixel ratios (e.g.
+125%/150% scaling) can render slightly fainter or uneven.
+
+
+## Fifty-fourth item — card line doubled to 2px in #0B3D2E; table headings #1C2326
+
+**Card line.** Thickness doubled, 1px -> 2px (`--card-bottom-line-h`), and the
+colour set to `#0B3D2E` (a dark forest green chosen from a swatch comparison),
+replacing the light-green gradient. A flat colour is held in
+`--card-bottom-line-color`; because the line is a `background-image` layer and
+needs an image, `--card-bottom-line` wraps it as a one-colour `linear-gradient`.
+The card's bottom border is 1px and transparent, so the 2px line now covers that
+border and 1px of the card's padding above it (the 1px line had filled exactly
+the border). Contrast of the line is 12.2 : 1 against the white card and 11.7 : 1
+against the page background - the opposite of the previous light-green line
+(~1.4-1.7 : 1) - so it now reads clearly.
+
+**Table headings.** Set to `#1C2326` through a new `--table-heading-color`, by
+changing the single global `th` rule (previously `var(--color-muted)`, `#64748B`,
+4.76 : 1 on white; now 15.94 : 1). That covers the column headings of all 15
+`<table>` elements in the project (Admin 5, Institution 3, BOT dashboard 7);
+`th` font size, weight, case and letter-spacing were not touched.
+
+**An ambiguity, resolved by checking the code.** "Headings of the tables" could
+mean the card titles (the owner has been calling the dashboard cards "jedwali")
+or the tables' own column headings. Card titles (`.card h2`) already resolve to
+`#1C2326` exactly - they use `--color-primary-dark` - so setting them would have
+changed nothing; the column headings were the grey ones that this request
+visibly changes, so those were changed. Card sub-headings (`h3`/`h4`) still use
+the general heading colour `#2B353A`, a near-identical shade, and were left
+alone; matching them is a one-line addition if wanted.
+
+**Verified here:** contrast ratios computed; edits confirmed present and the old
+light-green values and the old `th` colour confirmed gone by grep; the one-colour
+gradient and the nested `var()` rely on both custom properties being defined on
+`:root`, where they are; brace/paren balance (`index.css` 272/272, 313/313);
+backend compile unaffected; before/after mock of a card with a table (the mock
+engine has no `var()`, so values are inline there). **Not verified here:** the
+real stylesheet in a real browser.
+
+
+## Fifty-fifth item — Validate and Flag as Bad Data take the pale-edged button look, keeping their green and red
+
+Request: in Climate Quality Control - Readings Awaiting Review, give the Validate
+and Flag as Bad Data buttons "the design of the other buttons" while keeping their
+colours the same green and red.
+
+**What was first understood, and the correction.** The owner asked to be told the
+understanding before any change. The first reading - that "design" meant size
+(the two buttons are the compact `btn-sm`, padding 6x12px / 12.2px text, while
+standard buttons and the Approve/Reject in submission review are 10x20px / 13.4px)
+- was wrong. The owner clarified that the other buttons are the ones that go white,
+then gold, then white, and chose "also the gradient (pale ends, full colour in the
+middle) for green and red". Nothing was changed before that correction.
+
+**Implementation.** An opt-in class, `.btn-fade`, added to exactly those two
+buttons (`InternalPortal.tsx`, the two `handlePromoteClimateGroup` buttons); a
+project-wide change to `btn-success` / `btn-danger` would also have changed
+Approve, Reject, and the Admin Activate / Deactivate buttons, which were not part
+of the request. Four `:root` gradients: the CENTRE stop is the existing colour by
+reference (`--color-success` `#10B981`, `--color-danger` `#EF4444`), and the hover
+centres are the existing hover colours (`#0D9668`, `#DC2626`), so the colours
+themselves are unchanged. The pale ends are white blended with 15% (left) and 8%
+(right) of that colour - the same left/right asymmetry as the gold buttons' ends -
+giving `#DBF4EC` / `#ECF9F5` (green) and `#FDE3E3` / `#FEF0F0` (red); hover ends are
+those darkened 10%. The rules sit after the existing `.btn-success` / `.btn-danger`
+rules: `button.btn-success:hover` and `button.btn-success.btn-fade` have equal
+specificity, so source order decides, and the new `:hover` rules are more specific
+than both.
+
+**Text is now dark on these two buttons (a necessary side effect).** White text
+would vanish on the pale ends (1.1-1.2 : 1), so the text uses `--color-primary-dark`
+(`#1C2326`), as on the gold buttons. At the coloured centre this is an improvement,
+not a loss: on green, white was 2.54 : 1 and dark is 6.28 : 1; on red, white was
+3.76 : 1 and dark is 4.23 : 1 (still under the 4.5 : 1 guideline for small text,
+though better than before). On the hovered red the centre is darker and dark text
+falls to roughly 3.3 : 1.
+
+**Deliberately unchanged:** the buttons' size (still compact `btn-sm`) - the
+corrected request is about the colour pattern, not size; the ✓ and ✕ marks and the
+button labels - they were not mentioned; every other green/red button.
+
+**Verified here:** the pale-end colours and all contrast figures computed; `btn-fade`
+confirmed by grep to be on exactly two buttons (InternalPortal 2, AdminPanel 0,
+InstitutionPortal 0); brace/paren balance (`index.css` 276/276, 330/330;
+`InternalPortal.tsx` 545/545, 539/539); backend compile unaffected; a mock of
+before / after / hover beside a gold button and the unchanged Approve/Reject (the
+mock engine has no `var()`, so values are inline there). **Not verified here:** the
+real stylesheet in a real browser.
+
+
+## Fifty-sixth item — the four tiles get a "Summary Figures" heading; Loan Data and Collateral Data merged in the sidebar
+
+The group of four tiles (Total Loan Value, Total Collateral Value, Reporting
+Institutions, Total Submissions) was the only block on the BOT dashboard with no
+title; every other section is a card with an `h2`. After a recommendation to add
+one, the owner chose the name "Summary Figures" and expected the two sidebar
+entries that pointed here to be combined into one.
+
+**Heading.** `<h2 className="section-title">🔢 Summary Figures</h2>` is the first
+item in `#kpi-section`, spanning the whole grid like the existing approved-only
+note, which stays directly beneath it. It is deliberately NOT wrapped in a card:
+the tiles are themselves bordered, shadowed cards, so an outer card would nest
+boxes. `.section-title` shares one rule with `.card h2` (same size, weight,
+`#1C2326` colour, flex alignment), so the two cannot drift apart; it only adds
+`margin-bottom: 0` because the grid's own gap supplies the spacing. Consequence:
+since it is not a `.card`, it does not get the dark-green bottom line the cards have.
+
+**Sidebar.** `Loan Data` (💰) and `Collateral Data` (🛡️) - both scrolled to
+`#kpi-section` - are replaced by one `Summary Figures` entry at the same position
+(between Dashboard Filters and Climate & Hazard Data, matching the page order). It
+also now covers Reporting Institutions and Total Submissions, which had no entry.
+The icon is 🔢 in both the sidebar and the heading: 📊, the icon first proposed for
+the heading, is already used by Overview and Submission Status Distribution, and
+a third use would have left three entries indistinguishable. Nothing else in the
+code used the removed `loan` / `collateral` keys (searched). The sidebar goes from
+14 to 13 entries. Only the BOT portal had these entries; the Institution portal is
+unchanged.
+
+**Wording kept consistent.** The Dashboard Filters note said "Narrow the KPI
+cards, ..."; it now says "Narrow the Summary Figures, ...". The Automated Reports
+note's "KPI summary" describes the content of the generated report, not this
+dashboard section, so it was left alone.
+
+**Verified here:** every edit confirmed present, and the removed entries and the old
+wording confirmed gone, by grep; the sidebar listed in order and checked for
+repeated icons (only the two pre-existing 📊 uses); brace/paren balance (`index.css`
+277/277, 330/330; `InternalPortal.tsx` 546/546, 537/537); backend compile
+unaffected; a layout mock showing Filters card -> heading -> note -> tiles (the mock
+engine does not render the emoji and its tiles are a rough stand-in for the real
+ones). **Not verified here:** the real stylesheet in a real browser.
+
+
+## Fifty-seventh item — BOT sidebar reordered to follow the page's section order
+
+Request: arrange the sidebar so it follows the same flow as the sections on the
+main page - Automated Reports, then Dashboard Filters, then Summary Figures, then
+Geospatial Map, and so on.
+
+**Page order, checked against the code rather than assumed** (top to bottom):
+Automated Reports, Dashboard Filters, Summary Figures, Geospatial Overview, Climate
+Hazard Exposure Distribution, Climate Data Quality, Submission Status Distribution,
+Combined Climate-Financial Exposure, Risk Advisory Reports, Submission Monitoring,
+Climate & Financial Exposure by Region. The owner's description (the map follows
+Summary Figures) matched.
+
+**What moved.** The sidebar's 13 entries were reordered by editing the array, with an
+assertion that none was added or removed. Two entries were out of place: Geospatial
+Map was 12th and is now 6th, directly after Summary Figures; and Download / Export
+was last. Download / Export leads to the same card as Automated Reports (the top of
+the page), so listing it last made the sidebar jump back up the page; by the
+page-order rule it now sits third, right after Automated Reports. Every other entry
+keeps its relative position. Final order: Overview, Automated Reports, Download /
+Export, Dashboard Filters, Summary Figures, Geospatial Map, Climate & Hazard Data,
+Climate Data Quality, Submission Status Distribution, Combined Climate-Financial,
+Risk Advisory Reports, Submission Status, Exposure by Region.
+
+**Two things worth knowing.** (1) Automated Reports and Download / Export are
+duplicates: two adjacent entries, one destination. Nothing was removed unasked; the
+owner can merge or drop one. (2) Several sidebar labels do not match the page titles
+they lead to: Climate & Hazard Data vs "Climate Hazard Exposure Distribution",
+Geospatial Map vs "Geospatial Overview - Hazard Exposure & Portfolio", Combined
+Climate-Financial vs "... Exposure", Submission Status vs "Submission Monitoring",
+Exposure by Region vs "Climate & Financial Exposure by Region". Only the order was
+requested, so no label was changed.
+
+**Other pages checked, not changed.** The same check on the Institution portal
+(Overview, Download Template, Upload Data, Submitted Files) and the Admin panel
+(Password Resets, Institutions, Users, Audit Log) found both already in page order.
+
+**Verified here:** a script maps each sidebar item to its target's line on the page
+and confirms the sequence never goes backwards (True) - run on the working tree and
+again on the file inside the delivered ZIP; brace/paren balance (`InternalPortal.tsx`
+546/546, 537/537); backend compile unaffected. **Not verified here:** the real UI in
+a real browser.
+
+
+## Fifty-eighth item — "Download / Export" removed; the menu can be opened from the left edge of the screen
+
+**Download / Export removed.** The owner asked why the entry existed, since it had no
+visible function. It had none of its own: its only action was
+`scrollTo('reports-section')`, the same target as "Automated Reports". The real
+downloads - Summary Report (PDF), Summary Report (Excel), Summary Snapshot (Image) and
+Combined Exposure (CSV) - are the four buttons inside that card. The docs do not record
+when or why the label was added; that it was a leftover name for the reports card is an
+inference from its identical target and absence of any function of its own. Removing it
+loses nothing. The BOT sidebar now has 12 entries, in page order, with no two leading to
+the same section (checked by script).
+
+**Opening the menu from anywhere.** The hamburger lives in the page's top strip, so it
+scrolls out of view; far down the page the only way to the sidebar was to scroll back up.
+Checked first: the sidebar itself is already `position: fixed; top: 0; bottom: 0` with no
+transformed ancestor (`.portal-shell` and `.portal-main` have no transform or filter), so
+once opened it already appears wherever the page is scrolled to. Only the way to open it
+was missing.
+
+Added in the shared `PortalShell.tsx` (so it applies to the BOT, Institution and Admin
+portals alike) and `index.css`: a 14px-wide zone fixed along the viewport's left edge
+(`.nav-edge-trigger`, z-index 900, below the backdrop and sidebar at 1000/1001). Hovering
+it fades in a soft shade along the edge and slides in a dark "Menu" tab at the cursor's
+height; clicking anywhere on the zone or the tab opens the sidebar. The tab follows the
+cursor's vertical position only while the pointer is on the thin strip itself (a ref
+updated directly, not state, so the page does not re-render on every mouse move) and stays
+put once the pointer is on the tab, so it cannot run away from the cursor. The tab's hover
+persists because `:hover` applies when the pointer is over any descendant, even one
+positioned outside its parent's box. The zone is not rendered while the menu is open.
+
+**Deliberate limits.** (1) Mouse only: `@media (hover: none)` removes the zone on touch
+devices, where there is no hover and an invisible strip would only swallow taps - so on a
+phone the hamburger remains the only opener. (2) `aria-hidden`: it is a pointer
+convenience; the hamburger stays the accessible control. (3) The tab overlays the page's
+left content briefly while hovered. (4) The zone intercepts clicks in the 14px at the very
+left edge; page content starts at least ~28px in, so nothing is covered today.
+`prefers-reduced-motion` disables the transitions.
+
+**Verified here:** every edit confirmed present, the removed entry confirmed gone, by grep;
+the sidebar order and the no-duplicate-target property checked by script; brace/paren
+balance (`index.css` 286/286, 340/340; `PortalShell.tsx` 55/55, 58/58;
+`InternalPortal.tsx` 545/545, 535/535); backend compile unaffected; a two-panel mock of the
+hover hint and the in-place sidebar. **Not verified here:** the interaction in a real
+browser - the cursor following, the tab staying hoverable, the click opening the menu -
+which is reasoned from the CSS and React code, not run.
+
+
+## Fifty-ninth item — the pale-edged look applied to every coloured button, not just Validate / Flag
+
+The owner noticed the Activate / Deactivate buttons in the Admin Users and Institutions
+tables did not have the pale-edge-then-colour-then-pale-edge look, and asked for it on
+every clickable button that has a colour.
+
+**Change.** The fifty-fifth item's opt-in `.btn-fade` class was removed (from the two
+buttons and from the stylesheet) and its effect made the default: `button.btn-success`
+and `button.btn-danger` now use `--success-fade` / `--danger-fade` (and the `-hover`
+variants) directly. The green and red themselves are unchanged - they are the centre stop
+(`--color-success`, `--color-danger`; hover centres `#0D9668` / `#DC2626`). Because every
+use goes through those two classes, this covers all 8 green/red buttons in the project:
+Admin Users and Institutions Activate/Deactivate (their classes are chosen by a template
+string, which the stylesheet change reaches without touching the TSX), the Admin password
+reset Approve/Reject, the BOT submission-review Approve/Reject, and Validate / Flag as Bad
+Data.
+
+**How "every" was established, not assumed.** All 46 `<button>` elements were classified
+by the look the stylesheet now gives them: 35 have the pale-edged look (21 generic buttons
+and 6 gold-class buttons that already did, plus these 8); 11 have no fill by design - the
+icon and text controls (hamburger, sidebar close, notification bell, "Mark all as read"),
+the sidebar items (the active one is a gold fade), the three outline `btn-secondary`
+buttons, and one inline-transparent back link. Zero flat filled-colour buttons remain. The
+only other flat green/red backgrounds in the stylesheet are the status badges
+(`.badge-valid` etc.), which are not clickable. Several clickable classes in the
+stylesheet (`.pill-tab`, `.logout-button`, `.quick-action-card`, `.file-button`, ...) are
+used nowhere in the TSX and were left alone.
+
+**Text is dark on all green/red buttons now** (was white): white would vanish on the pale
+ends (1.1-1.2 : 1). Contrast at the coloured centre: green 2.54 -> 6.28 : 1, red 3.76 ->
+4.23 : 1 (still under the 4.5 : 1 guideline for small text, though better than white).
+
+**Left as they are, on purpose:** the outline `btn-secondary` buttons (no fill, so no
+colour to fade); the dark "Menu" tab of the left-edge opener (fiftieth-eighth item) - it
+is a filled, clickable element, but white text on a fade would be unreadable at its ends,
+and it is a navigation aid rather than an action button; say if it should be included.
+
+**Verified here:** the CSS and TSX searched to confirm no `btn-fade` remains and that
+every variable the rules use is defined; the 46-button classification above; brace/paren
+balance (`index.css` 282/282, 338/338; `InternalPortal.tsx` 545/545, 535/535); backend
+compile unaffected; a mock of the Admin tables and the Approve/Reject buttons. **Not
+verified here:** the real stylesheet in a real browser.
