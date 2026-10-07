@@ -94,10 +94,68 @@ class User(Base):
 
     institution = relationship("Institution", back_populates="users")
 
+    __table_args__ = (
+        # Tenant isolation depends on every institution user belonging to an institution (BR-15). The reverse
+        # direction is deliberately NOT enforced: the demonstration seed attaches the administrator and the
+        # BOT analyst to the BOT institution record, and an existing database holds those rows.
+        CheckConstraint("role <> 'INSTITUTION_USER' OR institution_id IS NOT NULL", name="ck_users_institution_user_has_institution"),
+    )
+
 
 # ---------------------------------------------------------------------------
 # REFRESH TOKENS (Module: session security)
 # ---------------------------------------------------------------------------
+
+class ApiClient(Base):
+    """
+    A credential for ONE external system (a QGIS or ArcGIS workstation, TMA, PMO, BSIS, RTIS ...) that reads
+    approved data over the integration endpoints without a person signing in.
+
+    The key itself is shown once, when it is created, and is never stored: only its SHA-256 hash is (the key is
+    a long random secret, so a fast hash is right, as for refresh tokens). `key_prefix` is the public part that
+    identifies the row, so a lookup never has to compare against every hash. A key always expires, and
+    revoking it (revoked_at) cuts access at once. It is created by a BOT analyst - the person who is already
+    allowed to read this data - never by the System Administrator, who may not read it; the administrator may
+    list and revoke keys, as an emergency control.
+    """
+    __tablename__ = "api_clients"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    name = Column(String(120), nullable=False)             # which system or workstation this key belongs to
+    description = Column(String(500), nullable=True)
+    key_prefix = Column(String(16), nullable=False)
+    key_hash = Column(String(64), nullable=False)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    revoked_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
+    # What the key may do - exactly one thing, never both: READ (approved data), or INGEST_TMA / INGEST_PMO
+    # (send climate files, nothing else). A key that can send cannot read, and the reverse.
+    scope = Column(String(20), nullable=False, default="READ", server_default="READ")
+    allowed_networks = Column(String(500), nullable=True)   # optional list of addresses or networks the key may be used from; NULL = any
+
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
+    revoked_by = relationship("User", foreign_keys=[revoked_by_user_id])
+
+    __table_args__ = (
+        Index("uq_api_clients_key_prefix", "key_prefix", unique=True),
+        # Two live keys may not share a name (it is how people tell them apart); a revoked name can be reused.
+        Index(
+            "uq_api_clients_active_name", "name",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+            sqlite_where=text("revoked_at IS NULL"),
+        ),
+        CheckConstraint("expires_at > created_at", name="ck_api_clients_expiry_after_creation"),
+        CheckConstraint("length(trim(name)) > 0", name="ck_api_clients_name_not_blank"),
+        CheckConstraint("length(key_hash) = 64", name="ck_api_clients_key_hash_length"),
+        CheckConstraint("revoked_by_user_id IS NULL OR revoked_at IS NOT NULL", name="ck_api_clients_revoker_needs_revocation"),
+        CheckConstraint("scope IN ('READ', 'INGEST_TMA', 'INGEST_PMO')", name="ck_api_clients_scope_valid"),
+        CheckConstraint("allowed_networks IS NULL OR length(trim(allowed_networks)) > 0", name="ck_api_clients_allowed_networks_not_blank"),
+    )
+
 
 class RefreshToken(Base):
     """
@@ -175,6 +233,10 @@ class Submission(Base):
         ),
         CheckConstraint("length(reporting_period) = 7 AND substr(reporting_period, 5, 2) = '-Q' AND substr(reporting_period, 7, 1) IN ('1','2','3','4')", name="ck_submissions_reporting_period_format"),
         CheckConstraint("version_number >= 1", name="ck_submissions_version_number_positive"),
+        # Workflow rules that were enforced by the application only (BR-03 and BR-05/06). Only a VALID or
+        # APPROVED submission can be the current one; and the reviewer is never the person who uploaded it.
+        CheckConstraint("NOT is_current OR status IN ('VALID', 'APPROVED')", name="ck_submissions_current_only_valid_or_approved"),
+        CheckConstraint("reviewed_by_user_id IS NULL OR submitted_by_user_id IS NULL OR reviewed_by_user_id <> submitted_by_user_id", name="ck_submissions_reviewer_not_submitter"),
         CheckConstraint("valid_records >= 0 AND invalid_records >= 0 AND total_records >= 0 AND valid_records + invalid_records <= total_records", name="ck_submissions_record_counts_consistent"),
     )
 
@@ -532,6 +594,8 @@ class ClimateIngestionBatch(Base):
     dataset_version = Column(String(50), nullable=True)
     file_name = Column(String(500), nullable=True)
     uploaded_by_user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    # Set instead of uploaded_by_user_id when the batch arrived with an API key (see ApiClient): which key delivered it.
+    uploaded_by_api_client_id = Column(String, ForeignKey("api_clients.id"), nullable=True, index=True)
 
     records_received = Column(Integer, default=0, nullable=False)
     records_accepted = Column(Integer, default=0, nullable=False)
@@ -547,6 +611,8 @@ class ClimateIngestionBatch(Base):
 
     __table_args__ = (
         Index("ix_climate_ingestion_batches_source_created", "source", "created_at"),
+        # A batch is uploaded by a person or delivered by a key, never both.
+        CheckConstraint("uploaded_by_user_id IS NULL OR uploaded_by_api_client_id IS NULL", name="ck_climate_ingestion_batches_one_uploader"),
     )
 
 

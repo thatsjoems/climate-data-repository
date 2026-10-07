@@ -82,6 +82,10 @@ success is not the same as scientific validation. A human QC step (promoting
 selected records to `VALIDATED`, or marking suspect ones `FLAGGED`) is not
 yet built as a UI action; the field exists and is ready for that workflow.
 
+## Delivery with an API key (a channel, not an agreed TMA interface)
+
+A BOT analyst can issue a key of type INGEST_TMA or INGEST_PMO (Integration Access, see INTEGRATION_ACCESS.md). A system holding it sends the same file to `POST /api/integration/climate-data`. The validation is the same code as the manual upload (`climate_upload_service.py`); the rows are stored UNVALIDATED with the label `API_KEY_TMA` or `API_KEY_PMO`; the batch records the key that delivered it. This does **not** make TMA or PMO a verified source: the label says the file came through that channel, and neither organisation has agreed an interface. What it provides is a ready, audited, read-nothing, write-only-this door that BOT can open to them, or use for its own scheduled job.
+
 ## What is explicitly NOT done, and why
 
 - **No TMA API client.** TMA has not published or agreed on an API. Building

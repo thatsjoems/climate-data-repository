@@ -27,8 +27,21 @@ from sqlalchemy import create_engine, inspect  # noqa: E402
 from app.core.config import settings  # noqa: E402
 
 EXPECTED_CHECK_CONSTRAINTS = {
-    "submissions": {"ck_submissions_reporting_period_format"},
+    "api_clients": {
+        "ck_api_clients_expiry_after_creation", "ck_api_clients_name_not_blank",
+        "ck_api_clients_key_hash_length", "ck_api_clients_revoker_needs_revocation", "ck_api_clients_scope_valid", "ck_api_clients_allowed_networks_not_blank",
+    },
+    "climate_ingestion_batches": {"ck_climate_ingestion_batches_one_uploader"},
+    "users": {"ck_users_institution_user_has_institution"},
+    "submissions": {
+        "ck_submissions_reporting_period_format",
+        "ck_submissions_version_number_positive",
+        "ck_submissions_record_counts_consistent",
+        "ck_submissions_current_only_valid_or_approved",
+        "ck_submissions_reviewer_not_submitter",
+    },
     "climate_records": {
+        "ck_climate_records_reporting_period_format",
         "ck_climate_records_hazard_severity", "ck_climate_records_period_type",
         "ck_climate_records_quality_flag", "ck_climate_records_avg_temperature_plausible",
         "ck_climate_records_latitude", "ck_climate_records_longitude",
@@ -43,13 +56,15 @@ EXPECTED_CHECK_CONSTRAINTS = {
         "ck_submission_records_collateral_longitude", "ck_submission_records_collateral_value_nonnegative",
         "ck_submission_records_insurance_nonnegative", "ck_submission_records_loan_amount_nonnegative",
         "ck_submission_records_loan_latitude", "ck_submission_records_loan_longitude",
-        "ck_submission_records_outstanding_nonnegative",
+        "ck_submission_records_outstanding_nonnegative", "ck_submission_records_outstanding_le_loan",
     },
 }
 
 EXPECTED_UNIQUE_INDEXES = {
+    "api_clients": {"uq_api_clients_key_prefix", "uq_api_clients_active_name"},
     "climate_records": {"uq_climate_observation_source_identity", "uq_climate_observation_station_identity"},
     "submissions": {"uq_submissions_one_current_per_institution_period"},
+    "submission_records": {"uq_submission_records_submission_loan"},
 }
 
 EXPECTED_COLUMNS = {
@@ -86,6 +101,15 @@ def main() -> int:
         for name in sorted(gap):
             missing.append(f"Column '{name}' missing on table '{table}'")
 
+    unvalidated = []
+    if engine.dialect.name == "postgresql":
+        with engine.connect() as conn:
+            unvalidated = [
+                row[0] for row in conn.exec_driver_sql(
+                    "SELECT conname FROM pg_constraint WHERE contype = 'c' AND NOT convalidated ORDER BY conname"
+                )
+            ]
+
     total_expected = (
         sum(len(v) for v in EXPECTED_CHECK_CONSTRAINTS.values())
         + sum(len(v) for v in EXPECTED_UNIQUE_INDEXES.values())
@@ -101,6 +125,12 @@ def main() -> int:
         return 1
 
     print(f"OK: all {total_expected} expected CHECK constraints and unique indexes are present on the real database.")
+    if unvalidated:
+        print("\nWARNING: these CHECK constraints exist and are enforced for new rows, but were added NOT VALID")
+        print("because older rows break them. Find and fix those rows, then run for each:")
+        print("  ALTER TABLE <table> VALIDATE CONSTRAINT <name>;")
+        for name in unvalidated:
+            print(f"  - {name}")
     return 0
 
 

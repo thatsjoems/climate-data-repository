@@ -168,11 +168,13 @@ export default function HazardMap({
   filterRegion,
   filterInstitutionId,
   filterReportingPeriod,
+  filterHazardType,
 }: {
   points: RegionMapPoint[]
   filterRegion?: string
   filterInstitutionId?: string
   filterReportingPeriod?: string
+  filterHazardType?: string
 }) {
   const [hazardChoice, setHazardChoice] = useState<string>('')
   const [financialChoice, setFinancialChoice] = useState<string>('')
@@ -187,6 +189,15 @@ export default function HazardMap({
   // selected region; this is a second, separate fetch specifically for the
   // hazard surface's anchor coordinates.
   const [allRegionPoints, setAllRegionPoints] = useState<RegionMapPoint[]>([])
+
+  // The hazard chosen in Dashboard Filters drives this map's hazard layer, so the two
+  // controls cannot disagree: choosing Flood there draws the Flood layer here. "None"
+  // (no hazard recorded) clears the layer. Clearing the filter leaves the analyst's own
+  // choice of layer alone.
+  useEffect(() => {
+    if (!filterHazardType) return
+    setHazardChoice(HAZARD_OPTIONS.includes(filterHazardType) ? filterHazardType : '')
+  }, [filterHazardType])
 
   useEffect(() => {
     if (!hazardChoice) return

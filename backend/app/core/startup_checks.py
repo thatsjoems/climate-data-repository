@@ -36,6 +36,17 @@ def insecure_secret_key_reason(secret_key: Optional[str]) -> Optional[str]:
     return None
 
 
+def api_docs_urls(environment: Optional[str]) -> dict:
+    """
+    Where FastAPI serves its interactive API documentation. In production it is not served at all:
+    it lists every endpoint and parameter to anyone who can reach the server. Development and
+    training keep it (/docs), and the endpoint catalogue is in the handover documents.
+    """
+    if is_production(environment):
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+
+
 def is_production(environment: Optional[str]) -> bool:
     """Case- and whitespace-insensitive, so 'Production ' cannot bypass the checks."""
     return (environment or "").strip().lower() == "production"

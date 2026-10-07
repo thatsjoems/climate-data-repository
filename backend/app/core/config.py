@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Login brute-force protection (Module A: secure authentication).
     MAX_FAILED_LOGIN_ATTEMPTS: int = 5
     LOGIN_LOCKOUT_MINUTES: int = 15
+    # Networks of the reverse proxy in front of the backend (comma-separated). Only a request that comes from one of them has
+    # its X-Forwarded-For believed (see app/core/client_ip.py). Empty = no proxy: the connection address is used.
+    TRUSTED_PROXIES: str = ""
 
     # Set to "production" to make the app refuse to start with an insecure
     # default SECRET_KEY - see main.py startup check.

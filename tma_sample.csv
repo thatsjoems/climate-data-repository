@@ -1,0 +1,4 @@
+region,district,year,month,rainfall_mm,avg_temperature_c,hazard_type,station_id,source_record_id
+Dodoma,,2026,9,45.2,24.1,Drought,TMA-DOD-01,T2026-09-001
+Arusha,,2026,9,80.5,19.4,Flood,TMA-ARU-01,T2026-09-002
+Nowhere,,2026,9,10,20,,TMA-XXX-01,T2026-09-003

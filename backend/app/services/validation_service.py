@@ -31,6 +31,12 @@ GPS_MISMATCH_WARNING_KM = 300
 HEADER_ROW_IN_TEMPLATE = 9
 EXAMPLE_ROW_IN_TEMPLATE = 10
 
+# The money columns are Numeric(20, 2): 18 digits before the decimal point. PostgreSQL
+# raises "numeric field overflow" - an unhandled server error, not a validation message -
+# for anything larger, so a bigger figure is reported here instead (SQLite does not
+# enforce this, which is why it is invisible to the SQLite-based test suite).
+MAX_TZS_AMOUNT = 10**18 - 1
+
 
 class ValidationIssue:
     def __init__(self, row_number, column_name, description, severity="ERROR"):
@@ -216,6 +222,18 @@ def validate_excel_file(
         if lon == "INVALID":
             issues.append(ValidationIssue(row_number, lon_field, f"{label_prefix} longitude is not a valid number"))
             lon = None
+        # The database rejects out-of-range coordinates (CHECK constraints) and rejects the
+        # whole INSERT, not just this row. So an impossible coordinate is reported here and
+        # NOT stored: otherwise a row the reviewer should see flagged would instead turn the
+        # entire upload into an unexplained HTTP 409.
+        if lat is not None and not (-90 <= lat <= 90):
+            issues.append(ValidationIssue(row_number, lat_field, f"{label_prefix} latitude must be between -90 and 90"))
+            lat = None
+            ok = False
+        if lon is not None and not (-180 <= lon <= 180):
+            issues.append(ValidationIssue(row_number, lon_field, f"{label_prefix} longitude must be between -180 and 180"))
+            lon = None
+            ok = False
         if lat is not None and lon is not None and region and geo.is_valid_region(region):
             centroid = get_region_coordinates(region)
             if centroid:
@@ -287,6 +305,15 @@ def validate_excel_file(
         if turnover == "INVALID":
             issues.append(ValidationIssue(row_number, "annual_turnover_tzs", "Annual turnover is not a valid number", severity="WARNING"))
             turnover = None
+        if isinstance(turnover, float):
+            if turnover < 0:
+                issues.append(ValidationIssue(row_number, "annual_turnover_tzs", "Annual turnover must not be negative"))
+                row_is_valid = False
+                turnover = None   # database CHECK (>= 0) would reject the whole INSERT
+            elif turnover > MAX_TZS_AMOUNT:
+                issues.append(ValidationIssue(row_number, "annual_turnover_tzs", f"Annual turnover is too large (maximum {MAX_TZS_AMOUNT:,})"))
+                row_is_valid = False
+                turnover = None
         record["annual_turnover_tzs"] = turnover
 
         record["disbursement_date"] = _clean_str(get(row, "disbursement_date")) or None
@@ -323,9 +350,39 @@ def validate_excel_file(
             elif required_field and v <= 0:
                 issues.append(ValidationIssue(row_number, amount_field, f"{dict(COLUMNS)[amount_field]} must be greater than 0"))
                 row_is_valid = False
+                if v < 0:
+                    v = None   # the database CHECK (>= 0) would reject the whole INSERT - report it, do not store it
+            elif v < 0:
+                issues.append(ValidationIssue(row_number, amount_field, f"{dict(COLUMNS)[amount_field]} must not be negative"))
+                row_is_valid = False
+                v = None       # same reason as above
+            if isinstance(v, float) and v > MAX_TZS_AMOUNT:
+                issues.append(ValidationIssue(row_number, amount_field, f"{dict(COLUMNS)[amount_field]} is too large (maximum {MAX_TZS_AMOUNT:,})"))
+                row_is_valid = False
+                v = None       # would overflow the Numeric(20, 2) column
             record[amount_field] = v
 
+        # A loan's outstanding principal cannot exceed what was disbursed. Previously nothing
+        # checked this, so such a row was accepted as VALID; the database rule for it
+        # (ck_submission_records_outstanding_le_loan) is now enforced, so it must be caught
+        # here first - the dubious outstanding figure is reported in the message and not
+        # stored, so the row is still persisted for the reviewer (FR-SUB-07) instead of the
+        # INSERT failing.
+        loan_amt = record.get("loan_amount_tzs")
+        out_amt = record.get("outstanding_principal_tzs")
+        if loan_amt is not None and out_amt is not None and out_amt > loan_amt:
+            issues.append(ValidationIssue(
+                row_number, "outstanding_principal_tzs",
+                f"Outstanding principal ({out_amt:,.2f}) cannot exceed the loan amount ({loan_amt:,.2f})",
+            ))
+            row_is_valid = False
+            record["outstanding_principal_tzs"] = None
+
         interest = _clean_float(get(row, "annual_interest_rate"))
+        if interest not in (None, "INVALID") and not (0 <= interest <= 100):
+            issues.append(ValidationIssue(row_number, "annual_interest_rate", "Annual interest rate must be between 0 and 100 (percent)"))
+            row_is_valid = False
+            interest = None   # database CHECK (0-100) would reject the whole INSERT
         record["annual_interest_rate"] = None if interest == "INVALID" else interest
 
         val, ok = validate_dropdown(row, "loan_type", LOAN_TYPES, row_number, required=False, severity="WARNING")

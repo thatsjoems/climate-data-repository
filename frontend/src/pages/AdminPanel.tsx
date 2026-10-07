@@ -1,6 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react'
 import apiClient from '../api/client'
 import PortalShell, { SidebarItem, PlatformStatus } from '../components/PortalShell'
+import IntegrationAccess from '../components/IntegrationAccess'
 
 interface UserItem {
   id: string
@@ -28,6 +29,14 @@ interface PasswordResetItem {
   created_at: string
 }
 
+interface AuditFilters { action: string; entity: string; user: string }
+
+interface AuditFilterOptions {
+  actions: string[]
+  entity_types: string[]
+  users: { id: string; username: string; full_name: string }[]
+}
+
 interface AuditLogItem {
   id: string
   user_id: string | null
@@ -53,6 +62,9 @@ export default function AdminPanel() {
   const [auditTotal, setAuditTotal] = useState(0)
   const [auditOffset, setAuditOffset] = useState(0)
   const [auditActionFilter, setAuditActionFilter] = useState('')
+  const [auditEntityFilter, setAuditEntityFilter] = useState('')
+  const [auditUserFilter, setAuditUserFilter] = useState('')
+  const [auditOptions, setAuditOptions] = useState<AuditFilterOptions>({ actions: [], entity_types: [], users: [] })
   const AUDIT_PAGE_SIZE = 25
 
   async function loadAll() {
@@ -65,11 +77,32 @@ export default function AdminPanel() {
     setInstitutions(instRes.data)
     setPasswordResets(resetRes.data)
     loadAuditLogs(0)
+    loadAuditOptions()
   }
 
-  async function loadAuditLogs(offset: number) {
-    const params = new URLSearchParams({ limit: String(AUDIT_PAGE_SIZE), offset: String(offset) })
-    if (auditActionFilter) params.set('action', auditActionFilter)
+  function auditFilterParams(f: AuditFilters, params: URLSearchParams) {
+    if (f.action) params.set('action', f.action)
+    if (f.entity) params.set('entity_type', f.entity)
+    if (f.user) params.set('user_id', f.user)
+    return params
+  }
+
+  // The drop-downs offer only values that occur in the audit log, so a filter can never match nothing by typo.
+  async function loadAuditOptions() {
+    const res = await apiClient.get('/audit-logs/filter-options')
+    setAuditOptions(res.data)
+  }
+
+  function changeAuditFilter(next: Partial<AuditFilters>) {
+    const f: AuditFilters = { action: auditActionFilter, entity: auditEntityFilter, user: auditUserFilter, ...next }
+    setAuditActionFilter(f.action)
+    setAuditEntityFilter(f.entity)
+    setAuditUserFilter(f.user)
+    loadAuditLogs(0, f)
+  }
+
+  async function loadAuditLogs(offset: number, f: AuditFilters = { action: auditActionFilter, entity: auditEntityFilter, user: auditUserFilter }) {
+    const params = auditFilterParams(f, new URLSearchParams({ limit: String(AUDIT_PAGE_SIZE), offset: String(offset) }))
     const res = await apiClient.get(`/audit-logs?${params.toString()}`)
     setAuditLogs(offset === 0 ? res.data.items : [...auditLogs, ...res.data.items])
     setAuditTotal(res.data.total)
@@ -77,8 +110,7 @@ export default function AdminPanel() {
   }
 
   async function handleExportAuditLog() {
-    const params = new URLSearchParams()
-    if (auditActionFilter) params.set('action', auditActionFilter)
+    const params = auditFilterParams({ action: auditActionFilter, entity: auditEntityFilter, user: auditUserFilter }, new URLSearchParams())
     const res = await apiClient.get(`/audit-logs/export.csv?${params.toString()}`, { responseType: 'blob' })
     const url = window.URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
     const link = document.createElement('a')
@@ -193,6 +225,7 @@ export default function AdminPanel() {
     { key: 'institutions', icon: '🏢', label: 'Institutions', onClick: () => scrollTo('institutions-card') },
     { key: 'users', icon: '👥', label: 'Users', onClick: () => scrollTo('users-card') },
     { key: 'audit', icon: '🧾', label: 'Audit Log', onClick: () => scrollTo('audit-card') },
+    { key: 'integration', icon: '🔌', label: 'Integration Access', onClick: () => scrollTo('integration-section') },
   ]
 
   return (
@@ -387,28 +420,47 @@ export default function AdminPanel() {
       <section className="card">
         <h2 id="audit-card">🧾 Audit Log</h2>
         <p className="note">System-wide record of important actions, for accountability and oversight.</p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center', marginBottom: '0.5rem' }}>
-          <input
-            placeholder="Filter by action (e.g. LOGIN)"
-            value={auditActionFilter}
-            onChange={(e) => setAuditActionFilter(e.target.value)}
-            style={{ maxWidth: 260 }}
-          />
-          <button onClick={() => loadAuditLogs(0)}>Apply Filter</button>
-          <button onClick={handleExportAuditLog}>Export All (CSV)</button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.78rem' }}>
+            Action
+            <select value={auditActionFilter} onChange={(e) => changeAuditFilter({ action: e.target.value })} style={{ minWidth: 190 }}>
+              <option value="">All actions</option>
+              {auditOptions.actions.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.78rem' }}>
+            Entity type
+            <select value={auditEntityFilter} onChange={(e) => changeAuditFilter({ entity: e.target.value })} style={{ minWidth: 160 }}>
+              <option value="">All entity types</option>
+              {auditOptions.entity_types.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.78rem' }}>
+            User
+            <select value={auditUserFilter} onChange={(e) => changeAuditFilter({ user: e.target.value })} style={{ minWidth: 200 }}>
+              <option value="">All users</option>
+              {auditOptions.users.map((u) => <option key={u.id} value={u.id}>{u.username} ({u.full_name})</option>)}
+            </select>
+          </label>
+          <button className="btn-secondary" disabled={!auditActionFilter && !auditEntityFilter && !auditUserFilter} onClick={() => changeAuditFilter({ action: '', entity: '', user: '' })}>Clear Filters</button>
+          <button onClick={handleExportAuditLog}>
+            {auditActionFilter || auditEntityFilter || auditUserFilter ? 'Export Filtered (CSV)' : 'Export All (CSV)'}
+          </button>
         </div>
+        <p className="note" style={{ marginTop: 0 }}>Showing {auditLogs.length.toLocaleString()} of {auditTotal.toLocaleString()} matching entries.</p>
         <table>
-          <thead><tr><th>When</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead>
+          <thead><tr><th>When</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead>
           <tbody>
             {auditLogs.map((log) => (
               <tr key={log.id}>
                 <td>{new Date(log.created_at).toLocaleString()}</td>
+                <td>{log.user_id ? (auditOptions.users.find((u) => u.id === log.user_id)?.username ?? log.user_id.slice(0, 8)) : 'system'}</td>
                 <td>{log.action}</td>
                 <td>{log.entity_type || '-'}</td>
                 <td>{log.details || '-'}</td>
               </tr>
             ))}
-            {auditLogs.length === 0 && <tr><td colSpan={4}>No audit entries yet.</td></tr>}
+            {auditLogs.length === 0 && <tr><td colSpan={5}>No audit entries match.</td></tr>}
           </tbody>
         </table>
         {auditOffset + AUDIT_PAGE_SIZE < auditTotal && (
@@ -417,6 +469,7 @@ export default function AdminPanel() {
           </button>
         )}
       </section>
+      <IntegrationAccess canCreate={false} />
     </PortalShell>
   )
 }

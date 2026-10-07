@@ -4,6 +4,11 @@ import { useAuth } from '../context/AuthContext'
 import PortalShell, { SidebarItem, PlatformStatus } from '../components/PortalShell'
 import HazardMap, { RegionMapPoint } from '../components/HazardMap'
 import { HAZARD_COLORS, HAZARD_NONE_COLOR } from '../data/hazardColors'
+import PagerBar from '../components/PagerBar'
+import IntegrationAccess from '../components/IntegrationAccess'
+
+// Rows and findings of a submission are shown this many at a time (see PagerBar).
+const DETAIL_PAGE = 50
 
 interface KPI {
   total_institutions: number
@@ -55,7 +60,24 @@ interface HazardExposure {
   region: string
   hazard_type: string | null
   exposed_loan_amount_tzs: number
+  exposed_collateral_value_tzs?: number
   record_count: number
+}
+
+interface KpiSource {
+  submission_id: string
+  institution_id: string
+  institution_name: string
+  reporting_period: string
+  file_name: string
+  version_number: number
+  total_records: number
+  valid_records: number
+  invalid_records: number
+  contributing_records: number
+  loan_total_tzs: number
+  collateral_total_tzs: number
+  row_validity_pct: number | null
 }
 
 interface CombinedExposure {
@@ -215,13 +237,20 @@ export default function InternalPortal() {
   const [filterInstitutionId, setFilterInstitutionId] = useState('')
   const [filterRegion, setFilterRegion] = useState('')
   const [filterReportingPeriod, setFilterReportingPeriod] = useState('')
+  const [filterHazardType, setFilterHazardType] = useState('')
+  const [showKpiSources, setShowKpiSources] = useState(false)
+  const [kpiSources, setKpiSources] = useState<KpiSource[]>([])
+  const [kpiSourcesError, setKpiSourcesError] = useState<string | null>(null)
+  const [summaryText, setSummaryText] = useState('')
+  const [summaryCopied, setSummaryCopied] = useState(false)
+  const [summaryOpen, setSummaryOpen] = useState(false)
   const [unvalidatedGroups, setUnvalidatedGroups] = useState<{ region: string; reporting_period: string; count: number }[]>([])
   const [qcMessage, setQcMessage] = useState<string | null>(null)
   const [qcReasons, setQcReasons] = useState<Record<string, string>>({})
   const [mapPoints, setMapPoints] = useState<RegionMapPoint[]>([])
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [notesById, setNotesById] = useState<Record<string, string>>({})
-  const [selectedSubmission, setSelectedSubmission] = useState<{ submission: Submission; errors: ValidationErrorItem[]; records: SubmissionRecordItem[] } | null>(null)
+  const [selectedSubmission, setSelectedSubmission] = useState<{ submission: Submission; errors: ValidationErrorItem[]; records: SubmissionRecordItem[]; recordsTotal: number; errorsTotal: number; recordOffset: number; errorOffset: number } | null>(null)
   const [reportGenerating, setReportGenerating] = useState(false)
   const [reportMessage, setReportMessage] = useState<string | null>(null)
   const [riskAdvisories, setRiskAdvisories] = useState<RiskAdvisory[]>([])
@@ -326,6 +355,7 @@ export default function InternalPortal() {
     if (filterInstitutionId) params.set('filter_institution_id', filterInstitutionId)
     if (filterRegion) params.set('filter_region', filterRegion)
     if (filterReportingPeriod) params.set('filter_reporting_period', filterReportingPeriod)
+    if (filterHazardType) params.set('filter_hazard_type', filterHazardType)
     for (const [k, v] of Object.entries(extra)) params.set(k, String(v))
     return params.toString()
   }
@@ -371,14 +401,114 @@ export default function InternalPortal() {
     setHazardExposure(hazardRes.data)
     setCombinedExposure(combinedRes.data)
     setMapPoints(mapRes.data)
+    if (showKpiSources) loadKpiSources()
+  }
+
+  // Data lineage: the current APPROVED submissions behind the Summary Figures (same filters; the
+  // hazard filter does not apply to these totals).
+  async function loadKpiSources(query?: string) {
+    setKpiSourcesError(null)
+    try {
+      const res = await apiClient.get(`/analytics/kpi-sources?${query !== undefined ? query : buildFilterQuery()}`)
+      setKpiSources(res.data)
+    } catch (err: any) {
+      setKpiSources([])
+      setKpiSourcesError('Could not load the sources of these figures. Please try again.')
+    }
+  }
+
+  function toggleKpiSources() {
+    const next = !showKpiSources
+    setShowKpiSources(next)
+    if (next) loadKpiSources()
+  }
+
+  async function openSourceRows(submissionId: string) {
+    await viewSubmissionDetails(submissionId)
+    setTimeout(() => document.getElementById('submission-details')?.scrollIntoView({ behavior: 'smooth' }), 150)
+  }
+
+  // Hide the summary draft again (it is never saved, so closing discards it).
+  function closeSummary() {
+    setSummaryOpen(false)
+    setSummaryCopied(false)
+  }
+
+  // A draft supervisory summary built only from the approved figures currently on screen. Every
+  // sentence states a measured value; nothing is estimated, compared with other periods, or rated.
+  function buildSupervisorySummary(): string {
+    if (!kpi) return 'No approved figures are available yet, so no summary can be generated.'
+    const money = (n: number) => `TZS ${Math.round(n).toLocaleString('en-US')}`
+    const pct = (part: number, whole: number) => (whole > 0 ? `${Math.round((1000 * part) / whole) / 10}%` : '0%')
+    const scopeParts: string[] = []
+    if (filterInstitutionId) {
+      const inst = institutions.find((i) => i.id === filterInstitutionId)
+      scopeParts.push(inst ? inst.name : 'one institution')
+    }
+    if (filterRegion) scopeParts.push(`region ${filterRegion}`)
+    if (filterReportingPeriod) scopeParts.push(`reporting period ${filterReportingPeriod}`)
+    if (filterHazardType) scopeParts.push(`hazard ${filterHazardType === 'None' ? 'none recorded' : filterHazardType} (hazard sections only)`)
+    const lines: string[] = []
+    lines.push(scopeParts.length ? `Scope: ${scopeParts.join('; ')}.` : 'Scope: sector-wide, all approved data.')
+    lines.push(`Reported exposure: ${kpi.approved_submissions} approved submission(s) from ${kpi.total_institutions} reporting institution(s) show total loan exposure of ${money(kpi.total_loan_exposure_tzs)} against collateral valued at ${money(kpi.total_collateral_value_tzs)}.`)
+
+    const totalsByHazard: Record<string, number> = {}
+    let hazardTotal = 0
+    for (const h of hazardExposure) {
+      const key = h.hazard_type || 'None'
+      totalsByHazard[key] = (totalsByHazard[key] || 0) + h.exposed_loan_amount_tzs
+      hazardTotal += h.exposed_loan_amount_tzs
+    }
+    const recorded = Object.entries(totalsByHazard).filter(([k]) => k !== 'None').sort((a, b) => b[1] - a[1])
+    if (recorded.length > 0 && hazardTotal > 0) {
+      const topHazard = recorded[0][0]
+      const topValue = recorded[0][1]
+      const regionsForTop = new Set(hazardExposure.filter((h) => h.hazard_type === topHazard).map((h) => h.region)).size
+      lines.push(`Hazard pattern: ${topHazard} is the most frequently recorded hazard for ${pct(topValue, hazardTotal)} of the loan exposure shown (${regionsForTop} region(s)). This describes a regional pattern, not the hazard at any individual loan's location.`)
+      const noneValue = totalsByHazard['None'] || 0
+      if (noneValue > 0) lines.push(`No hazard is recorded for ${pct(noneValue, hazardTotal)} of the exposure shown (regions or periods without climate readings).`)
+    } else {
+      lines.push('Hazard pattern: no hazard is recorded for the exposure shown.')
+    }
+
+    const byRegion: Record<string, number> = {}
+    let regionTotal = 0
+    for (const c of combinedExposure) {
+      byRegion[c.region] = (byRegion[c.region] || 0) + c.total_loan_exposure_tzs
+      regionTotal += c.total_loan_exposure_tzs
+    }
+    const regionsSorted = Object.entries(byRegion).sort((a, b) => b[1] - a[1])
+    if (regionsSorted.length > 0 && regionTotal > 0) {
+      lines.push(`Concentration: ${regionsSorted[0][0]} holds the largest share of the exposure shown, ${pct(regionsSorted[0][1], regionTotal)} (${money(regionsSorted[0][1])}).`)
+    }
+
+    if (combinedExposure.length > 0) {
+      const validated = combinedExposure.filter((c) => c.climate_data_quality === 'VALIDATED').length
+      const noClimate = combinedExposure.filter((c) => !c.climate_data_quality).length
+      lines.push(`Climate data: ${validated} of ${combinedExposure.length} region-period rows rest on fully VALIDATED readings; ${combinedExposure.length - validated - noClimate} include unvalidated or synthetic readings; ${noClimate} have no climate readings (left blank, never estimated).`)
+    }
+
+    lines.push(`Submission tracking: ${kpi.valid_submissions} awaiting review, ${kpi.invalid_submissions} invalid and ${kpi.rejected_submissions} rejected (none of these is included in any figure above).`)
+    lines.push('Basis: BOT-approved submissions only. This draft was generated from the figures shown on the dashboard; the analyst must review and edit it before use.')
+    return lines.join('\n\n')
+  }
+
+  async function copySummary() {
+    try {
+      await navigator.clipboard.writeText(summaryText)
+      setSummaryCopied(true)
+    } catch (err: any) {
+      setSummaryCopied(false)
+    }
   }
 
   function resetDashboardFilters() {
-    setFilterInstitutionId(''); setFilterRegion(''); setFilterReportingPeriod('')
+    setFilterInstitutionId(''); setFilterRegion(''); setFilterReportingPeriod(''); setFilterHazardType('')
     apiClient.get(`/analytics/kpi-summary?validated_only=${validatedOnly}`).then((r) => setKpi(r.data))
     apiClient.get(`/analytics/hazard-exposure?validated_only=${validatedOnly}`).then((r) => setHazardExposure(r.data))
     apiClient.get(`/analytics/combined-climate-financial-exposure?validated_only=${validatedOnly}`).then((r) => setCombinedExposure(r.data))
     apiClient.get(`/analytics/map-points?validated_only=${validatedOnly}`).then((r) => setMapPoints(r.data))
+    if (showKpiSources) loadKpiSources('')
   }
 
   async function handleCreateAdvisory(e: FormEvent) {
@@ -497,13 +627,63 @@ export default function InternalPortal() {
   // to close - a technically-VALID submission is not the same claim as an
   // ANALYST-REVIEWED one, and until this button existed, the checker had no
   // way to actually check the content, only trust the machine's own pass/fail.
+  // A submission can hold tens of thousands of rows and findings. Drawing them all at once froze the
+  // browser ("Page unresponsive"), so the server sends one page of each and the panel pages through them.
+  async function loadSubmissionDetails(submissionId: string, recordOffset = 0, errorOffset = 0) {
+    const res = await apiClient.get(`/submissions/${submissionId}`, {
+      params: { record_offset: recordOffset, record_limit: DETAIL_PAGE, error_offset: errorOffset, error_limit: DETAIL_PAGE },
+    })
+    setSelectedSubmission({
+      submission: res.data, errors: res.data.errors, records: res.data.records,
+      recordsTotal: res.data.records_total ?? res.data.records.length, errorsTotal: res.data.errors_total ?? res.data.errors.length,
+      recordOffset, errorOffset,
+    })
+  }
+
   async function viewSubmissionDetails(submissionId: string) {
-    const res = await apiClient.get(`/submissions/${submissionId}`)
-    setSelectedSubmission({ submission: res.data, errors: res.data.errors, records: res.data.records })
+    await loadSubmissionDetails(submissionId, 0, 0)
+    // The panel sits lower on the page than the button that opens it: bring it into view.
+    window.setTimeout(() => document.getElementById('submission-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80)
   }
 
   const filteredSubmissions =
     statusFilter === 'ALL' ? submissions : submissions.filter((s) => s.status === statusFilter)
+
+  // Hazard exposure matrix: the Hazard Exposure rows grouped by their dominant recorded hazard.
+  // What the hazard filter means for the headline figures. The four Summary Figures are
+  // deliberately NOT narrowed by hazard (a hazard is recorded per region, so a "flood total"
+  // would be read as loans hit by floods). This line states the narrower number honestly:
+  // exposure in the regions whose dominant recorded hazard is the chosen one.
+  const hazardLabel = filterHazardType === 'None' ? 'no hazard recorded' : filterHazardType
+  const hazardFocus = (() => {
+    if (!filterHazardType) return null
+    const loan = hazardExposure.reduce((acc, h) => acc + h.exposed_loan_amount_tzs, 0)
+    const collateral = hazardExposure.reduce((acc, h) => acc + (h.exposed_collateral_value_tzs || 0), 0)
+    const regions = new Set(hazardExposure.map((h) => h.region)).size
+    const total = kpi ? kpi.total_loan_exposure_tzs : 0
+    const share = total > 0 ? Math.round((1000 * loan) / total) / 10 : 0
+    return { loan, collateral, regions, share }
+  })()
+
+  const hazardMatrix = (() => {
+    const byHazard: Record<string, { loan: number; collateral: number; records: number; regions: Set<string> }> = {}
+    for (const h of hazardExposure) {
+      const key = h.hazard_type || 'None'
+      if (!byHazard[key]) byHazard[key] = { loan: 0, collateral: 0, records: 0, regions: new Set<string>() }
+      byHazard[key].loan += h.exposed_loan_amount_tzs
+      byHazard[key].collateral += h.exposed_collateral_value_tzs || 0
+      byHazard[key].records += h.record_count
+      byHazard[key].regions.add(h.region)
+    }
+    return Object.entries(byHazard)
+      .map(([hazard, v]) => ({ hazard, loan: v.loan, collateral: v.collateral, records: v.records, regions: v.regions.size }))
+      .sort((a, b) => b.loan - a.loan)
+  })()
+
+  const sourcesTotals = kpiSources.reduce(
+    (acc, src) => ({ rows: acc.rows + src.contributing_records, loan: acc.loan + src.loan_total_tzs, collateral: acc.collateral + src.collateral_total_tzs }),
+    { rows: 0, loan: 0, collateral: 0 },
+  )
 
   const statusSegments = kpi ? [
     { label: 'Pending', value: kpi.pending_submissions, color: '#94A3B8' },
@@ -547,6 +727,7 @@ export default function InternalPortal() {
     { key: 'risk', icon: '🧭', label: 'Risk Advisory Reports', onClick: () => scrollTo('risk-advisory-section') },
     { key: 'submissions', icon: '📄', label: 'Submission Status', onClick: () => scrollTo('monitoring-section') },
     { key: 'regional', icon: '🌍', label: 'Exposure by Region', onClick: () => scrollTo('regional-exposure-section') },
+    { key: 'integration', icon: '🔌', label: 'Integration Access', onClick: () => scrollTo('integration-section') },
   ]
 
   return (
@@ -576,6 +757,36 @@ export default function InternalPortal() {
           <button onClick={handleGenerateReportExcel} disabled={reportGenerating}>Generate Summary Report (Excel)</button>
           <button onClick={handleGenerateReportImage} disabled={reportGenerating}>Generate Summary Snapshot (Image)</button>
           <button onClick={handleDownloadCombinedCsv}>Download Combined Exposure (CSV)</button>
+          <button
+            onClick={() => { setSummaryText(buildSupervisorySummary()); setSummaryCopied(false); setSummaryOpen(true) }}
+            style={{ gridColumn: '1 / -1', width: '100%' }}
+          >
+            Generate Supervisory Summary
+          </button>
+        </div>
+        <div>
+          {summaryOpen && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '0.4rem' }}>
+                <p className="note" style={{ margin: 0 }}>
+                  A draft written from the approved figures currently shown on this dashboard. Edit it as needed
+                  before use; it is not saved or sent anywhere, so closing it discards the draft.
+                </p>
+                <button className="btn-secondary btn-sm" onClick={closeSummary} aria-label="Close the supervisory summary">Close</button>
+              </div>
+              <textarea
+                value={summaryText}
+                onChange={(e) => { setSummaryText(e.target.value); setSummaryCopied(false) }}
+                rows={14}
+                style={{ width: '100%' }}
+              />
+              <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <button className="btn-secondary btn-sm" onClick={copySummary}>Copy to clipboard</button>
+                <button className="btn-secondary btn-sm" onClick={closeSummary}>Close</button>
+                {summaryCopied && <span className="note">Copied.</span>}
+              </div>
+            </div>
+          )}
         </div>
         {reportMessage && <div className="alert-info">{reportMessage}</div>}
       </section>
@@ -609,9 +820,21 @@ export default function InternalPortal() {
               {[...new Set([...combinedExposure.map((c) => c.reporting_period), ...submissions.map((s) => s.reporting_period)])].sort().reverse().map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', marginBottom: '0.2rem' }}>Hazard</label>
+            <select value={filterHazardType} onChange={(e) => setFilterHazardType(e.target.value)}>
+              <option value="">All hazards</option>
+              {['Flood', 'Drought', 'Landslide', 'Cyclone', 'None'].map((h) => <option key={h} value={h}>{h === 'None' ? 'None recorded' : h}</option>)}
+            </select>
+          </div>
           <button className="btn-accent" onClick={applyDashboardFilters}>Apply Filters</button>
           <button onClick={resetDashboardFilters}>Reset</button>
         </div>
+        <p className="note" style={{ marginTop: '0.6rem' }}>
+          The Hazard filter keeps the regions whose dominant recorded hazard is the one chosen. It narrows
+          Hazard Exposure, Combined Exposure, the map's region circles and the reports. It does not change
+          the Summary Figures, the hazard surface (which needs every region) or the loan and collateral points.
+        </p>
       </section>
 
       {kpi && (
@@ -651,6 +874,67 @@ export default function InternalPortal() {
               <span className="kpi-number">{kpi.total_submissions}</span>
             </div>
           </div>
+          {hazardFocus && (
+            <div className="alert-info" style={{ gridColumn: '1 / -1' }}>
+              <strong>Hazard focus: {hazardLabel}.</strong>{' '}
+              {hazardFocus.regions === 0
+                ? 'No region has this as its dominant recorded hazard for the current filters. '
+                : `Loan exposure in the ${hazardFocus.regions} region(s) where this is the dominant recorded hazard: ${formatTZS(hazardFocus.loan)} (${hazardFocus.share}% of the total loan value above), with collateral of ${formatTZS(hazardFocus.collateral)}. `}
+              The four figures above are not narrowed by hazard.
+            </div>
+          )}
+          <div style={{ gridColumn: '1 / -1' }}>
+            <button className="btn-secondary btn-sm" onClick={toggleKpiSources}>
+              {showKpiSources ? 'Hide the source of these figures' : 'View the source of these figures'}
+            </button>
+          </div>
+          {showKpiSources && (
+            <div className="card" style={{ gridColumn: '1 / -1', margin: 0 }}>
+              <h3 style={{ fontSize: '0.95rem', marginTop: 0 }}>Where these figures come from</h3>
+              <p className="note">
+                Each row is one APPROVED, current submission that feeds the figures above, under the
+                same institution, region and period filters (the hazard filter does not apply to these
+                totals). "Rows used" counts the valid rows that contribute. Row validity is valid rows
+                divided by all rows in the file - a descriptive ratio, not a risk score. "View rows"
+                opens the submitted rows and loan numbers.
+              </p>
+              {kpiSourcesError && <div className="alert-error">{kpiSourcesError}</div>}
+              {!kpiSourcesError && kpiSources.length === 0 && <p className="note">No approved submission contributes under the current filters.</p>}
+              {kpiSources.length > 0 && (
+                <div style={{ overflowX: 'auto' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Institution</th><th>Period</th><th>File (version)</th><th>Rows used</th>
+                        <th>Loan (TZS)</th><th>Collateral (TZS)</th><th>Row validity</th><th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {kpiSources.map((src) => (
+                        <tr key={src.submission_id}>
+                          <td>{src.institution_name}</td>
+                          <td>{src.reporting_period}</td>
+                          <td>{src.file_name} (v{src.version_number})</td>
+                          <td>{src.contributing_records}</td>
+                          <td>{Math.round(src.loan_total_tzs).toLocaleString('en-US')}</td>
+                          <td>{Math.round(src.collateral_total_tzs).toLocaleString('en-US')}</td>
+                          <td>{src.row_validity_pct === null ? '—' : `${src.row_validity_pct}%`}</td>
+                          <td><button className="btn-sm" onClick={() => openSourceRows(src.submission_id)}>View rows</button></td>
+                        </tr>
+                      ))}
+                      <tr style={{ fontWeight: 700 }}>
+                        <td colSpan={3}>Total of these sources</td>
+                        <td>{sourcesTotals.rows}</td>
+                        <td>{Math.round(sourcesTotals.loan).toLocaleString('en-US')}</td>
+                        <td>{Math.round(sourcesTotals.collateral).toLocaleString('en-US')}</td>
+                        <td colSpan={2}></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </section>
       )}
 
@@ -662,13 +946,31 @@ export default function InternalPortal() {
           precise per-loan mapping will follow once BOT's data template includes coordinates. Click a
           circle for details.
         </p>
-        {mapPoints.length > 0 ? (
-          <HazardMap
-            points={mapPoints}
-            filterRegion={filterRegion}
-            filterInstitutionId={filterInstitutionId}
-            filterReportingPeriod={filterReportingPeriod}
-          />
+        {filterHazardType && (
+          <p className="alert-info">
+            Hazard filter active ({filterHazardType === 'None' ? 'none recorded' : filterHazardType}): the region
+            circles show only regions whose dominant recorded hazard matches. The hazard surface and the loan and
+            collateral points are not narrowed by this filter.
+          </p>
+        )}
+        {mapPoints.length > 0 || filterHazardType ? (
+          <>
+            {filterHazardType && (
+              <p className="alert-info">
+                {mapPoints.length === 0
+                  ? `No region has "${hazardLabel}" as its dominant recorded hazard for the current filters, so no region markers are shown. `
+                  : `Hazard filter on: ${mapPoints.length} region marker(s) where "${hazardLabel}" is the dominant recorded hazard. `}
+                The hazard layer below follows this filter; the hazard surface and the loan and collateral points are not narrowed by hazard.
+              </p>
+            )}
+            <HazardMap
+              points={mapPoints}
+              filterRegion={filterRegion}
+              filterInstitutionId={filterInstitutionId}
+              filterReportingPeriod={filterReportingPeriod}
+              filterHazardType={filterHazardType}
+            />
+          </>
         ) : (
           <div className="placeholder-panel">
             <span className="placeholder-icon">🗺️</span>
@@ -694,6 +996,31 @@ export default function InternalPortal() {
           official/supervisory use; leave unchecked to include SYNTHETIC/UNVALIDATED demo data too)
         </label>
         <PieChart segments={hazardSegments.length ? hazardSegments : [{ label: 'No data yet', value: 1, color: '#EDEBE3' }]} />
+        {hazardMatrix.length > 0 && (
+          <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
+            <h3 style={{ fontSize: '0.9rem', margin: '0 0 0.4rem' }}>Hazard exposure matrix</h3>
+            <table>
+              <thead>
+                <tr><th>Hazard (dominant recorded)</th><th>Loan exposure (TZS)</th><th>Collateral (TZS)</th><th>Records</th><th>Regions</th></tr>
+              </thead>
+              <tbody>
+                {hazardMatrix.map((m) => (
+                  <tr key={m.hazard}>
+                    <td>{m.hazard === 'None' ? 'None recorded' : m.hazard}</td>
+                    <td>{Math.round(m.loan).toLocaleString('en-US')}</td>
+                    <td>{Math.round(m.collateral).toLocaleString('en-US')}</td>
+                    <td>{m.records}</td>
+                    <td>{m.regions}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="note" style={{ marginTop: '0.4rem' }}>
+              Each region and period is counted under one dominant recorded hazard, so the rows add up to the total
+              without double counting. This is a regional pattern, not the hazard at an individual loan's location.
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="card" id="quality-section">
@@ -805,6 +1132,9 @@ export default function InternalPortal() {
         </table>
 
         <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.4rem' }}>Recent Ingestion Batches</h3>
+        <p className="note" style={{ marginTop: 0 }}>
+          MANUAL_*: a BOT analyst uploaded the file. API_KEY_TMA and API_KEY_PMO: a system delivered it with a key issued by a BOT analyst; the label names the channel, not a verified sender. Everything delivered arrives as unvalidated and is used in the analysis only after an analyst promotes it.
+        </p>
         <table>
           <thead><tr><th>When</th><th>Source</th><th>File</th><th>Received</th><th>Accepted</th><th>Rejected</th><th>Duplicate</th></tr></thead>
           <tbody>
@@ -1032,7 +1362,7 @@ export default function InternalPortal() {
         <table>
           <thead>
             <tr>
-              <th>File</th><th>Period</th><th>Status</th><th>Valid/Total</th><th>Date</th>
+              <th>File</th><th>Period</th><th>Status</th><th>Valid/Total</th><th>Row validity</th><th>Date</th>
               {(user?.role === 'BOT_USER' || user?.role === 'SYSTEM_ADMIN') && <th>Notes + Decision</th>}
             </tr>
           </thead>
@@ -1043,6 +1373,7 @@ export default function InternalPortal() {
                 <td>{s.reporting_period}</td>
                 <td><span className={`badge badge-${s.status.toLowerCase()}`}>{s.status === 'APPROVED' ? 'Approved✅' : s.status === 'REJECTED' ? 'Rejected❌' : s.status}</span></td>
                 <td>{s.valid_records}/{s.total_records}</td>
+                <td>{s.total_records > 0 ? `${Math.round((1000 * s.valid_records) / s.total_records) / 10}%` : '—'}</td>
                 <td>{new Date(s.created_at).toLocaleDateString()}</td>
                 {(user?.role === 'BOT_USER' || user?.role === 'SYSTEM_ADMIN') && (
                   <td>
@@ -1071,15 +1402,18 @@ export default function InternalPortal() {
               </tr>
             ))}
             {filteredSubmissions.length === 0 && (
-              <tr><td colSpan={6}>No submissions match this filter.</td></tr>
+              <tr><td colSpan={7}>No submissions match this filter.</td></tr>
             )}
           </tbody>
         </table>
       </section>
 
       {selectedSubmission && (
-        <section className="card">
-          <h2>Submission Details: {selectedSubmission.submission.file_name}</h2>
+        <section className="card" id="submission-details">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <h2 style={{ margin: 0 }}>Submission Details: {selectedSubmission.submission.file_name}</h2>
+            <button className="btn-secondary btn-sm" onClick={() => setSelectedSubmission(null)}>Close</button>
+          </div>
           <p className="note">
             Row-level content of this submission - what the analyst is actually approving or
             rejecting, not just the automated valid/total counts above. Automated checks catch
@@ -1090,6 +1424,8 @@ export default function InternalPortal() {
           )}
 
           <h3 style={{ fontSize: '0.88rem', marginBottom: '0.3rem' }}>Submitted Records</h3>
+          <PagerBar noun="rows" total={selectedSubmission.recordsTotal} offset={selectedSubmission.recordOffset} pageSize={DETAIL_PAGE}
+            onChange={(o) => loadSubmissionDetails(selectedSubmission.submission.id, o, selectedSubmission.errorOffset)} />
           {selectedSubmission.records.length === 0 ? (
             <p className="note">No records were found in this submission.</p>
           ) : (
@@ -1123,6 +1459,8 @@ export default function InternalPortal() {
           )}
 
           <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.3rem' }}>Validation Errors</h3>
+          <PagerBar noun="findings" total={selectedSubmission.errorsTotal} offset={selectedSubmission.errorOffset} pageSize={DETAIL_PAGE}
+            onChange={(o) => loadSubmissionDetails(selectedSubmission.submission.id, selectedSubmission.recordOffset, o)} />
           {selectedSubmission.errors.length === 0 ? (
             <p>No errors were found.</p>
           ) : (
@@ -1188,6 +1526,7 @@ export default function InternalPortal() {
           </tbody>
         </table>
       </section>
+      <IntegrationAccess canCreate />
     </PortalShell>
   )
 }

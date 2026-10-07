@@ -70,18 +70,29 @@ Use one of the demo accounts printed in the `backend` container's log output:
 
 **Change these passwords before any production use.**
 
+In production (`ENVIRONMENT=production`) these accounts are **not created at all**; create the first
+administrator with `scripts/create_admin.py` - see
+[`docs/DATABASE_OPERATIONS.md`](docs/DATABASE_OPERATIONS.md), section 3, which also covers backups.
+
 ### 3. After pulling updates
 
-Whenever the backend's database models, or `docker-compose.yml` itself, have changed,
-reset the database volume so the new schema is created cleanly:
+Rebuild and restart. The database schema is brought up to date automatically - the backend
+runs its migrations (`alembic upgrade head`) every time it starts - and **your data is kept**:
 
 ```bash
-docker compose down -v
-docker compose up --build
+docker compose down
+docker compose build --no-cache
+docker compose up -d
+docker compose exec backend pytest -v
 ```
 
-`down -v` deletes the PostgreSQL data volume — use it whenever you are told a change
-requires a fresh database. A plain `docker compose down` (no `-v`) keeps existing data.
+**Do not use `docker compose down -v` on a system that holds real data.** `-v` deletes the
+database *and* the uploaded files. It is only for a throw-away demo or training copy when you
+really do want to start from nothing. If in doubt, take a backup first - see
+[`docs/DATABASE_OPERATIONS.md`](docs/DATABASE_OPERATIONS.md).
+
+> Earlier versions of this README said to reset the volume whenever the models or
+> `docker-compose.yml` changed. That predates the migrations and is no longer needed.
 
 ---
 

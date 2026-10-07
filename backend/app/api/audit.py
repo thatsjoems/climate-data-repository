@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.models.models import AuditLog, User, RoleEnum
-from app.schemas.schemas import AuditLogPage
+from app.schemas.schemas import AuditLogPage, AuditFilterOptions, AuditFilterUser
 
 router = APIRouter(prefix="/audit-logs", tags=["Audit Log"])
 
@@ -55,6 +55,28 @@ def list_audit_logs(
     total = query.count()
     items = query.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit).all()
     return AuditLogPage(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/filter-options", response_model=AuditFilterOptions)
+def audit_filter_options(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.SYSTEM_ADMIN)),
+):
+    """
+    The actions, entity types and users that actually occur in the audit log, so the viewer can
+    offer drop-down filters instead of free text: a typed filter that matches nothing looks
+    exactly like an empty log, whereas a drop-down can only offer values that exist.
+    """
+    actions = [a for (a,) in db.query(AuditLog.action).distinct().order_by(AuditLog.action).all() if a]
+    entity_types = [e for (e,) in db.query(AuditLog.entity_type).distinct().order_by(AuditLog.entity_type).all() if e]
+    users = (
+        db.query(User.id, User.username, User.full_name)
+        .join(AuditLog, AuditLog.user_id == User.id).distinct().order_by(User.username).all()
+    )
+    return AuditFilterOptions(
+        actions=actions, entity_types=entity_types,
+        users=[AuditFilterUser(id=i, username=u, full_name=f) for i, u, f in users],
+    )
 
 
 @router.get("/export.csv")

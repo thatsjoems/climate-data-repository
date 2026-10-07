@@ -81,6 +81,10 @@ def make_institution(db, code="BANK-A", name="Bank A Ltd"):
 
 
 def make_user(db, role=RoleEnum.INSTITUTION_USER, institution=None, username="user1", password=DEFAULT_PASSWORD):
+    # The database requires an institution user to belong to an institution (ck_users_institution_user_has_institution),
+    # exactly as the API does. A test that only needs "a user" no longer has to build an institution first.
+    if role == RoleEnum.INSTITUTION_USER and institution is None:
+        institution = make_institution(db, code=f"T-{username}"[:20], name=f"Test institution for {username}")
     user = User(
         full_name=f"Test {username}",
         username=username,

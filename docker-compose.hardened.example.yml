@@ -1,0 +1,20 @@
+# OPT-IN hardening of how the backend reaches the database.  Nothing here is active by default.
+#
+# Runs the application as a restricted database role (cdr_app) instead of the `postgres` superuser,
+# and runs the migrations - which need to alter tables - as the owner. See
+# docs/DATABASE_OPERATIONS.md, section "Least-privilege database role", for the full steps.
+#
+#   1. Create the role once:  database/roles/create_app_role.sql
+#   2. In .env (next to docker-compose.yml) set both passwords:
+#          POSTGRES_PASSWORD=<owner password - the one the db service already uses>
+#          APP_DB_PASSWORD=<the password you gave create_app_role.sql>
+#   3. Copy this file to  docker-compose.override.yml  - Docker Compose merges that file in
+#      automatically, replacing DATABASE_URL and adding MIGRATION_DATABASE_URL.
+#   4. docker compose up -d --force-recreate backend
+#
+# To go back: delete docker-compose.override.yml and recreate the backend.
+services:
+  backend:
+    environment:
+      DATABASE_URL: postgresql://cdr_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}@db:5432/climate_data_repository
+      MIGRATION_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/climate_data_repository

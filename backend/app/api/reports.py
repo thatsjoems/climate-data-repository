@@ -27,6 +27,7 @@ def download_summary_report(
     filter_institution_id: str | None = Query(default=None),
     filter_region: str | None = Query(default=None),
     filter_reporting_period: str | None = Query(default=None),
+    filter_hazard_type: str | None = Query(default=None, pattern=r"^(Flood|Drought|Landslide|Cyclone|None)$"),
     validated_only: bool = Query(default=True),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
@@ -42,7 +43,7 @@ def download_summary_report(
     """
     pdf_bytes = generate_summary_report_pdf(
         db, current_user, filter_institution_id=filter_institution_id,
-        filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+        filter_region=filter_region, filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
         validated_only=validated_only,
     )
 
@@ -64,6 +65,7 @@ def download_summary_report_excel(
     filter_institution_id: str | None = Query(default=None),
     filter_region: str | None = Query(default=None),
     filter_reporting_period: str | None = Query(default=None),
+    filter_hazard_type: str | None = Query(default=None, pattern=r"^(Flood|Drought|Landslide|Cyclone|None)$"),
     validated_only: bool = Query(default=True),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
@@ -76,7 +78,7 @@ def download_summary_report_excel(
     """
     excel_bytes = generate_summary_report_excel(
         db, current_user, filter_institution_id=filter_institution_id,
-        filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+        filter_region=filter_region, filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
         validated_only=validated_only,
     )
 
@@ -98,6 +100,7 @@ def download_summary_report_image(
     filter_institution_id: str | None = Query(default=None),
     filter_region: str | None = Query(default=None),
     filter_reporting_period: str | None = Query(default=None),
+    filter_hazard_type: str | None = Query(default=None, pattern=r"^(Flood|Drought|Landslide|Cyclone|None)$"),
     validated_only: bool = Query(default=True),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
@@ -111,7 +114,7 @@ def download_summary_report_image(
     """
     image_bytes = generate_summary_report_image(
         db, current_user, filter_institution_id=filter_institution_id,
-        filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+        filter_region=filter_region, filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
         validated_only=validated_only,
     )
 
@@ -133,6 +136,7 @@ def download_combined_exposure_csv(
     filter_institution_id: str | None = Query(default=None),
     filter_region: str | None = Query(default=None),
     filter_reporting_period: str | None = Query(default=None),
+    filter_hazard_type: str | None = Query(default=None, pattern=r"^(Flood|Drought|Landslide|Cyclone|None)$"),
     validated_only: bool = Query(default=True),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
@@ -148,7 +152,7 @@ def download_combined_exposure_csv(
     rows = analytics_service.get_combined_climate_financial_exposure(
         db, institution_id=None, validated_only=validated_only,
         filter_institution_id=filter_institution_id, filter_region=filter_region,
-        filter_reporting_period=filter_reporting_period,
+        filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
     )
 
     buffer = io.StringIO()

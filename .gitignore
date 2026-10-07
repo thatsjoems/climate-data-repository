@@ -15,3 +15,13 @@ frontend/.env
 # OS
 .DS_Store
 Thumbs.db
+
+# Docker Compose reads this file from the project root: real passwords and keys go here, never into git
+.env
+
+# Production secrets and the TLS private key: never in git
+.env.production
+certs/
+
+# Backups hold real data (database dumps and uploaded files): never in git
+backups/

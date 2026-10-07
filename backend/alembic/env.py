@@ -9,8 +9,11 @@ from app.core.database import Base
 from app.models import models  # noqa: F401
 
 config = context.config
-if settings.DATABASE_URL:
-    config.set_main_option('sqlalchemy.url', settings.DATABASE_URL.replace('%', '%%'))
+# A restricted runtime role (docs/DATABASE_OPERATIONS.md) cannot run DDL, so migrations may be given
+# their own owner-level URL. Unset or empty = the runtime DATABASE_URL, i.e. unchanged behaviour.
+MIGRATION_URL = os.environ.get('MIGRATION_DATABASE_URL') or settings.DATABASE_URL
+if MIGRATION_URL:
+    config.set_main_option('sqlalchemy.url', MIGRATION_URL.replace('%', '%%'))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -18,7 +21,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 def run_migrations_offline():
-    context.configure(url=settings.DATABASE_URL, target_metadata=target_metadata, literal_binds=True, compare_type=True)
+    context.configure(url=MIGRATION_URL, target_metadata=target_metadata, literal_binds=True, compare_type=True)
     with context.begin_transaction():
         context.run_migrations()
 

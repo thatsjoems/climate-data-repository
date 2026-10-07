@@ -79,6 +79,15 @@ ensure_schema()
 # Seeding is intentionally limited to development/training environments.
 if settings.ENVIRONMENT == "production":
     print("Production environment detected: skipping demo seed data and demo credentials.")
+    _db = SessionLocal()
+    try:
+        _no_users_yet = _db.query(User).count() == 0
+    finally:
+        _db.close()
+    if _no_users_yet:
+        print("No users exist yet. Create the first System Administrator with:")
+        print('  docker compose exec backend python scripts/create_admin.py --username <name> '
+              '--full-name "<Full Name>" --email <address>')
     raise SystemExit(0)
 
 db = SessionLocal()

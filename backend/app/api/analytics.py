@@ -12,10 +12,13 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.models.models import User, RoleEnum
-from app.schemas.schemas import KPISummary, ClimateTrendPoint, HazardExposurePoint, CombinedExposurePoint, RegionMapPoint, ExposurePointsOut
+from app.schemas.schemas import KPISummary, ClimateTrendPoint, HazardExposurePoint, CombinedExposurePoint, RegionMapPoint, ExposurePointsOut, KPISourceOut
 from app.services import analytics_service
 
 router = APIRouter(prefix="/analytics", tags=["Analytics & Dashboard"])
+
+# The hazard types the system knows (the same list the map layer offers); "None" = no hazard recorded.
+HAZARD_PATTERN = r"^(Flood|Drought|Landslide|Cyclone|None)$"
 
 
 def _scope_for(current_user: User) -> str | None:
@@ -59,13 +62,14 @@ def hazard_exposure(
     filter_institution_id: str | None = Query(default=None),
     filter_region: str | None = Query(default=None),
     filter_reporting_period: str | None = Query(default=None),
+    filter_hazard_type: str | None = Query(default=None, pattern=HAZARD_PATTERN, description="Narrow to regions with this recorded hazard (Flood, Drought, Landslide, Cyclone, None)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
 ):
     return analytics_service.get_hazard_exposure(
         db, institution_id=_scope_for(current_user), validated_only=validated_only,
         filter_institution_id=filter_institution_id, filter_region=filter_region,
-        filter_reporting_period=filter_reporting_period,
+        filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
     )
 
 
@@ -75,6 +79,7 @@ def combined_climate_financial_exposure(
     filter_institution_id: str | None = Query(default=None),
     filter_region: str | None = Query(default=None),
     filter_reporting_period: str | None = Query(default=None),
+    filter_hazard_type: str | None = Query(default=None, pattern=HAZARD_PATTERN, description="Narrow to regions with this recorded hazard (Flood, Drought, Landslide, Cyclone, None)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
 ):
@@ -86,7 +91,7 @@ def combined_climate_financial_exposure(
     return analytics_service.get_combined_climate_financial_exposure(
         db, institution_id=_scope_for(current_user), validated_only=validated_only,
         filter_institution_id=filter_institution_id, filter_region=filter_region,
-        filter_reporting_period=filter_reporting_period,
+        filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
     )
 
 
@@ -96,6 +101,7 @@ def region_map_points(
     filter_institution_id: str | None = Query(default=None),
     filter_region: str | None = Query(default=None),
     filter_reporting_period: str | None = Query(default=None),
+    filter_hazard_type: str | None = Query(default=None, pattern=HAZARD_PATTERN, description="Narrow to regions with this recorded hazard (Flood, Drought, Landslide, Cyclone, None)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
 ):
@@ -110,7 +116,7 @@ def region_map_points(
     return analytics_service.get_region_map_points(
         db, institution_id=_scope_for(current_user), validated_only=validated_only,
         filter_institution_id=filter_institution_id, filter_region=filter_region,
-        filter_reporting_period=filter_reporting_period,
+        filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
     )
 
 
@@ -132,4 +138,24 @@ def exposure_points(
         db, institution_id=_scope_for(current_user),
         filter_institution_id=filter_institution_id, filter_region=filter_region,
         filter_reporting_period=filter_reporting_period,
+    )
+
+
+@router.get("/kpi-sources", response_model=list[KPISourceOut])
+def kpi_sources(
+    filter_institution_id: str | None = Query(default=None),
+    filter_region: str | None = Query(default=None),
+    filter_reporting_period: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
+):
+    """
+    Data lineage: the current APPROVED submissions behind the dashboard figures, with the
+    institution, reporting period, file, version and loan/collateral totals each one
+    contributes. Same tenant scoping and filters as every other analytics endpoint; the
+    hazard filter does not apply here (KPI totals are not narrowed by hazard).
+    """
+    return analytics_service.get_kpi_sources(
+        db, institution_id=_scope_for(current_user), filter_institution_id=filter_institution_id,
+        filter_region=filter_region, filter_reporting_period=filter_reporting_period,
     )

@@ -184,6 +184,7 @@ def get_hazard_exposure(
     db: Session, institution_id: str | None = None, validated_only: bool = False,
     filter_institution_id: str | None = None, filter_region: str | None = None,
     filter_reporting_period: str | None = None,
+    filter_hazard_type: str | None = None,
 ) -> list[dict]:
     """
     Shows how much loan value sits in areas with a REAL recorded climate
@@ -263,7 +264,14 @@ def get_hazard_exposure(
         aggregated[key]["exposed_collateral_value_tzs"] += float(combo.total_collateral or 0.0)
         aggregated[key]["record_count"] += combo.record_count
 
-    return list(aggregated.values())
+    rows = list(aggregated.values())
+    # Hazard filter (ICN item 9). Each (region, period) is classified under ONE dominant
+    # recorded hazard, so a loan is never counted under two hazards. Filtering keeps only
+    # the regions whose dominant recorded hazard is the one asked for ("None" = no
+    # hazard recorded). It narrows what is shown; it never widens access.
+    if filter_hazard_type:
+        rows = [r for r in rows if r["hazard_type"] == filter_hazard_type]
+    return rows
 
 
 def get_exposure_points(
@@ -318,6 +326,7 @@ def get_region_map_points(
     db: Session, institution_id: str | None = None, validated_only: bool = False,
     filter_institution_id: str | None = None, filter_region: str | None = None,
     filter_reporting_period: str | None = None,
+    filter_hazard_type: str | None = None,
 ) -> list[dict]:
     """
     Region-level map points for the Geospatial Overview: real hazard-exposure
@@ -341,7 +350,7 @@ def get_region_map_points(
     exposure_rows = get_hazard_exposure(
         db, institution_id, validated_only=validated_only,
         filter_institution_id=filter_institution_id, filter_region=filter_region,
-        filter_reporting_period=filter_reporting_period,
+        filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
     )
 
     # Collapse per-hazard rows into one point per region (a region may have
@@ -517,6 +526,7 @@ def get_combined_climate_financial_exposure(
     db: Session, institution_id: str | None = None, validated_only: bool = False,
     filter_institution_id: str | None = None, filter_region: str | None = None,
     filter_reporting_period: str | None = None,
+    filter_hazard_type: str | None = None,
 ) -> list[dict]:
     """
     THE core ICN aim: combine financial sector data with climate/meteorological data
@@ -624,4 +634,74 @@ def get_combined_climate_financial_exposure(
             "record_count": combo.record_count,
         })
 
+    # Hazard filter (ICN item 9): keep the region/period rows where the hazard is among
+    # those recorded in the climate data used for the row ("None" = none recorded).
+    if filter_hazard_type:
+        if filter_hazard_type == "None":
+            results = [r for r in results if not r["hazard_types_recorded"]]
+        else:
+            results = [r for r in results if filter_hazard_type in r["hazard_types_recorded"]]
     return results
+
+
+def get_kpi_sources(
+    db: Session, institution_id: str | None = None,
+    filter_institution_id: str | None = None, filter_region: str | None = None,
+    filter_reporting_period: str | None = None,
+) -> list[dict]:
+    """
+    Data lineage for the KPI figures: which submissions the numbers come from.
+
+    Returns one row per current, BOT-APPROVED submission that contributes valid rows
+    under the given scope and filters - exactly the population get_kpi_summary(),
+    get_hazard_exposure() and every other calculation draws on (it reuses the same
+    base query, so the two can never disagree). Each row says whose data it is, for
+    which reporting period, from which uploaded file and version, how many valid rows
+    it contributes under the active filters, and their loan and collateral totals;
+    the rows themselves are opened from the existing submission detail view.
+
+    row_validity_pct is valid rows / total rows of the whole file (a descriptive
+    ratio, not a risk score). It is None when the file has no rows.
+    """
+    rows = (
+        _active_records_query(
+            db, institution_id, filter_institution_id=filter_institution_id,
+            filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+        )
+        .join(Institution, Institution.id == Submission.institution_id)
+        .with_entities(
+            Submission.id, Submission.institution_id, Institution.name, Submission.reporting_period,
+            Submission.file_name, Submission.version_number, Submission.reviewed_at,
+            Submission.total_records, Submission.valid_records, Submission.invalid_records,
+            func.count(SubmissionRecord.id).label("contributing_records"),
+            func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0).label("loan_total"),
+            func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0).label("collateral_total"),
+        )
+        .group_by(
+            Submission.id, Submission.institution_id, Institution.name, Submission.reporting_period,
+            Submission.file_name, Submission.version_number, Submission.reviewed_at,
+            Submission.total_records, Submission.valid_records, Submission.invalid_records,
+        )
+        .order_by(Submission.reporting_period.desc(), Institution.name)
+        .all()
+    )
+    out = []
+    for r in rows:
+        total = r.total_records or 0
+        out.append({
+            "submission_id": r.id,
+            "institution_id": r.institution_id,
+            "institution_name": r.name,
+            "reporting_period": r.reporting_period,
+            "file_name": r.file_name,
+            "version_number": r.version_number or 1,
+            "reviewed_at": r.reviewed_at,
+            "total_records": total,
+            "valid_records": r.valid_records or 0,
+            "invalid_records": r.invalid_records or 0,
+            "contributing_records": r.contributing_records,
+            "loan_total_tzs": float(r.loan_total or 0.0),
+            "collateral_total_tzs": float(r.collateral_total or 0.0),
+            "row_validity_pct": round(100.0 * (r.valid_records or 0) / total, 1) if total else None,
+        })
+    return out

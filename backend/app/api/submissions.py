@@ -15,7 +15,8 @@ import os
 import re
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -26,7 +27,7 @@ from app.models.models import (
     Submission, SubmissionRecord, ValidationError as VErrorModel,
     User, RoleEnum, SubmissionStatus,
 )
-from app.schemas.schemas import SubmissionOut, SubmissionDetailOut, ReviewRequest
+from app.schemas.schemas import SubmissionOut, SubmissionDetailOut, ReviewRequest, ValidationErrorOut, SubmissionRecordOut
 from app.services.validation_service import validate_excel_file
 from app.services.template_generator import FIELD_NAMES
 from app.services.audit_service import record_audit
@@ -359,15 +360,44 @@ def export_submission_history_csv(
 @router.get("/{submission_id}", response_model=SubmissionDetailOut)
 def get_submission(
     submission_id: str,
+    record_offset: int = Query(0, ge=0, description="First row to return (0-based)"),
+    record_limit: int = Query(100, ge=1, le=500, description="Rows per page"),
+    error_offset: int = Query(0, ge=0, description="First finding to return (0-based)"),
+    error_limit: int = Query(100, ge=1, le=500, description="Findings per page"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
 ):
+    """
+    One submission with ONE PAGE of its rows and ONE PAGE of its findings.
+
+    A file may hold up to 100,000 rows and, if it is badly wrong, as many findings. Returning
+    and drawing all of them froze the browser ("Page unresponsive"), so the rows and findings
+    are paged: `records` / `errors` hold the requested page in a stable order (row number),
+    and `records_total` / `errors_total` give the full counts so the page can show "1-50 of N".
+    Authorisation is unchanged and is checked before any row is read.
+    """
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
     if current_user.role == RoleEnum.INSTITUTION_USER and submission.institution_id != current_user.institution_id:
         raise HTTPException(status_code=403, detail="You do not have permission to view this submission")
-    return submission
+
+    records_total = db.query(func.count(SubmissionRecord.id)).filter(SubmissionRecord.submission_id == submission.id).scalar() or 0
+    errors_total = db.query(func.count(VErrorModel.id)).filter(VErrorModel.submission_id == submission.id).scalar() or 0
+    records = (
+        db.query(SubmissionRecord).filter(SubmissionRecord.submission_id == submission.id)
+        .order_by(SubmissionRecord.row_number, SubmissionRecord.id).offset(record_offset).limit(record_limit).all()
+    )
+    errors = (
+        db.query(VErrorModel).filter(VErrorModel.submission_id == submission.id)
+        .order_by(VErrorModel.row_number, VErrorModel.id).offset(error_offset).limit(error_limit).all()
+    )
+    return SubmissionDetailOut(
+        **SubmissionOut.model_validate(submission).model_dump(),
+        errors=[ValidationErrorOut.model_validate(e) for e in errors],
+        records=[SubmissionRecordOut.model_validate(r) for r in records],
+        records_total=records_total, errors_total=errors_total,
+    )
 
 
 @router.get("/{submission_id}/download")

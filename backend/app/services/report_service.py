@@ -80,6 +80,7 @@ def generate_summary_report_pdf(
     db: Session, generated_by: User, filter_institution_id: str | None = None,
     filter_region: str | None = None, filter_reporting_period: str | None = None,
     validated_only: bool = False,
+    filter_hazard_type: str | None = None,
 ) -> bytes:
     styles = _styles()
     buffer = io.BytesIO()
@@ -101,6 +102,7 @@ def generate_summary_report_pdf(
         f"Institution ID: {filter_institution_id}" if filter_institution_id else None,
         f"Region: {filter_region}" if filter_region else None,
         f"Reporting Period: {filter_reporting_period}" if filter_reporting_period else None,
+        f"Hazard: {filter_hazard_type} (applies to hazard exposure, combined exposure and map, not to KPI totals)" if filter_hazard_type else None,
         "VALIDATED climate readings only" if validated_only else None,
     ] if f]
     story.append(Paragraph(
@@ -135,7 +137,7 @@ def generate_summary_report_pdf(
     hazard_rows = analytics_service.get_hazard_exposure(
         db, institution_id=None, validated_only=validated_only,
         filter_institution_id=filter_institution_id, filter_region=filter_region,
-        filter_reporting_period=filter_reporting_period,
+        filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
     )
     story.append(Paragraph("2. Climate Hazard Exposure by Region", styles["SectionHeading"]))
     story.append(Paragraph(
@@ -154,7 +156,7 @@ def generate_summary_report_pdf(
     combined_rows = analytics_service.get_combined_climate_financial_exposure(
         db, institution_id=None, validated_only=validated_only,
         filter_institution_id=filter_institution_id, filter_region=filter_region,
-        filter_reporting_period=filter_reporting_period,
+        filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
     )
     story.append(Paragraph("3. Combined Climate-Financial Exposure", styles["SectionHeading"]))
     story.append(Paragraph(
@@ -219,6 +221,7 @@ def generate_summary_report_excel(
     db: Session, generated_by: User, filter_institution_id: str | None = None,
     filter_region: str | None = None, filter_reporting_period: str | None = None,
     validated_only: bool = False,
+    filter_hazard_type: str | None = None,
 ) -> bytes:
     """
     Same figures as the PDF report, as a multi-sheet Excel workbook - useful
@@ -268,7 +271,7 @@ def generate_summary_report_excel(
     hazard_rows = analytics_service.get_hazard_exposure(
         db, institution_id=None, validated_only=validated_only,
         filter_institution_id=filter_institution_id, filter_region=filter_region,
-        filter_reporting_period=filter_reporting_period,
+        filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
     )
     write_sheet(ws2, ["Region", "Recorded Hazard", "Loan Exposure in Region/Period (TZS)", "Records"], [
         [h["region"], h["hazard_type"] or "None", h["exposed_loan_amount_tzs"], h["record_count"]]
@@ -280,7 +283,7 @@ def generate_summary_report_excel(
     combined_rows = analytics_service.get_combined_climate_financial_exposure(
         db, institution_id=None, validated_only=validated_only,
         filter_institution_id=filter_institution_id, filter_region=filter_region,
-        filter_reporting_period=filter_reporting_period,
+        filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
     )
     write_sheet(ws3, ["Region", "Period", "Avg Rainfall (mm)", "Avg Temp (C)", "Hazards", "Climate Data Quality", "Loan Exposure (TZS)", "Collateral Value (TZS)", "Records"], [
         [
@@ -315,6 +318,7 @@ def generate_summary_report_excel(
         f"Institution ID: {filter_institution_id}" if filter_institution_id else None,
         f"Region: {filter_region}" if filter_region else None,
         f"Reporting Period: {filter_reporting_period}" if filter_reporting_period else None,
+        f"Hazard: {filter_hazard_type} (applies to hazard exposure, combined exposure and map, not to KPI totals)" if filter_hazard_type else None,
         "VALIDATED climate readings only" if validated_only else None,
     ] if f]
     info_sheet["A3"] = "Filters applied: " + ("; ".join(active_filters) if active_filters else "none (sector-wide, all data)")
@@ -367,6 +371,7 @@ def generate_summary_report_image(
     db: Session, generated_by: User, filter_institution_id: str | None = None,
     filter_region: str | None = None, filter_reporting_period: str | None = None,
     validated_only: bool = True,
+    filter_hazard_type: str | None = None,
 ) -> bytes:
     kpi = analytics_service.get_kpi_summary(
         db, institution_id=None, filter_institution_id=filter_institution_id,
@@ -375,7 +380,7 @@ def generate_summary_report_image(
     hazard_rows = analytics_service.get_hazard_exposure(
         db, institution_id=None, validated_only=validated_only,
         filter_institution_id=filter_institution_id, filter_region=filter_region,
-        filter_reporting_period=filter_reporting_period,
+        filter_reporting_period=filter_reporting_period, filter_hazard_type=filter_hazard_type,
     )
     # Collapse to top hazard types by total exposure, for a readable chart.
     by_hazard: dict[str, float] = {}
@@ -411,6 +416,7 @@ def generate_summary_report_image(
         f"Institution ID: {filter_institution_id}" if filter_institution_id else None,
         f"Region: {filter_region}" if filter_region else None,
         f"Reporting Period: {filter_reporting_period}" if filter_reporting_period else None,
+        f"Hazard: {filter_hazard_type} (applies to hazard exposure, combined exposure and map, not to KPI totals)" if filter_hazard_type else None,
         "VALIDATED climate readings only" if validated_only else None,
     ] if f]
     filters_text = "Filters applied: " + ("; ".join(active_filters) if active_filters else "none (sector-wide, all data)")

@@ -13,7 +13,7 @@ validation logic in climate_ingestion_service.py is expected to persist.
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -31,6 +31,7 @@ from app.schemas.schemas import (
 from app.services.climate_ingestion_service import parse_and_validate_climate_file
 from app.services.template_generator import TANZANIA_REGIONS
 from app.services.audit_service import record_audit
+from app.services.climate_upload_service import ConcurrentUploadError, batch_with_errors, store_climate_upload
 
 router = APIRouter(prefix="/climate-data", tags=["Climate Data Ingestion"])
 
@@ -44,6 +45,8 @@ MAX_CLIMATE_FILE_SIZE_MB = settings.MAX_UPLOAD_SIZE_MB  # reuse the same configu
 # from - not a cryptographically or systematically verified integration.
 # There is deliberately no "TMA_OFFICIAL"/"TMA_API" option: that would only
 # become truthful once a real, authenticated TMA integration exists.
+# (API_KEY_TMA / API_KEY_PMO exist only for data delivered with an API key; they describe the CHANNEL - a key that a
+# BOT analyst issued for TMA or PMO - not a verified sender, and this manual upload refuses them.)
 ALLOWED_CLIMATE_SOURCES = {"MANUAL_TMA_FILE", "MANUAL_PMO_FILE", "MANUAL_OTHER_FILE"}
 
 
@@ -76,72 +79,19 @@ async def ingest_climate_file(
     if size_mb > MAX_CLIMATE_FILE_SIZE_MB:
         raise HTTPException(status_code=400, detail=f"File exceeds the {MAX_CLIMATE_FILE_SIZE_MB}MB limit ({size_mb:.1f}MB)")
 
-    # Build the existing-observation key set for duplicate detection (never overwrite silently)
-    existing_rows = db.query(
-        ClimateRecord.region, ClimateRecord.district, ClimateRecord.year,
-        ClimateRecord.month, ClimateRecord.source_record_id, ClimateRecord.station_id,
-    ).all()
-    existing_keys = set(existing_rows)
-
-    result = parse_and_validate_climate_file(contents, file.filename, existing_keys, max_rows=settings.MAX_UPLOAD_ROWS)
-
-    batch = ClimateIngestionBatch(
-        source=source,
-        dataset_name=dataset_name,
-        dataset_version=dataset_version,
-        file_name=file.filename,
-        uploaded_by_user_id=current_user.id,
-        records_received=result.total_rows,
-        records_accepted=len(result.accepted_records),
-        records_rejected=result.rejected_count,
-        records_duplicate=result.duplicate_count,
-        status="COMPLETED",
-        error_summary=(
-            f"{result.rejected_count} rejected, {result.duplicate_count} duplicate "
-            f"out of {result.total_rows} rows" if (result.rejected_count or result.duplicate_count) else None
-        ),
-    )
-    db.add(batch)
-    db.flush()
-
-    for record in result.accepted_records:
-        db.add(ClimateRecord(
-            **record,
-            batch_id=batch.id,
-            source=source,
-            quality_flag="UNVALIDATED",  # a human/automated QC pass can promote this later - never assumed valid on arrival
-            processing_method="FILE_INGESTION",
-        ))
-
-    for issue in result.issues:
-        db.add(ClimateIngestionError(
-            batch_id=batch.id, row_number=issue.row_number,
-            column_name=issue.column_name, error_description=issue.error_description,
-        ))
-
-    # Write the audit event in the same transaction as the batch and records.
-    # If anything fails before this commit, neither data nor its audit event is persisted.
-    record_audit(
-        db, current_user.id, "CLIMATE_DATA_INGESTED", "ClimateIngestionBatch", batch.id,
-        f"{file.filename}: {batch.records_accepted} accepted, {batch.records_rejected} rejected, "
-        f"{batch.records_duplicate} duplicate",
-        commit=False,
-    )
     try:
-        db.commit()
-    except IntegrityError:
-        # A concurrent upload inserted the same observation between our
-        # application-level duplicate check and this commit - the database's
-        # own uniqueness guarantee (see Alembic migration 8b2f5c1e9a44) is the
-        # final backstop. Roll back and report clearly rather than a raw 500.
-        db.rollback()
+        batch = store_climate_upload(
+            db, source=source, dataset_name=dataset_name, dataset_version=dataset_version,
+            file_name=file.filename, contents=contents,
+            uploaded_by_user_id=current_user.id, audit_user_id=current_user.id,
+        )
+    except ConcurrentUploadError:
         raise HTTPException(
             status_code=409,
             detail="One or more observations in this file were inserted by a concurrent upload just now. Please re-check and re-upload if needed.",
         )
-    db.refresh(batch)
 
-    return batch
+    return batch_with_errors(db, batch)
 
 
 @router.get("/ingestions", response_model=list[ClimateIngestionBatchOut])
@@ -176,13 +126,16 @@ def list_ingestion_batches(
 @router.get("/ingestions/{batch_id}", response_model=ClimateIngestionDetailOut)
 def get_ingestion_batch(
     batch_id: str,
+    error_offset: int = Query(0, ge=0, description="First rejected row to return (0-based)"),
+    error_limit: int = Query(500, ge=1, le=2000, description="Rejected rows per page"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):
+    """One batch with a page of its rejected rows (row, column, reason) and the total number of them."""
     batch = db.query(ClimateIngestionBatch).filter(ClimateIngestionBatch.id == batch_id).first()
     if not batch:
         raise HTTPException(status_code=404, detail="Ingestion batch not found")
-    return batch
+    return batch_with_errors(db, batch, error_offset, error_limit)
 
 
 @router.get("/quality-summary", response_model=DataQualitySummary)

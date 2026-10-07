@@ -2,6 +2,10 @@ import { useEffect, useState, FormEvent } from 'react'
 import apiClient from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import PortalShell, { SidebarItem } from '../components/PortalShell'
+import PagerBar from '../components/PagerBar'
+
+// Rows and findings of a submission are shown this many at a time (see PagerBar).
+const DETAIL_PAGE = 50
 
 interface Submission {
   id: string
@@ -72,7 +76,7 @@ export default function InstitutionPortal() {
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadMessage, setUploadMessage] = useState<string | null>(null)
-  const [selected, setSelected] = useState<{ submission: Submission; errors: ValidationErrorItem[]; records: SubmissionRecordItem[] } | null>(null)
+  const [selected, setSelected] = useState<{ submission: Submission; errors: ValidationErrorItem[]; records: SubmissionRecordItem[]; recordsTotal: number; errorsTotal: number; recordOffset: number; errorOffset: number } | null>(null)
 
   async function loadSubmissions() {
     const res = await apiClient.get('/submissions')
@@ -155,9 +159,22 @@ export default function InstitutionPortal() {
     }
   }
 
+  // A submission can hold tens of thousands of rows and findings; the server sends one page of each.
+  async function loadDetails(submissionId: string, recordOffset = 0, errorOffset = 0) {
+    const res = await apiClient.get(`/submissions/${submissionId}`, {
+      params: { record_offset: recordOffset, record_limit: DETAIL_PAGE, error_offset: errorOffset, error_limit: DETAIL_PAGE },
+    })
+    setSelected({
+      submission: res.data, errors: res.data.errors, records: res.data.records,
+      recordsTotal: res.data.records_total ?? res.data.records.length, errorsTotal: res.data.errors_total ?? res.data.errors.length,
+      recordOffset, errorOffset,
+    })
+  }
+
   async function viewDetails(submissionId: string) {
-    const res = await apiClient.get(`/submissions/${submissionId}`)
-    setSelected({ submission: res.data, errors: res.data.errors, records: res.data.records })
+    await loadDetails(submissionId, 0, 0)
+    // The panel sits lower on the page than the button that opens it: bring it into view.
+    window.setTimeout(() => document.getElementById('submission-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80)
   }
 
   const totalSubmissions = submissions.length
@@ -281,13 +298,18 @@ export default function InstitutionPortal() {
       </section>
 
       {selected && (
-        <section className="card">
-          <h2>Submission Details: {selected.submission.file_name}</h2>
+        <section className="card" id="submission-details">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <h2 style={{ margin: 0 }}>Submission Details: {selected.submission.file_name}</h2>
+            <button className="btn-secondary btn-sm" onClick={() => setSelected(null)}>Close</button>
+          </div>
           {selected.submission.review_notes && (
             <p><strong>BOT Reviewer Notes:</strong> {selected.submission.review_notes}</p>
           )}
 
           <h3 style={{ fontSize: '0.88rem', marginBottom: '0.3rem' }}>Your Submitted Records</h3>
+          <PagerBar noun="rows" total={selected.recordsTotal} offset={selected.recordOffset} pageSize={DETAIL_PAGE}
+            onChange={(o) => loadDetails(selected.submission.id, o, selected.errorOffset)} />
           {selected.records.length === 0 ? (
             <p className="note">No records were found in this submission.</p>
           ) : (
@@ -319,6 +341,8 @@ export default function InstitutionPortal() {
           )}
 
           <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.3rem' }}>Validation Errors</h3>
+          <PagerBar noun="findings" total={selected.errorsTotal} offset={selected.errorOffset} pageSize={DETAIL_PAGE}
+            onChange={(o) => loadDetails(selected.submission.id, selected.recordOffset, o)} />
           {selected.errors.length === 0 ? (
             <p>No errors were found.</p>
           ) : (

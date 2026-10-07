@@ -2,8 +2,10 @@
 Pydantic Schemas - validate data going into and coming out of the API.
 """
 from datetime import datetime
-from typing import Optional, Any
-from pydantic import BaseModel, EmailStr, ConfigDict
+from typing import Optional, Any, Literal
+from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator
+
+from app.core.client_ip import normalise_address_list
 
 from app.models.models import RoleEnum, SubmissionStatus, InstitutionType, RiskLevel
 
@@ -184,6 +186,10 @@ class SubmissionOut(BaseModel):
 class SubmissionDetailOut(SubmissionOut):
     errors: list[ValidationErrorOut] = []
     records: list[SubmissionRecordOut] = []
+    # Totals of ALL rows and findings; `records` and `errors` hold only the requested page
+    # (GET /submissions/{id}), so a very large file cannot freeze a browser that draws them.
+    records_total: int = 0
+    errors_total: int = 0
 
 
 class ReviewRequest(BaseModel):
@@ -268,6 +274,7 @@ class ClimateIngestionBatchOut(BaseModel):
     dataset_version: Optional[str] = None
     file_name: Optional[str] = None
     uploaded_by_user_id: Optional[str] = None
+    uploaded_by_api_client_id: Optional[str] = None
     records_received: int
     records_accepted: int
     records_rejected: int
@@ -277,7 +284,8 @@ class ClimateIngestionBatchOut(BaseModel):
 
 
 class ClimateIngestionDetailOut(ClimateIngestionBatchOut):
-    errors: list[ClimateIngestionErrorOut] = []
+    errors: list[ClimateIngestionErrorOut] = []   # one page of the rejected rows, by row number (500 by default)
+    errors_total: int = 0                          # how many rejected rows the batch has in all
 
 
 class DataQualitySummary(BaseModel):
@@ -400,3 +408,83 @@ class AuditLogPage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class AuditFilterUser(BaseModel):
+    id: str
+    username: str
+    full_name: str
+
+
+class AuditFilterOptions(BaseModel):
+    """The values that actually occur in the audit log, for the viewer's drop-down filters."""
+    actions: list[str]
+    entity_types: list[str]
+    users: list[AuditFilterUser]
+
+
+class KPISourceOut(BaseModel):
+    """One approved, current submission that feeds the dashboard figures (data lineage)."""
+    submission_id: str
+    institution_id: str
+    institution_name: str
+    reporting_period: str
+    file_name: str
+    version_number: int
+    reviewed_at: Optional[datetime] = None
+    total_records: int
+    valid_records: int
+    invalid_records: int
+    contributing_records: int
+    loan_total_tzs: float
+    collateral_total_tzs: float
+    row_validity_pct: Optional[float] = None
+
+
+# ---------- INTEGRATION ACCESS (read-only API keys for external systems) ----------
+class ApiClientCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120, description="Which system or workstation the key is for")
+    description: Optional[str] = Field(default=None, max_length=500)
+    valid_days: int = Field(default=180, ge=1, le=365, description="How long the key works (1 to 365 days)")
+    scope: Literal["READ", "INGEST_TMA", "INGEST_PMO"] = Field(
+        default="READ", description="READ: read approved data. INGEST_TMA / INGEST_PMO: send climate files, nothing else",
+    )
+    allowed_networks: Optional[str] = Field(
+        default=None, max_length=500,
+        description="Optional: addresses or networks the key may be used from, separated by commas (blank = any address)",
+    )
+
+    @field_validator("allowed_networks")
+    @classmethod
+    def _networks_are_valid(cls, value):
+        return normalise_address_list(value)
+
+
+class ApiClientOut(BaseModel):
+    """What may be shown about a key at any time: never the key and never its hash."""
+    id: str
+    name: str
+    description: Optional[str] = None
+    key_prefix: str
+    scope: str                        # READ, INGEST_TMA or INGEST_PMO
+    allowed_networks: Optional[str] = None   # None = usable from any address
+    status: str                       # ACTIVE, EXPIRED or REVOKED
+    created_by_username: Optional[str] = None
+    revoked_by_username: Optional[str] = None
+    created_at: datetime
+    expires_at: datetime
+    last_used_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+
+
+class ApiClientCreated(ApiClientOut):
+    """Returned once, when the key is created: the only time the key itself is ever shown."""
+    api_key: str
+
+
+class IntegrationWhoAmI(BaseModel):
+    name: str
+    key_prefix: str
+    scope: str
+    expires_at: datetime
+    access: str

@@ -3301,3 +3301,509 @@ every variable the rules use is defined; the 46-button classification above; bra
 balance (`index.css` 282/282, 338/338; `InternalPortal.tsx` 545/545, 535/535); backend
 compile unaffected; a mock of the Admin tables and the Approve/Reject buttons. **Not
 verified here:** the real stylesheet in a real browser.
+
+
+## Sixtieth item - database review: four fixes (missing constraints, backup, first administrator, database access)
+
+A review of the database (code, migrations, `docker-compose.yml`; the live database was not
+available) found the design strong - `Numeric(20,2)` money, 29 CHECK constraints, partial unique
+indexes, version lineage, no string-built SQL - and four things to fix before real data goes in.
+Everything below was written without Docker, PostgreSQL, SQLAlchemy or pytest in the environment;
+what was executed and what was not is stated at the end.
+
+**1. Three CHECK constraints existed only in the code.** `ck_submission_records_outstanding_le_loan`,
+`ck_submissions_record_counts_consistent` and `ck_submissions_version_number_positive` are declared in
+models.py but created by no migration (searched by name and by rule text). The tests build their SQLite
+database from models.py, so they had the rules and passed; the real PostgreSQL database, built only by
+migrations, did not - the same drift as 9c1852419557. New migration `f4a9c2d71b05` adds them, safely on a
+database that already holds data: on PostgreSQL `ADD CONSTRAINT ... NOT VALID` (enforced for every new
+or changed row) then `VALIDATE` at once if no old row breaks it; if some do, it logs the count and the
+query to find them and leaves it NOT VALID. A plain ADD CONSTRAINT would have scanned every old row and,
+because init_db.py runs migrations at container start, a single bad historical row would have stopped the
+backend from booting. Nothing is deleted or rewritten. `scripts/verify_db_constraints.py` did not list
+these three either (nor `ck_climate_records_reporting_period_format` and
+`uq_submission_records_submission_loan`); it now lists all 33 protections and warns about constraints
+still NOT VALID. New `tests/test_schema_parity.py` (5 tests, no database) fails if a constraint declared in
+the models is created by no migration, if the verify script misses a declared protection, or if the
+migrations stop forming one linear chain - it was shown to fail when the new migration is removed.
+
+**1b. The validator had to change with it (KG-05).** Run against 8 bad rows before any change, the
+validator kept the bad value even where it flagged the row: a negative loan amount (flagged, -5 stored),
+a negative insurance value, a negative annual turnover, an interest rate of 150 or -2, a latitude of 200,
+a longitude of 500 were stored as given - and the database CHECK then rejects the whole INSERT, so the
+upload fails with an unexplained HTTP 409 instead of showing a row error; outstanding > loan was accepted
+as VALID. Amounts of 1e18 or more were accepted too, which would overflow `Numeric(20,2)` in PostgreSQL
+(a server error; SQLite does not enforce it, so the SQLite tests could never show it). Now each such
+value is reported as an ERROR on its row and NOT stored, so the row is still persisted for the reviewer
+(FR-SUB-07) and the database never sees a value it would reject. Outstanding == loan and a large-but-
+representable amount (5e17) are still accepted. Verified by running the real validator over every case
+before and after; the system's own downloadable template (with its example row) validates identically
+under the old and new code. 12 new upload tests (`test_upload_database_rules.py`).
+
+**2. No backup.** `scripts/backup.ps1|.sh` and `restore.ps1|.sh` back up the database (pg_dump custom
+format, checked readable) AND the uploaded files together, with SHA256SUMS verified before a restore, a
+typed RESTORE confirmation, and the backend stopped during the database restore. The dump is made inside
+the container and copied out with `docker compose cp`, because piping binary data through PowerShell
+corrupts it. Old backups are never deleted by the scripts. See `docs/DATABASE_OPERATIONS.md` (new).
+
+**3. No first administrator in production.** `init_db.py` seeds nothing when ENVIRONMENT=production (the
+demo passwords are published) and the only user-creation endpoint needs an administrator already signed
+in, so a fresh production database had tables and no way to log in. New `app/services/admin_bootstrap.py`
+(testable logic) and `scripts/create_admin.py` (hidden password prompt, never a command-line option);
+refuses a weak password, a bad e-mail, a taken name, or an already-existing active administrator unless
+`--allow-additional` (the lockout-recovery path); audited as ADMIN_BOOTSTRAPPED without the password.
+`init_db.py` now prints the command when production starts with no users. 12 new tests
+(`test_admin_bootstrap.py`).
+
+**4. The database was open to the network and used as a superuser.** The port is now published as
+`127.0.0.1:5433` (it was `5433:5432`, i.e. every interface; the backend uses `db:5432` internally and never
+needed it). A restricted runtime role is provided as an OPT-IN, so the existing setup keeps working:
+`database/roles/create_app_role.sql` (no superuser, no DDL, no DELETE - the application issues none,
+checked by search - and no UPDATE on `audit_logs` / `risk_advisory_notes`, turning "append-only" from the
+application's promise into something the database enforces),
+`docker-compose.hardened.example.yml` (copy to `docker-compose.override.yml`), and
+`MIGRATION_DATABASE_URL` support in `alembic/env.py` so migrations still run as the owner. Default
+behaviour is unchanged when it is unset.
+
+**Stale advice corrected.** The README told readers to run `docker compose down -v` (deleting the
+database and the uploaded files) "whenever the models or docker-compose.yml itself change" - a leftover
+from before migrations existed, and this very change edits docker-compose.yml. It now says to rebuild and
+restart, that migrations keep the data, and not to use `-v` on real data. The README also points to the
+first-administrator step.
+
+**Honest limits.** Not done: encryption at rest or TLS to the database, row-level security, retention of
+old tokens/notifications/audit rows, time-zone-aware timestamps, case-insensitive user names (listed in
+`docs/DATABASE_OPERATIONS.md`, section 6).
+
+**Executed here:** the validator on 12+ cases, old versus new, and on the generated template; the 5
+schema-parity tests (5/5 pass, and shown to fail without the migration); YAML parse of both compose files
+and a simulated merge of the override; `bash -n` on both shell scripts; py_compile on every Python file;
+an AST call-signature cross-check (no mismatched keywords); a static check that every name, keyword and
+model column the new code and tests use exists. **NOT executed:** the new migration against PostgreSQL;
+the 24 new database-backed tests (upload rules and bootstrap - they need the full stack; expected suite
+size 181 + 29 = 210 collected, 208 passed, 2 skipped); the backup and restore scripts, and the two
+PowerShell files could not even be parse-checked (no PowerShell here); the role SQL. Run the restore drill
+in `docs/DATABASE_OPERATIONS.md` before relying on the backups.
+
+
+## Sixty-first item - decision-support additions: hazard filter, KPI lineage, row validity, hazard matrix, summary draft
+
+Five additions, all drawn from data the system already holds and all within the ICN; none needs new
+data from BOT. Chosen after a review of suggested additions that rejected anything inventing policy
+(risk scores with Low/High thresholds, "+20%" scenarios, "overdue" without BOT deadlines).
+
+**1. Hazard filter (ICN item 9; closes KG-10).** `filter_hazard_type` (Flood, Drought, Landslide,
+Cyclone, None; anything else is HTTP 422) on hazard-exposure, combined exposure, map-points and the four
+report endpoints, and a fourth control in Dashboard Filters. Semantics, chosen to avoid double counting:
+Hazard Exposure and the map classify each region/period under ONE dominant recorded hazard, so the filter
+keeps the regions whose dominant hazard matches; Combined Exposure keeps the regions where the hazard is
+among those recorded. It deliberately does NOT narrow the Summary Figures, the IDW hazard surface (which
+needs every region) or the loan and collateral points (they carry no region); the screen says so, and the
+reports state the active hazard filter in their "Filters applied" line. (An earlier note in the review
+conversation suggested a loan could be counted under two hazards; that is not so for Hazard Exposure.)
+
+**2. KPI data lineage.** New `GET /api/analytics/kpi-sources`: one row per current APPROVED submission behind
+the figures (institution, period, file and version, rows used, loan and collateral totals, row validity),
+built on the same base query as every calculation so it cannot disagree with the KPI. "View the source of
+these figures" under Summary Figures lists them with a totals row, and "View rows" opens the existing
+submission detail with its rows and loan numbers. Same tenant scoping; the administrator is refused.
+
+**3. Row validity.** valid rows / total rows, shown in Submission Monitoring and in the lineage table. Named
+"row validity", not a quality score: a score needs weights and thresholds that are BOT's to set; it is a
+descriptive ratio and is never combined with risk.
+
+**4. Hazard exposure matrix.** Hazard x loan exposure x collateral x records x regions, grouped on the
+client from the Hazard Exposure rows already loaded. The "Institutions" column from the original suggestion
+is not in the data, so it is "Regions". No new hazard type was added.
+
+**5. Editable supervisory summary.** "Generate Supervisory Summary" writes a draft into a text box from the
+approved figures on screen (scope, exposure, hazard pattern, concentration, climate-data quality,
+submission tracking). Every sentence states a measured value; there is no period-over-period comparison, no
+rating, no estimate. The analyst edits it; it is not saved or sent.
+
+**Tests added (not yet run by the author):** `test_hazard_filter_and_kpi_sources.py`, 10 tests - filter on
+each of the three analytics views, unknown value refused, KPI totals unchanged by the hazard filter, reports
+honour the filter (CSV content, and PDF, Excel and PNG generate), lineage lists only current approved
+submissions and matches the KPI total, follows the filters, is tenant-scoped, administrator refused.
+
+**Verification here.** py_compile of every touched backend file; an AST check that every keyword passed to
+the patched functions is a real parameter; the dashboard source type-checked with the TypeScript compiler
+(strict, with stand-ins for react and the project's own modules): no diagnostics, before and after, and the
+checker was shown to catch a deliberately introduced typo. NOT verified: the pytest run (10 new tests; the
+suite should now collect 220), `docker compose build`, and the screens in a browser.
+
+
+## Sixty-second item - hazard filter linked to the map; hazard-focus line; full-width supervisory button
+
+Raised by the project owner while testing: choosing a Region in Dashboard Filters visibly changed the
+Geospatial Map, but choosing a Hazard appeared to do nothing.
+
+**Cause (read from `HazardMap.tsx` and `InternalPortal.tsx`, not assumed).** The dashboard passed the map
+the institution, region and reporting-period filters but not the hazard. The hazard filter only trimmed the
+list of region markers on the server side. The map's own "Hazard layer" selector is separate and starts
+empty, so no hazard surface appeared. And when no region had the chosen hazard as its dominant recorded
+hazard, the marker list was empty and the whole map was replaced by "No geolocated exposure data yet", which
+was misleading: the data exists and the filter reduced it to zero. This is the divergence between the
+dashboard control and the map control that was foreseen when the hazard filter was designed.
+
+**Changes (frontend only; no backend, schema or test change).**
+1. `HazardMap` accepts `filterHazardType` and, when it is set, selects the same hazard layer ("None" clears it);
+   clearing the filter leaves the analyst's own layer choice alone. The dashboard passes it in.
+2. The map stays visible under a hazard filter and states what the filter did: how many region markers match,
+   or that no region has that dominant recorded hazard, and that the hazard surface and the loan and collateral
+   points are not narrowed by hazard.
+3. A labelled "Hazard focus" line under Summary Figures when a hazard is chosen: loan exposure and collateral in
+   the regions whose dominant recorded hazard is the chosen one, with its share of the total loan value. It is
+   the existing Hazard Exposure total, now visible next to the headline figures. The four Summary Figures
+   themselves are deliberately still NOT narrowed by hazard (hazard is recorded per region; a "flood total"
+   would be read as loans hit by floods); the line says so. Narrowing the four figures by hazard was
+   considered and left for after the demonstration: it changes the backend KPI calculations and needs tests.
+4. In Automated Reports the "Generate Supervisory Summary" button now spans the full width of the card, below
+   the four report buttons, which are unchanged (2 x 2 grid).
+
+**What the hazard layer actually shows (clarified, and the presentation wording corrected).** The surface is
+not a map of flood or drought intensity. Its values are the loan exposure (TZS) of the regions in which the
+chosen hazard is the dominant recorded one, interpolated by IDW with every other region anchored at zero. It is
+a picture of exposure under a hazard classification. Combined with a financial layer (Loan or Collateral dots
+at the submitted coordinates) it lets an analyst see, for example, collateral locations against exposure under
+Flood.
+
+**Verification here.** The frontend type-checked with the TypeScript compiler (strict, stand-ins for react,
+axios and leaflet): 45 diagnostics before and 45 after, all stand-in noise, none new. The checker was shown to
+catch three deliberate mistakes in the new code: a misspelt property, an unknown prop passed to the map, and a
+prop of the wrong type. An earlier version of the check did NOT validate component props; the stand-ins were
+corrected and the result above is from the corrected check. **NOT verified:** `docker compose build` with the
+real React types, and the screens in a browser (layout of the full-width button, the map messages).
+
+## Sixty-third item - "View Details" froze the browser
+
+Reported by the project owner: pressing the many View details / View rows buttons made the page
+stick until the browser offered "Exit page".
+
+**Cause (read from the code, not assumed).** The submission detail endpoint returned every row and
+every finding of the submission (`return submission`), and the panels drew all of them at once
+(`records.map(...)` and `errors.map(...)`). A 15,000-row file is about 165,000 table cells, so the
+browser's main thread blocked and Chrome showed "Page unresponsive - Exit page / Wait". The same
+panel is opened by Submission Status (View Details), by the source-of-the-figures table (View rows)
+and, in the institution portal, by Review. A second cause of confusion: the panel is at the bottom
+of the page while the button is higher up, so even when it opened the user did not see it.
+
+**Fix.**
+1. Backend, GET /api/submissions/{id}: new optional query parameters `record_offset`, `record_limit`
+   (default 100, maximum 500), `error_offset`, `error_limit` (same); the response carries one page of
+   rows and one page of findings in a stable order (row number) plus `records_total` and
+   `errors_total`. Authorisation is unchanged and is checked before any row is read. Upload and review
+   responses are unchanged.
+2. Frontend, both portals: the panel loads 50 rows and 50 findings at a time and pages them with a new
+   PagerBar ("Showing rows 1 to 50 of 15,000", Previous, Next); the panel scrolls itself into view when
+   opened; a Close button was added at the top of the panel.
+3. Six tests in test_submission_detail_pagination.py: default page and totals, ordered pages that
+   together are the whole submission, findings paged independently of rows, a page beyond the end is
+   empty, unreasonable parameters refused (HTTP 422), owner can page and another institution is refused.
+
+**Verification here.** Backend files compile; test imports and fixtures exist; the frontend type check
+shows the same 45 stand-in diagnostics before and after, none new, and a deliberate wrong prop type was
+caught. **NOT verified:** the six new tests have not been run (the suite should now collect 226), the
+Docker build with the real React types, and the behaviour in a browser on a large file.
+
+
+## Sixty-fourth item - audit log filters as drop-downs
+
+Requested by the project owner. The audit viewer had one free-text box for the action; the
+backend already filtered by action, entity type and user.
+
+**Change.** Three drop-downs (Action, Entity type, User) that apply as soon as one is chosen, a Clear
+Filters button, an Export button that says whether it exports all or the filtered entries, a count of
+matching entries and a User column. The options come from a new administrator-only endpoint,
+GET /api/audit-logs/filter-options, which lists the actions, entity types and users that actually
+occur in the audit log, so a filter can only name something that exists (a typed filter that matches
+nothing looks exactly like an empty log). The endpoint count is now 52 (51 under /api plus health).
+
+**Tests.** Four, in test_audit_filter_options.py: each value listed once and in order, no empty values,
+every offered value works as a filter, only the administrator may read the options (HTTP 403 and 401).
+
+**Not verified here.** The four new tests have not been run (the suite should now collect 230 with the
+detail-paging tests), the Docker build with the real React types, and the screen in a browser.
+
+
+## Sixty-fifth item - the supervisory summary can be closed
+
+Reported by the project owner: Generate Supervisory Summary opened the draft well, but it could not
+be closed without refreshing the page. The panel was shown whenever the draft text was non-empty and
+nothing could empty it.
+
+**Change.** An explicit open or closed state for the panel (frontend only). A Close button sits at the
+top of the draft and another beside Copy; the text area stays editable and no longer controls whether the
+panel is shown. Closing discards the draft (it is never saved or sent) and Generate writes a fresh one.
+
+**Verification here.** Braces and parentheses balance; the frontend type check shows no new diagnostics.
+**Not verified:** the behaviour in a browser.
+
+## Sixty-sixth item - three workflow rules enforced by the database
+
+Raised from the database analysis: three rules held only because the application kept them.
+
+**Added (migration b5d8a3c6e102, head after f4a9c2d71b05).**
+1. `ck_submissions_current_only_valid_or_approved` - only a VALID or APPROVED submission can be current.
+2. `ck_submissions_reviewer_not_submitter` - the reviewer is never the person who uploaded it (BR-03).
+3. `ck_users_institution_user_has_institution` - an institution user belongs to an institution (BR-15).
+The protections the verification script expects go from 34 to 37 (CHECK constraints 29 to 32).
+
+**Why the third rule is one-way.** The reverse (staff roles must have no institution) was designed first
+and withdrawn: the demonstration seed (`init_db.py`) attaches the administrator and the BOT analyst to the
+BOT institution record, although the API refuses that combination. An existing database holds those rows,
+and PostgreSQL checks a NOT VALID constraint on every UPDATE of an existing row, so every sign-in (which
+updates `last_login_at`) would have failed for those two accounts. Recorded as a finding: the seed does not
+follow the API's own rule; harmless today, to be aligned later.
+
+**Safety.** Each rule was compared with every code path that writes the columns (upload, supersession,
+approve, reject, fallback restoration): status and `is_current` change in one UPDATE, the reviewer is set only
+after the maker-checker refusal, and only institution users can upload. On PostgreSQL the constraints are
+added NOT VALID and validated at once when no existing row breaks them; otherwise the count is logged and
+nothing is deleted. The three conditions and the "rows that break it" queries were exercised on SQLite with
+accept, reject and NULL cases.
+
+**Tests.** `test_workflow_constraints.py` (11 cases). `make_user` in the test helpers now gives an
+institution user an institution when none is passed (21 existing calls built users the database now refuses).
+
+**Not verified here.** The new tests and the migration on PostgreSQL have not been run (the suite should
+collect 241), nor `verify_db_constraints.py` (should report 37). The report and the presentation still state
+the last verified figures (29 CHECK constraints, 34 protections, 7 migrations) and are to be updated after
+the run.
+
+## Sixty-sixth item - production environment (stage 1 of the full-deployment work)
+
+Requested by the project owner after the prototype was accepted: build the environment for a full
+deployment, so that the next session can connect the Bank's systems and the climate-sector data directly.
+The first condition was not to break the working system.
+
+**How it is kept safe.** Everything is new and separate: `docker-compose.prod.yml` (project name `cdr-prod`,
+volumes `cdr_prod_*`), `frontend/nginx.prod.conf`, `.env.production.example`, `scripts/prod_setup.py`,
+`scripts/check_production_config.py`, `scripts/prod_up.ps1` and `.sh`, `docs/PRODUCTION_DEPLOYMENT.md`. The
+development `docker-compose.yml`, `frontend/nginx.conf` and `backend/Dockerfile` are byte-identical to the delivered
+ones. The only application change: in production FastAPI does not serve `/docs`, `/redoc` or `/openapi.json`
+(`api_docs_urls()` in `startup_checks.py`, three-line change in `main.py`, 8 test cases).
+
+**What it provides.** Only ports 80 and 443 open; HTTPS with HTTP redirected and HSTS; no demonstration accounts;
+secrets generated at random into `.env.production` (ignored by git, with `certs/`); the restricted database role enabled
+by a staged start; log rotation; health checks with start order by health; a configuration checker that refuses weak or
+placeholder settings, a published database or backend port, development volumes and a missing certificate.
+
+**Verification here.** Compose and nginx files parse; the checker and the generator were run on a copy and caught every
+deliberate fault (weak and short secrets, a published database port, a missing git-ignore entry, missing certificate);
+all Compose variables are defined in the example; `bash -n` accepts `prod_up.sh`; the backend compiles.
+**Not verified:** a real start with Docker, the TLS handshake with a real certificate, the staged role switch, and
+`prod_up.ps1` (no PowerShell available). The 8 new test cases have not been run (the suite should now collect 249).
+
+
+## Sixty-seventh item - verification run on the owner's machine (6 October 2026)
+
+Run by the project owner on the delivered stack (before the production files were added):
+`docker compose down`, `build --no-cache` (142 s; the frontend compiled in 8 s with the real React types), `up -d`
+(database healthy, backend and frontend started); the backend log shows no `NOT VALID` constraint; `pytest`:
+**241 collected, 239 passed, 2 skipped, 0 failed** (the two skips are the known ones in test_startup_checks);
+`verify_db_constraints.py`: **all 37 expected CHECK constraints and unique indexes present on the real database**.
+This verifies migration b5d8a3c6e102 on PostgreSQL (the three workflow constraints were added and validated), the
+paging of submission details, the audit filter options and the workflow-constraint tests.
+
+`backup.ps1` did not run: PowerShell refused it as "not digitally signed" (execution policy), so no backup was
+taken before the rebuild; the data volume was kept (`down` without `-v`). The fix is documented in
+DATABASE_OPERATIONS.md and PRODUCTION_DEPLOYMENT.md (`Unblock-File` or `-ExecutionPolicy Bypass`).
+
+The report and the presentation still state the figures of the earlier verified run (220 tests, 29 CHECK constraints,
+34 protections, 7 migrations); they are to be updated once, after the next run, which will include the 8 production-config
+test cases (249 collected).
+
+## Sixty-eighth item - create_admin crashed after creating the administrator
+
+Found by the project owner creating the first administrator on the production stack: the command ended with a
+`DetachedInstanceError` traceback. **The administrator had been created** (committed, and the ADMIN_BOOTSTRAPPED audit
+entry written); only the final message failed.
+
+**Cause.** `scripts/create_admin.py` closed its database session in a `finally` block and then printed
+`user.username`. The audit step commits, which expires the user's loaded fields, so after `db.close()` reading the
+field tried to reload it through a session that no longer existed. The 12 bootstrap tests keep their session open for
+the whole test, so they could not see it.
+
+**Fix.** The script reads the username while the session is still open; the service reloads the user after the audit
+commit (`db.refresh`) so the returned object stays readable after a close. New test
+`test_the_returned_user_is_still_readable_after_the_session_is_closed` (closes the session, then reads the user).
+
+**Not verified here.** The new test has not been run (the suite should now collect 250 with the production-configuration
+tests) and the script was not run against the production stack after the fix. The account that was created before the
+crash is valid and unaffected.
+
+
+## Sixty-ninth item - production backup, retention, restore drill and schedule (stage 2 of the full-deployment work)
+
+**Why a new tool.** The existing backup and restore scripts call `docker compose` without a project or file, so they serve the
+development stack; and a backup that has never been restored is not proven. `scripts/prod_ops.py` (Python 3, Docker, Windows and
+Linux) adds, for the production stack only: `backup` (same layout as `backup.ps1`, checks its own result, optional off-machine
+copy that is also checked, retention that removes only timestamp-named folders and never the new one), `status` (age and integrity,
+exit code for monitoring), `drill`, `restore` and `schedule`.
+
+**The drill** restores a backup into a throw-away copy (project `cdr-drill`, own volumes, no ports): creates the bare role cdr_app,
+restores the dump, re-applies the least-privilege grants, starts the backend, restores the files, then checks the protections, the
+rows, that cdr_app still cannot update the audit log or delete submissions, and the file count; it prints the time taken; it removes the
+copy even when a check fails. Every command names `-p cdr-drill`, and the only destructive command refuses any other project.
+`restore` (production) needs the typed phrase RESTORE-PRODUCTION, refuses a damaged backup, and takes a safety backup first.
+
+**Found on the way.** `backups/` was not in `.gitignore` although a backup holds real data; it is now. `database/roles/create_bare_role.sql`
+is new: a backup taken on production carries grants for cdr_app, and restoring them where the role does not exist would fail.
+
+**Verification here.** Run against a fake `docker` that records every command: three backups with `--keep 2` leave two; the off-machine copy
+is checked; a damaged dump is reported by `status` (exit 1) and refused by `drill` and `restore` (nothing issued); a healthy drill passes;
+a drill with wrong cdr_app rights FAILS (exit 1) and still removes its copy; no command anywhere combined `down` or `-v` with `cdr-prod`;
+restore with a wrong phrase issues no command; restore with the right phrase takes the safety backup first, then restores in order.
+**Not verified:** a real run with Docker (the PostgreSQL behaviour of `pg_restore --clean --if-exists --no-owner` into the drill copy),
+and the Windows `schtasks` registration.
+
+## Seventieth item - verification of the production environment on the owner's machine (6 October 2026)
+
+Run by the project owner after items 66 and 69. **Verified on real Docker, PostgreSQL 16 and Windows:**
+- `prod_setup.py`, `check_production_config.py` and the four stages of `prod_up.ps1` (the stack was built and started; the
+  restricted role cdr_app was created with its revokes; the backend was switched to it; the web server started). Three problems were
+  found and fixed on the way: the configuration checker needed the `yaml` module (rewritten to need none), `create_admin` crashed after
+  creating the administrator (item 68), and the PowerShell execution policy blocks unsigned scripts (documented).
+- The production database holds exactly one user (the administrator you created) and no demonstration accounts; all 37 protections are
+  present; the backend connects as `cdr_app`; HTTP is redirected to HTTPS (301); `/openapi.json` returns the web application, not the
+  API description; HSTS, nosniff, X-Frame-Options and Referrer-Policy are sent; only ports 80 and 443 are published (the database and the
+  backend are reachable only inside the network); all three services report healthy. Sign-in and the administrator panel work over HTTPS
+  with a self-signed trial certificate.
+- `prod_ops.py`: `backup`, `status`, `schedule` and `drill` ran; both drills PASSED (see BACKUP_AND_RECOVERY.md).
+
+**Not yet verified:** `prod_ops.py restore` against the production stack (destructive; to be rehearsed on an agreed date), a real
+certificate from the Bank's ICT, the scheduled task actually firing at 02:00, and the latest development test run after the
+production-configuration changes (the suite should now collect 250). The report and the presentation still state earlier figures.
+
+
+## Seventieth item - a missing off-machine destination crashed the backup (found on the owner's machine, 7 October 2026)
+
+Verification run of the owner on 7 October 2026: the development stack rebuilt (92 s) and `pytest`: **250 collected, 248 passed,
+2 skipped, 0 failed**; the restore drill passed a second time on the production backup (31 s) and on the 15 MB development
+backup (36 s); the daily task "CDR-Backup" was registered; `status` reported two backups with integrity OK.
+
+**Found.** `python scripts/prod_ops.py backup --copy-to D:\cdr-backups` ended in a FileNotFoundError traceback because the
+machine has no D: drive. The local backup had been made, but the traceback hid that, retention did not run, and the re-registered
+daily task now pointed at the missing drive.
+
+**Fix.** An off-machine copy that cannot be made is now a clear warning (what failed, that the local backup is safe), not a crash:
+the local backup stands, retention runs, `backup.log` records `COPY-FAILED`, the exit code is 1 so a scheduler or monitor can see
+it, and `status` keeps warning until a copy succeeds. Tested against a destination that cannot exist: local backup kept, retention
+still removes the oldest, status warns (exit 1); against a good destination: the copy is checked, the log says OK, status exit 0.
+
+**Not verified.** The fixed tool on the owner's Windows machine. The report and presentation still carry earlier figures
+(220 tests, 29 CHECK constraints, 34 protections, 7 migrations) and say nothing yet of the production stack, the backup tool or
+the drill: they are to be updated once, with the verified figures above (250 / 248 / 2; 32 CHECK, 37 protections, 8 migrations).
+
+## Seventy-first item - report and presentation brought up to the verified state (7 October 2026)
+
+The report (99 pages) and the presentation (87 slides) now state the figures verified on the owner machine: **250 test cases,
+248 passed, 2 skipped by design, in 108 seconds (25 modules)**; **37 database protections** present on the development database,
+the production database and every restored drill copy; **8 migrations**, one head; **52 endpoints**.
+
+New in the report: Section 4.15.4 (the production environment, Figure 4.10, Table 4.15), the backup and drill tool in 4.15.2, Section 5.11
+with Tables 5.11 and 5.12 (production checks and four restore drills), four more defects in Table 5.8, the revised recommendations
+and the pilot stage, Appendix H screens S-26 to S-28 and Appendix I.4. New in the presentation: the production environment slide, the
+restore drill slide, a rewritten backup slide, and the updated path to production and roadmap.
+
+**What both documents still say honestly:** the production environment was checked with a self-signed certificate on one machine with sample
+data; no off-machine copy of a backup exists (the machine has one drive); the real restore command has not been run; the SRS (version 1.4)
+does not yet contain the production and backup additions.
+
+## Seventy-second item - read-only keys for external systems (stage 3 of the full-deployment work)
+
+**Why.** The Bank wants QGIS, ArcGIS, TMA, BSIS and RTIS connected. Those are systems, not people: they cannot sign in with a password that
+expires, and the system had no machine-to-machine access. This stage adds the foundation, not the connectors that bring TMA and PMO data in.
+
+**Design decisions.** (1) A key is created by a BOT analyst, never by the System Administrator, who may not read supervisory data (a key
+would be a way round that rule); the administrator may list and revoke keys as an emergency control. (2) Keys have their own endpoints
+(`/api/integration/...`, GET only) and are refused everywhere else, so no existing endpoint changed and a key can never write. (3) The endpoints call
+the same analytics functions as the dashboard, with sector-wide scope, so the numbers cannot differ from the screen. (4) The key is shown once and never
+stored (SHA-256 hash only); every refusal gives the same message while the audit log records the real reason; every successful read is audited
+with the client, path, filters and row count, never the key. (5) A key always expires (1 to 365 days) and revoking is immediate.
+
+**Built.** Table `api_clients` (migration `c6e9b2d4f713`; four CHECK constraints and two unique indexes, so the verification script now expects
+43 protections: 36 CHECK, 6 unique, 1 column); `app/core/integration_auth.py`; `app/api/integration_clients.py` (create, list, revoke) and
+`app/api/integration.py` (whoami, kpi-summary, hazard-exposure, combined-climate-financial-exposure, map-points, exposure-points and a GeoJSON
+variant); the Integration Access section on the analyst page (create, list, revoke) and the administrator page (list, revoke); docs/INTEGRATION_ACCESS.md.
+The suite is expected to collect **282** cases (250 + 32 new).
+
+**Verification here.** The key-handling code was run against stand-in modules: 18 of 18 checks (format, both header forms, wrong, unknown, malformed,
+revoked and expired keys, a sign-in token refused, the audit contents, no secret in any audit entry, the rate-limit bucket). The static parity tests pass (5 of 5);
+the parameters the endpoints pass match the service functions; the type check shows only the usual stand-in noise (+3) and a deliberate typo was caught.
+**Not verified:** the 32 new tests, the migration on PostgreSQL, the Docker build with the real React types, the screen in a browser, the per-key rate limit
+(the limiter is off in the test suite) and the QGIS and ArcGIS snippets.
+
+
+## Seventy-third item - keys that send climate files (stage 4 of the full-deployment work)
+
+**Why.** The Bank wants TMA and PMO data to arrive without an analyst uploading each file. Neither organisation has agreed an interface (TMA_INGESTION.md), and
+inventing one would be wrong. What can be built honestly is the receiving side: a door that accepts the same file the analyst uploads, for a system that holds a key.
+
+**Design decisions.** (1) A key has one scope: READ (as before), INGEST_TMA or INGEST_PMO. A sending key reads nothing, not even the dashboard figures, and a reading key
+sends nothing; using a key for the other job is refused with 403 and audited. (2) The source label (`API_KEY_TMA`, `API_KEY_PMO`) comes from the key and cannot be chosen by
+the sender; the manual upload refuses these two labels. The label names the channel, not a verified sender. (3) One shared implementation (`climate_upload_service.py`)
+validates and stores a file for both the analyst and the key, so they can never validate differently; the analyst endpoint behaves exactly as before (the extracted steps are the old ones). (4) Everything
+delivered is stored UNVALIDATED: it enters the analysis only when an analyst promotes it, so no feed can change a dashboard figure by itself. (5) Sending the same file again is
+safe (duplicates are reported, nothing is overwritten). (6) Provenance: a batch records the key (`uploaded_by_api_client_id`) or the person, never both (a CHECK); the audit log
+gets `INTEGRATION_INGEST` with the key name, file and counts; BOT analysts are notified. (7) Limits: the upload size and row limits of the manual upload, 30 files a minute per key.
+
+**Built.** Migration `d7f1a3c5e824` (column `api_clients.scope`; column `climate_ingestion_batches.uploaded_by_api_client_id` with its foreign key and index; two CHECK
+constraints, so the verification script now expects **45 protections**: 38 CHECK, 6 unique, 1 column); `store_climate_upload` and the `POST /api/integration/climate-data` endpoint;
+the type selector and type column in Integration Access; a note under Recent Ingestion Batches; 16 new tests (`test_integration_ingest.py`). The suite should collect **298** cases.
+The system now has 14 tables and 63 endpoints (62 under /api plus the health check).
+
+**Verification here.** The scope checks of the real code were run against stand-in modules (8 of 8: each type refused for the other's job, the label follows the key, a corrupt scope is refused);
+the static parity tests pass (5 of 5); the migration chain has one head; the extraction of the upload steps matches the original line by line; the type check shows only the usual stand-in noise.
+**Not verified:** the 16 new tests, migration `d7f1a3c5e824` on PostgreSQL, the Docker build, the screens, and a real TMA or PMO delivery (none exists).
+
+
+## Seventy-fourth item - the reasons for rejected rows were never returned (found trying stage 4 by hand, 7 October 2026)
+
+**Verification run of the owner (7 October 2026).** Development stack: **298 collected, 296 passed, 2 skipped, 0 failed** (162 s); production started with `prod_up`; a TMA key was created, a three-row file was sent
+(`source API_KEY_TMA`, no user as uploader, the key recorded, 3 received, 2 accepted, 1 rejected) and the same key was refused on a read endpoint (`This key is not allowed to do that`).
+
+**Found.** That reply said one row was rejected and `errors` was an empty list. The batch object has no `errors` relationship (only `records`), so the field fell back to its default: **no reply, to a sender or to an
+analyst, ever listed the rejected rows**, and `GET /climate-data/ingestions/{id}` had the same fault. The reasons were stored in `climate_ingestion_errors` all along; nothing was lost. No test looked at the field.
+
+**Fix, with no database change.** One helper, `batch_with_errors`, builds every reply that returns a batch: the batch, a page of its rejected rows ordered by row number (500 by default) and `errors_total`. The analyst upload, the key upload and
+the detail endpoint use it; the detail endpoint takes `error_offset` and `error_limit` (1 to 2000). A page and not the lot, on purpose: a file of 100,000 bad rows must not become a 100,000-item reply.
+Seven new test cases in `test_climate_batch_errors.py` (key reply, manual reply, clean file, paging, the 500 cap with the true total, refused paging values). The suite should now collect **306** cases.
+
+**Not verified.** The seven new tests and the Docker rebuild. The production stack was started before this fix; run `prod_up` again to apply it.
+
+## Seventy-fifth item - verification run of 7 October 2026 for stages 3 and 4; report and presentation brought up to date
+
+Run by the project owner after the keys for external systems and the rejected-row fix: development stack rebuilt without cache (249 s) and `pytest`:
+**306 collected, 304 passed, 2 skipped, 0 failed** (167 s); production restarted with `prod_up` and `verify_db_constraints.py` reported **all 45 expected protections present** on the production
+database, which already held data (migrations `c6e9b2d4f713` and `d7f1a3c5e824` applied without loss). Earlier the same day, by hand: a read key was created, used, refused where it must be refused and revoked; a TMA sending key delivered a three-row
+file (source `API_KEY_TMA`, no user as uploader, the key recorded, 2 accepted, 1 rejected) and was refused on a read endpoint; the audit log showed every step and no key.
+
+The report (106 pages) and the presentation (89 slides) now state: 306 test cases in 28 modules, 45 database protections (38 CHECK, 6 unique, 1 column), 14 tables, 190 columns, 19 foreign keys,
+10 migrations, 63 endpoints; section 4.16 and section 5.12 (keys, with Table 5.13), the new defect in Table 5.8, the updated ER diagram and charts, and two new slides.
+
+Still not done, and stated as such in both documents: no real sender or reader is connected to the key doors; the per-key rate limit was not exercised (the limiter is off in the tests); the QGIS and ArcGIS examples were not run;
+a key sees the whole sector's approved data; there is no IP allow-list (needs the trusted-proxy setting, KG-01).
+
+
+## Seventy-sixth item - the real client address behind the proxy, and an address list for each key (stage 6a; closes KG-01)
+
+**Problem (KG-01).** In production every connection reaches the backend from the web server, so the rate limiter, which used the connection address, gave all users ONE bucket: 10 sign-in attempts a minute in total, so one person
+guessing passwords could stop everyone from signing in, and the audit entries and key records held the proxy's address. An address list for keys could not be built on that.
+
+**Fix.** `app/core/client_ip.py` (standard library only): `X-Forwarded-For` is believed only when the connection comes from a trusted proxy (`TRUSTED_PROXIES`), and only the part the proxies added: read from the right,
+skipping proxies of ours; the first other address is the caller, so a prefix invented by the caller is never reached; anything unreadable falls back to the proxy, never to a guess; no setting means nothing is trusted. The
+limiter's key function, the key rate-limit bucket and the audit `client_address` all use it. A mistake in the setting stops the backend at start-up. The production Compose file trusts the private networks (the web server is the only way in) and the production
+checker requires the setting.
+
+**Address list for keys.** Optional `api_clients.allowed_networks` (NULL = any address, as before) with one CHECK (`ck_api_clients_allowed_networks_not_blank`), migration `e9b3c7a1d5f2`, validated and normalised on creation (up to 20 addresses or
+networks, 422 on a bad entry), checked after the key itself is proved, refused like any other bad key with the reason `address not allowed` and the address in the audit log; a list that cannot be read refuses everyone. The verification script now expects **46** protections (39 CHECK, 6 unique, 1 column).
+
+**Found by the tests.** A list of only commas and spaces came back as an empty string instead of "no list"; the database would have refused it and the user would have seen a server error. Fixed, and covered.
+
+**Tests.** 40 cases in `test_client_ip.py` (these were run here against the real module: 40 of 40), 19 in `test_integration_allowed_networks.py` and 3 in `test_rate_limit_real_address.py` (the limiter switched on, connecting as the proxy: one caller is stopped on the 11th
+attempt while another is not; inventing addresses does not help; without a trusted proxy the header is ignored). The suite should now collect **368** cases.
+
+**Not verified here.** The 22 tests that need the application (they have not been run), migration `e9b3c7a1d5f2` on PostgreSQL, the Docker build, and the per-caller limit on a real server (on a single Windows machine Docker's gateway hides the callers).
+No report or presentation was changed, at the owner's instruction.
