@@ -22,6 +22,7 @@ function Wait-Healthy($service) {
   throw "$service did not become healthy. See: docker compose -f docker-compose.prod.yml --env-file .env.production logs $service"
 }
 
+New-Item -ItemType Directory -Force -Path backups\status | Out-Null   # where the backup task leaves its result for the monitor
 Write-Host "1/4 Starting the database and the backend ..."
 docker compose @c up -d --build db backend
 Wait-Healthy 'backend'
@@ -39,7 +40,7 @@ docker compose @c up -d --force-recreate backend
 Wait-Healthy 'backend'
 
 Write-Host "4/4 Starting the web server ..."
-docker compose @c up -d --build frontend
+docker compose @c up -d --build --force-recreate frontend
 Wait-Healthy 'frontend'
 
 $domain = Get-EnvValue 'CDR_DOMAIN'

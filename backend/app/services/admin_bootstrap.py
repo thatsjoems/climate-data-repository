@@ -62,7 +62,7 @@ def create_first_admin(
     except ValueError as exc:
         raise BootstrapError(f"Invalid input: {exc}") from exc
 
-    problems = validate_password_strength(password)
+    problems = validate_password_strength(password, role=RoleEnum.SYSTEM_ADMIN, username=username)
     if problems:
         raise BootstrapError("Password must " + "; ".join(problems) + ".")
 

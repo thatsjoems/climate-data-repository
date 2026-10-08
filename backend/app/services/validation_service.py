@@ -9,6 +9,8 @@ issues found).
 import io
 import math
 import pandas as pd
+
+from app.services.date_rules import EMPTY, OK, date_problem_hint, read_date
 from app.services.template_generator import (
     REQUIRED_COLUMNS, TANZANIA_REGIONS, HAZARD_OPTIONS, COLUMNS, FIELD_NAMES,
     CLIENT_TYPES, BUSINESS_SIZES, LOAN_TYPES, CURRENCIES, LOAN_ECONOMIC_ACTIVITIES,
@@ -63,19 +65,19 @@ def _clean_str(val) -> str:
 
 
 def _parse_date_value(val):
-    """Return a canonical Python date or None for an empty value.
+    """Return (a canonical Python date or None, whether the cell is acceptable). An empty cell is acceptable and gives None.
 
-    Source workbooks are allowed to contain Excel dates or common textual date
-    forms. Invalid non-empty dates are rejected rather than silently stored as
-    ambiguous strings in the canonical date column.
+    The rules are in app/services/date_rules.py: a real date cell and year-first text are accepted, day-first or month-first text only when it can mean one thing,
+    and an ambiguous date (04/05/2026), a number or an implausible year is refused instead of being guessed or stored as a date of 1970.
     """
-    if val is None or _clean_str(val) == "":
-        return None, True
-    try:
-        parsed = pd.to_datetime(val, errors="raise")
-        return parsed.date(), True
-    except (TypeError, ValueError, OverflowError):
-        return None, False
+    parsed, status = read_date(val)
+    return parsed, status in (EMPTY, OK)
+
+
+def _date_hint(val) -> str:
+    """': ' plus what to do, for the finding of a refused date ('' when there is nothing to add)."""
+    hint = date_problem_hint(val)
+    return f": {hint}" if hint else ""
 
 
 def _clean_float(val):
@@ -166,8 +168,10 @@ def validate_excel_file(
         return records, issues
 
     def get(row, field):
+        # `row` is a plain tuple of the cell values (see the loop below), not a pandas Series: reading a Series cell with .iloc cost
+        # more than every other step of a row together, thirty times a row (measured in docs/LOAD_TESTING.md).
         idx = col_map.get(field)
-        return row.iloc[idx] if idx is not None else None
+        return row[idx] if idx is not None else None
 
     def validate_location(row, row_number, region_field, district_field, ward_field, village_field,
                            lat_field, lon_field, label_prefix, required):
@@ -267,7 +271,7 @@ def validate_excel_file(
     seen_loan_ids = set()
 
     # ---- 3. Row-level validation ----
-    for idx, row in data_rows.iterrows():
+    for idx, row in enumerate(data_rows.itertuples(index=False, name=None)):
         row_number = header_row_idx + 2 + idx  # +1 header->1-indexed row, +1 for pandas 0-index -> next row
         row_is_valid = True
         record = {}
@@ -323,10 +327,10 @@ def validate_excel_file(
         record["disbursement_date_value"] = disb_date
         record["maturity_date_value"] = mat_date
         if not disb_ok:
-            issues.append(ValidationIssue(row_number, "disbursement_date", "Disbursement date is not a valid date"))
+            issues.append(ValidationIssue(row_number, "disbursement_date", "Disbursement date is not a valid date" + _date_hint(get(row, "disbursement_date"))))
             row_is_valid = False
         if not mat_ok:
-            issues.append(ValidationIssue(row_number, "maturity_date", "Maturity date is not a valid date"))
+            issues.append(ValidationIssue(row_number, "maturity_date", "Maturity date is not a valid date" + _date_hint(get(row, "maturity_date"))))
             row_is_valid = False
         if disb_date and mat_date and mat_date < disb_date:
             issues.append(ValidationIssue(row_number, "maturity_date", "Maturity date cannot be earlier than disbursement date"))
@@ -408,7 +412,7 @@ def validate_excel_file(
         pledged_date, pledged_ok = _parse_date_value(get(row, "collateral_pledged_date"))
         record["collateral_pledged_date_value"] = pledged_date
         if not pledged_ok:
-            issues.append(ValidationIssue(row_number, "collateral_pledged_date", "Collateral pledged date is not a valid date"))
+            issues.append(ValidationIssue(row_number, "collateral_pledged_date", "Collateral pledged date is not a valid date" + _date_hint(get(row, "collateral_pledged_date"))))
             row_is_valid = False
         record["collateral_economic_activity"] = _clean_str(get(row, "collateral_economic_activity")) or None
 

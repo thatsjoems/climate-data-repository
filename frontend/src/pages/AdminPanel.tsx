@@ -1,5 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react'
 import apiClient from '../api/client'
+import SystemStatus from '../components/SystemStatus'
+import { useAuth } from '../context/AuthContext'
 import PortalShell, { SidebarItem, PlatformStatus } from '../components/PortalShell'
 import IntegrationAccess from '../components/IntegrationAccess'
 
@@ -11,6 +13,7 @@ interface UserItem {
   role: string
   institution_id: string | null
   is_active: boolean
+  mfa_enabled?: boolean
 }
 
 interface InstitutionItem {
@@ -50,6 +53,7 @@ interface AuditLogItem {
 export default function AdminPanel() {
   const [users, setUsers] = useState<UserItem[]>([])
   const [institutions, setInstitutions] = useState<InstitutionItem[]>([])
+  const { user: me } = useAuth()
   const [message, setMessage] = useState<string | null>(null)
 
   const [newUser, setNewUser] = useState({
@@ -190,6 +194,19 @@ export default function AdminPanel() {
     }
   }
 
+  // For someone who lost their phone and their recovery codes. They set it up again at their next sign-in; the administrator never sees a secret.
+  async function resetTwoStep(u: UserItem) {
+    if (!window.confirm(`Reset two-step sign-in for ${u.full_name} (${u.username})? Their open sessions end, and they must set it up again at their next sign-in.`)) return
+    setMessage(null)
+    try {
+      await apiClient.post(`/users/${u.id}/mfa/reset`)
+      setMessage(`Two-step sign-in was reset for ${u.username}. They will set it up again when they next sign in.`)
+      loadAll()
+    } catch (err: any) {
+      setMessage(err?.response?.data?.detail || 'Failed to reset two-step sign-in.')
+    }
+  }
+
   async function toggleInstitutionActive(i: InstitutionItem) {
     const action = i.is_active ? 'deactivate' : 'activate'
     if (i.is_active) {
@@ -221,7 +238,8 @@ export default function AdminPanel() {
   ]
 
   const sidebarItems: SidebarItem[] = [
-    { key: 'resets', icon: '🔑', label: 'Password Resets', active: true, onClick: () => scrollTo('password-resets-card') },
+    { key: 'status', icon: '📊', label: 'System Status', active: true, onClick: () => scrollTo('status-section') },
+    { key: 'resets', icon: '🔑', label: 'Password Resets', onClick: () => scrollTo('password-resets-card') },
     { key: 'institutions', icon: '🏢', label: 'Institutions', onClick: () => scrollTo('institutions-card') },
     { key: 'users', icon: '👥', label: 'Users', onClick: () => scrollTo('users-card') },
     { key: 'audit', icon: '🧾', label: 'Audit Log', onClick: () => scrollTo('audit-card') },
@@ -239,6 +257,8 @@ export default function AdminPanel() {
       platforms={platforms}
     >
       {message && <div className="alert-info">{message}</div>}
+
+      <SystemStatus />
 
       {generatedResetPassword && (
         <section className="card" style={{ borderLeft: '3px solid var(--color-accent)' }}>
@@ -368,7 +388,7 @@ export default function AdminPanel() {
           const inactiveInstitutionIds = new Set(institutions.filter((i) => !i.is_active).map((i) => i.id))
           return (
             <table>
-              <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Two-step</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 {users.map((u) => {
                   const blockedByInstitution = u.is_active && u.institution_id && inactiveInstitutionIds.has(u.institution_id)
@@ -377,6 +397,7 @@ export default function AdminPanel() {
                       <td>{u.full_name}</td>
                       <td>{u.username}</td>
                       <td>{u.role}</td>
+                      <td>{u.mfa_enabled ? 'On' : 'Off'}</td>
                       <td>
                         {u.is_active ? 'Active' : 'Deactivated'}
                         {blockedByInstitution && (
@@ -389,7 +410,7 @@ export default function AdminPanel() {
                           </span>
                         )}
                       </td>
-                      <td><button className={`btn-sm ${u.is_active ? 'btn-danger' : 'btn-success'}`} onClick={() => toggleUserActive(u)}>{u.is_active ? 'Deactivate' : 'Activate'}</button></td>
+                      <td><button className={`btn-sm ${u.is_active ? 'btn-danger' : 'btn-success'}`} onClick={() => toggleUserActive(u)}>{u.is_active ? 'Deactivate' : 'Activate'}</button>{u.mfa_enabled && u.id !== me?.id && (<button className="btn-sm" style={{ marginLeft: '0.4rem' }} onClick={() => resetTwoStep(u)}>Reset two-step</button>)}</td>
                     </tr>
                   )
                 })}

@@ -51,6 +51,22 @@ The backend therefore reads the real caller from `X-Forwarded-For`, but **only**
 
 On a single Windows machine with Docker Desktop, requests from the browser reach the stack through Docker's own gateway (a private address), so every caller still looks like the gateway; the per-caller limit becomes visible on a real server where callers arrive from their own addresses.
 
+## Two-step sign-in for the Bank's staff
+
+In production the BOT analyst and System Administrator roles must use a code from an authenticator app after the password (`MFA_REQUIRED`, true by default in `docker-compose.prod.yml`; the checker requires the setting). **The first administrator you create is asked to set it up at the first sign-in**: have a phone with an authenticator app ready, and keep the recovery codes. Create a second administrator early, so a lost phone can be reset by someone else. Everything else (lost phone, the emergency switch, changing `SECRET_KEY`) is in `docs/MFA.md`.
+
+## Monitoring and alerts
+
+The backend checks itself every 10 minutes (database, schema version, backups, disk, failed sign-ins, refused API keys, expiring keys, administrators) and tells the System Administrators in the bell; **Administration, System Status** shows everything. The backup task leaves its result in `backups/status` (mounted read-only into the backend; `prod_up` creates the folder), so a backup that did not happen is noticed. **Run `python scripts/prod_ops.py backup` once after deploying**, or the page rightly says no backup is recorded. For a scheduler or monitoring tool on the host: `python scripts/prod_ops.py check` (exit code 0 fine, 1 attention, 2 urgent). Details and limits: `docs/MONITORING.md`.
+
+## Staging (rehearse before you change production)
+
+`python scripts/prod_setup.py --stack staging`, then `scripts/staging_up.ps1`: a separate copy of the same setup (own project `cdr-staging`, secrets, volumes, certificate, ports 8080 and 8443 on this machine only) for rehearsing an upgrade and for load tests. It never shares anything with production and holds synthetic data only. See `docs/STAGING.md`.
+
+## Load testing
+
+Load tests run only on staging, with synthetic data (`docs/LOAD_TESTING.md`). Production's configuration checker refuses an environment file that switches the rate limit off or allows the load-test tool.
+
 ## Windows: "the script is not digitally signed"
 
 PowerShell may refuse the `.ps1` scripts (`backup.ps1`, `restore.ps1`, `prod_up.ps1`) because the project came from a download or a

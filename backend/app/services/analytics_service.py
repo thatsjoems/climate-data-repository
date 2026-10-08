@@ -18,11 +18,16 @@ This explicit version-selection rule prevents duplicate exposure across
 correction attempts.
 """
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 import re
 from app.models.models import (
     Institution, Submission, SubmissionRecord, ClimateRecord, SubmissionStatus
 )
+
+# Working memory PostgreSQL may use, for THIS statement only, to count the distinct borrowers of the current approved loans. With its default (4 MB) it
+# sorted 212,000 of them on disk, which was most of the second a dashboard needed (docs/LOAD_TESTING.md). A value only for the transaction (SET LOCAL),
+# used only as much as needed: about 13 MB for that many borrowers.
+KPI_WORK_MEM = "32MB"
 
 # Submission statuses whose records must NEVER contribute to analytics totals.
 EXCLUDED_STATUSES = (
@@ -132,15 +137,18 @@ def get_kpi_summary(
         filter_region=filter_region, filter_reporting_period=filter_reporting_period,
     )
 
-    total_loan = records_query.with_entities(
-        func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0)
-    ).scalar()
-    total_collateral = records_query.with_entities(
-        func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0)
-    ).scalar()
-    total_borrowers = records_query.filter(
+    # Both totals in ONE pass over the loans (they were two passes), then the distinct borrowers as the count of a DISTINCT list, which the database
+    # can hash instead of sorting (the same number as count(distinct ...), measured against it in scripts/db_diagnose.py).
+    total_loan, total_collateral = records_query.with_entities(
+        func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0),
+        func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0),
+    ).one()
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text(f"SET LOCAL work_mem = '{KPI_WORK_MEM}'"))
+    borrowers = records_query.filter(
         SubmissionRecord.customer_id.isnot(None), SubmissionRecord.customer_id != ""
-    ).with_entities(func.count(func.distinct(SubmissionRecord.customer_id))).scalar()
+    ).with_entities(SubmissionRecord.customer_id).distinct().subquery()
+    total_borrowers = db.query(func.count()).select_from(borrowers).scalar()
 
     return {
         "total_institutions": total_institutions,

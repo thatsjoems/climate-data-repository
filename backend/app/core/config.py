@@ -33,6 +33,21 @@ class Settings(BaseSettings):
     # Networks of the reverse proxy in front of the backend (comma-separated). Only a request that comes from one of them has
     # its X-Forwarded-For believed (see app/core/client_ip.py). Empty = no proxy: the connection address is used.
     TRUSTED_PROXIES: str = ""
+    # The rate limits (sign-in and the general ceiling). Only staging switches them off, for load tests: the production checker refuses it there.
+    RATE_LIMIT_ENABLED: bool = True
+    # Monitoring (see docs/MONITORING.md). 0 = the background monitor is off (development and the tests); production runs it every 10 minutes.
+    MONITOR_INTERVAL_MINUTES: int = 0
+    BACKUP_STATUS_DIR: str = "/backup-status"        # where the backup task leaves its result (mounted read-only into the backend)
+    BACKUP_MAX_AGE_HOURS: float = 26
+    BACKUP_MONITORING: bool = True                   # False for staging, which has no backup task
+    ALERT_SIGNIN_FAILURES_WARN: int = 10             # failed sign-in steps in the last hour
+    ALERT_SIGNIN_FAILURES_CRITICAL: int = 30
+    ALERT_DISK_FREE_WARN_PERCENT: int = 20
+    ALERT_DISK_FREE_CRITICAL_PERCENT: int = 10
+    # Two-step sign-in (a code from an authenticator app). When on, BOT analysts and System Administrators must enrol at their next sign-in;
+    # anyone who has enrolled uses it regardless. Off by default (development, demonstration, tests); the production Compose file turns it on.
+    MFA_REQUIRED: bool = False
+    MFA_ISSUER: str = "Climate Data Repository (BOT)"   # the name the authenticator app shows
 
     # Set to "production" to make the app refuse to start with an insecure
     # default SECRET_KEY - see main.py startup check.

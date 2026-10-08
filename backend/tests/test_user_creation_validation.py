@@ -18,7 +18,7 @@ def test_institution_user_without_an_institution_is_rejected(client, db_session)
     res = client.post(
         "/api/users",
         json={"full_name": "New Person", "username": "newperson", "email": "n@example.com",
-              "password": "Passw0rd!23", "role": "INSTITUTION_USER"},
+              "password": "Quiet-Lake!2026", "role": "INSTITUTION_USER"},
         headers=auth_header(token),
     )
     assert res.status_code == 400
@@ -31,7 +31,7 @@ def test_bot_user_with_an_institution_is_rejected(client, db_session):
     res = client.post(
         "/api/users",
         json={"full_name": "New Analyst", "username": "newanalyst", "email": "a@example.com",
-              "password": "Passw0rd!23", "role": "BOT_USER", "institution_id": inst.id},
+              "password": "Quiet-Lake!2026", "role": "BOT_USER", "institution_id": inst.id},
         headers=auth_header(token),
     )
     assert res.status_code == 400
@@ -44,7 +44,7 @@ def test_system_admin_with_an_institution_is_rejected(client, db_session):
     res = client.post(
         "/api/users",
         json={"full_name": "New Admin", "username": "newadmin", "email": "ad@example.com",
-              "password": "Passw0rd!23", "role": "SYSTEM_ADMIN", "institution_id": inst.id},
+              "password": "Quiet-Lake!2026", "role": "SYSTEM_ADMIN", "institution_id": inst.id},
         headers=auth_header(token),
     )
     assert res.status_code == 400
@@ -55,7 +55,7 @@ def test_institution_user_with_a_nonexistent_institution_is_rejected(client, db_
     res = client.post(
         "/api/users",
         json={"full_name": "New Person", "username": "newperson", "email": "n@example.com",
-              "password": "Passw0rd!23", "role": "INSTITUTION_USER", "institution_id": "does-not-exist"},
+              "password": "Quiet-Lake!2026", "role": "INSTITUTION_USER", "institution_id": "does-not-exist"},
         headers=auth_header(token),
     )
     assert res.status_code == 400
@@ -67,7 +67,7 @@ def test_institution_user_with_a_valid_institution_is_accepted(client, db_sessio
     res = client.post(
         "/api/users",
         json={"full_name": "New Person", "username": "newperson", "email": "n@example.com",
-              "password": "Passw0rd!23", "role": "INSTITUTION_USER", "institution_id": inst.id},
+              "password": "Quiet-Lake!2026", "role": "INSTITUTION_USER", "institution_id": inst.id},
         headers=auth_header(token),
     )
     assert res.status_code == 201
@@ -79,7 +79,7 @@ def test_bot_user_with_no_institution_is_accepted(client, db_session):
     res = client.post(
         "/api/users",
         json={"full_name": "New Analyst", "username": "newanalyst", "email": "a@example.com",
-              "password": "Passw0rd!23", "role": "BOT_USER"},
+              "password": "Quiet-Lake!2026", "role": "BOT_USER"},
         headers=auth_header(token),
     )
     assert res.status_code == 201

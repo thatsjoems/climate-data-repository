@@ -18,6 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
+from app.core.timeutil import utcnow
 
 
 def gen_uuid() -> str:
@@ -65,7 +66,7 @@ class Institution(Base):
     contact_email = Column(String(255), nullable=True)
     contact_phone = Column(String(50), nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     users = relationship("User", back_populates="institution")
     submissions = relationship("Submission", back_populates="institution")
@@ -82,7 +83,7 @@ class User(Base):
     role = Column(SAEnum(RoleEnum), nullable=False, default=RoleEnum.INSTITUTION_USER)
     institution_id = Column(String, ForeignKey("institutions.id"), nullable=True, index=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     last_login_at = Column(DateTime, nullable=True)
 
     # Auth hardening (Module A / Solution 2 - "secure user authentication"):
@@ -92,6 +93,13 @@ class User(Base):
     locked_until = Column(DateTime, nullable=True)
     must_change_password = Column(Boolean, default=False, nullable=False)
 
+    # Two-step sign-in (see app/core/mfa.py). The secret is stored encrypted, the recovery codes only as keyed hashes.
+    mfa_enabled = Column(Boolean, default=False, nullable=False, server_default=text("false"))
+    mfa_secret_encrypted = Column(Text, nullable=True)
+    mfa_recovery_hashes = Column(Text, nullable=True)     # JSON list of the hashes of the recovery codes not yet used
+    mfa_last_step = Column(Integer, nullable=True)        # the last 30-second step accepted: a code is never accepted twice
+    mfa_enrolled_at = Column(DateTime, nullable=True)
+
     institution = relationship("Institution", back_populates="users")
 
     __table_args__ = (
@@ -99,6 +107,8 @@ class User(Base):
         # direction is deliberately NOT enforced: the demonstration seed attaches the administrator and the
         # BOT analyst to the BOT institution record, and an existing database holds those rows.
         CheckConstraint("role <> 'INSTITUTION_USER' OR institution_id IS NOT NULL", name="ck_users_institution_user_has_institution"),
+        # A user who is marked as enrolled must have a secret to check codes against.
+        CheckConstraint("NOT mfa_enabled OR mfa_secret_encrypted IS NOT NULL", name="ck_users_mfa_enabled_has_secret"),
     )
 
 
@@ -126,7 +136,7 @@ class ApiClient(Base):
     key_prefix = Column(String(16), nullable=False)
     key_hash = Column(String(64), nullable=False)
     created_by_user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     last_used_at = Column(DateTime, nullable=True)
     revoked_at = Column(DateTime, nullable=True)
@@ -175,7 +185,7 @@ class RefreshToken(Base):
     id = Column(String, primary_key=True, default=gen_uuid)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     token_hash = Column(String(64), nullable=False, unique=True, index=True)  # SHA-256 hex digest
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
 
@@ -212,8 +222,8 @@ class Submission(Base):
     review_notes = Column(Text, nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     institution = relationship("Institution", back_populates="submissions")
     records = relationship("SubmissionRecord", back_populates="submission", cascade="all, delete-orphan")
@@ -434,7 +444,7 @@ class ClimateRecord(Base):
     # ---- Quality control / ingestion metadata ----
     quality_flag = Column(String(30), default="UNVALIDATED")  # UNVALIDATED, VALIDATED, FLAGGED, SYNTHETIC
     processing_method = Column(String(100), nullable=True)    # e.g. SYNTHETIC_SEED, TMA_INGESTION, MANUAL_ENTRY
-    ingestion_timestamp = Column(DateTime, default=datetime.utcnow)
+    ingestion_timestamp = Column(DateTime, default=utcnow)
 
     ingestion_batch = relationship("ClimateIngestionBatch", back_populates="records")
 
@@ -502,7 +512,7 @@ class RiskAdvisoryNote(Base):
     data_snapshot = Column(JSON, nullable=True)             # Structured JSON snapshot; supported by PostgreSQL and SQLite JSON1-compatible storage
 
     created_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     __table_args__ = (
         Index("ix_risk_advisory_notes_region_period", "region", "reporting_period"),
@@ -541,7 +551,7 @@ class PasswordResetRequest(Base):
     review_notes = Column(Text, nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     __table_args__ = (
         Index("ix_password_reset_requests_user_status", "user_id", "status"),
@@ -567,7 +577,7 @@ class Notification(Base):
     related_entity_type = Column(String(100), nullable=True)   # e.g. "Submission"
     related_entity_id = Column(String, nullable=True)
     is_read = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 # ---------------------------------------------------------------------------
@@ -607,7 +617,7 @@ class ClimateIngestionBatch(Base):
 
     records = relationship("ClimateRecord", back_populates="ingestion_batch")
 
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
 
     __table_args__ = (
         Index("ix_climate_ingestion_batches_source_created", "source", "created_at"),
@@ -645,7 +655,7 @@ class AuditLog(Base):
     entity_id = Column(String, nullable=True)
     details = Column(Text, nullable=True)
     details_json = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
 
     __table_args__ = (
         Index("ix_audit_logs_action_created", "action", "created_at"),

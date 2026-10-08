@@ -360,23 +360,29 @@ export default function InternalPortal() {
     return params.toString()
   }
 
+  // The seven datasets load independently: if one fails the others are still shown, and the page says which one is missing
+  // (before, a single failure left the whole dashboard empty).
+  const [loadWarnings, setLoadWarnings] = useState<string[]>([])
+
   async function loadAll() {
-    const [instRes, kpiRes, subsRes, hazardRes, combinedRes, advisoryRes, mapRes] = await Promise.all([
-      apiClient.get('/institutions'),
-      apiClient.get(`/analytics/kpi-summary?${buildFilterQuery()}`),
-      apiClient.get('/submissions'),
-      apiClient.get(`/analytics/hazard-exposure?${buildFilterQuery({ validated_only: validatedOnly })}`),
-      apiClient.get(`/analytics/combined-climate-financial-exposure?${buildFilterQuery({ validated_only: validatedOnly })}`),
-      apiClient.get('/risk-advisories'),
-      apiClient.get(`/analytics/map-points?${buildFilterQuery({ validated_only: validatedOnly })}`),
+    const missing: string[] = []
+    const part = async (label: string, request: Promise<any>, apply: (data: any) => void) => {
+      try {
+        apply((await request).data)
+      } catch (err: any) {
+        missing.push(label)
+      }
+    }
+    await Promise.all([
+      part('institutions', apiClient.get('/institutions'), setInstitutions),
+      part('summary figures', apiClient.get(`/analytics/kpi-summary?${buildFilterQuery()}`), setKpi),
+      part('submissions', apiClient.get('/submissions'), setSubmissions),
+      part('hazard exposure', apiClient.get(`/analytics/hazard-exposure?${buildFilterQuery({ validated_only: validatedOnly })}`), setHazardExposure),
+      part('combined exposure', apiClient.get(`/analytics/combined-climate-financial-exposure?${buildFilterQuery({ validated_only: validatedOnly })}`), setCombinedExposure),
+      part('risk advisories', apiClient.get('/risk-advisories'), setRiskAdvisories),
+      part('map points', apiClient.get(`/analytics/map-points?${buildFilterQuery({ validated_only: validatedOnly })}`), setMapPoints),
     ])
-    setInstitutions(instRes.data)
-    setKpi(kpiRes.data)
-    setSubmissions(subsRes.data)
-    setHazardExposure(hazardRes.data)
-    setCombinedExposure(combinedRes.data)
-    setRiskAdvisories(advisoryRes.data)
-    setMapPoints(mapRes.data)
+    setLoadWarnings(missing)
   }
 
   async function reloadClimateExposureViews(nextValidatedOnly: boolean) {
@@ -741,6 +747,13 @@ export default function InternalPortal() {
       platforms={platforms}
     >
       <div id="top-anchor" />
+
+      {loadWarnings.length > 0 && (
+        <div className="card" style={{ borderLeft: '4px solid #b42318' }}>
+          <strong>Some parts of the dashboard could not be loaded:</strong> {loadWarnings.join(', ')}. The rest is shown.{' '}
+          <button className="btn-secondary btn-sm" onClick={() => loadAll()}>Try again</button>
+        </div>
+      )}
 
       <section className="card" id="reports-section">
         <h2>⬇️ Automated Reports</h2>

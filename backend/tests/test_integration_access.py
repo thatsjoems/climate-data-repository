@@ -16,6 +16,7 @@ from app.core.security import hash_refresh_token
 from app.models.models import ApiClient, AuditLog, RoleEnum, SubmissionRecord
 from tests.conftest import auth_header, login, make_institution, make_user
 from tests.test_rbac_and_isolation import _seed_submission_for
+from app.core.timeutil import utcnow
 
 REFUSAL = "Invalid, expired or revoked API key"
 
@@ -182,7 +183,7 @@ def test_every_kind_of_refusal_gives_the_same_answer_and_is_audited_with_its_rea
 
 def test_an_expired_key_is_refused_and_a_revoked_one_too(client, db_session, bot_token, api_key):
     row = db_session.query(ApiClient).one()
-    row.created_at, row.expires_at = datetime.utcnow() - timedelta(days=2), datetime.utcnow() - timedelta(days=1)
+    row.created_at, row.expires_at = utcnow() - timedelta(days=2), utcnow() - timedelta(days=1)
     db_session.commit()
     res = client.get("/api/integration/whoami", headers=_by_key(api_key))
     assert res.status_code == 401 and res.json()["detail"] == REFUSAL
@@ -213,7 +214,7 @@ def test_creating_and_revoking_a_key_are_audited_with_the_acting_user(client, db
 # ------------------------------------------------------------------ the database protects the table itself
 def _row(db, **over):
     user = make_user(db, role=RoleEnum.BOT_USER, username=over.pop("username", "bot_db"))
-    now = datetime.utcnow()
+    now = utcnow()
     values = dict(name="n", key_prefix="aaaaaaaaaa", key_hash="0" * 64, created_by_user_id=user.id,
                   created_at=now, expires_at=now + timedelta(days=1))
     values.update(over)
@@ -222,7 +223,7 @@ def _row(db, **over):
 
 
 @pytest.mark.parametrize("override", [
-    dict(expires_at=datetime.utcnow() - timedelta(days=1)),          # expires before it was created
+    dict(expires_at=utcnow() - timedelta(days=1)),          # expires before it was created
     dict(name="   "),                                                # blank name
     dict(key_hash="short"),                                          # not a SHA-256 hex digest
     dict(revoked_by_user_id="someone"),                              # a revoker without a revocation
@@ -243,5 +244,5 @@ def test_the_database_refuses_a_second_row_with_the_same_prefix_or_the_same_live
     with pytest.raises(IntegrityError):
         _row(db_session, username="bot_db3", key_prefix="bbbbbbbbbb")  # same live name
     db_session.rollback()
-    _row(db_session, username="bot_db4", key_prefix="cccccccccc", revoked_at=datetime.utcnow())   # a revoked row never clashes
-    _row(db_session, username="bot_db5", key_prefix="dddddddddd", revoked_at=datetime.utcnow())
+    _row(db_session, username="bot_db4", key_prefix="cccccccccc", revoked_at=utcnow())   # a revoked row never clashes
+    _row(db_session, username="bot_db5", key_prefix="dddddddddd", revoked_at=utcnow())

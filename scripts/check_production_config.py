@@ -107,19 +107,29 @@ def check_files() -> list:
             problems.append(f"{s} must not publish any port in production.")
     if services.get("backend", {}).get("env", {}).get("ENVIRONMENT") != "production":
         problems.append("backend must run with ENVIRONMENT=production.")
+    if not services.get("backend", {}).get("env", {}).get("MFA_REQUIRED"):
+        problems.append("backend must set MFA_REQUIRED (two-step sign-in for the Bank's staff).")
+    if not services.get("backend", {}).get("env", {}).get("MONITOR_INTERVAL_MINUTES") or ":/backup-status:ro" not in (ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8"):
+        problems.append("backend must set MONITOR_INTERVAL_MINUTES and mount ./backups/status at /backup-status read-only (monitoring and backup alerts).")
     if not services.get("backend", {}).get("env", {}).get("TRUSTED_PROXIES"):
         problems.append("backend must set TRUSTED_PROXIES (the proxy in front of it), or every rate limit sees only the proxy address.")
     if not any(p.endswith(":443") for p in services.get("frontend", {}).get("ports", [])):
         problems.append("frontend must publish 443 (HTTPS).")
+    compose_text = (ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
+    for s in ("backend", "frontend"):                         # container hardening (docs/DOCKER.md)
+        m = re.search(rf"\n  {s}:\n(.*?)(?=\n  [a-z]+:\n|\nvolumes:)", compose_text, re.S)
+        section = m.group(1) if m else ""
+        if "no-new-privileges" not in section or "cap_drop" not in section or "- ALL" not in section:
+            problems.append(f"service {s} in docker-compose.prod.yml must keep no-new-privileges and cap_drop: ALL (container hardening).")
     for v in facts["volumes"]:
         if v in ("cdr_postgres_data", "cdr_uploads"):
             problems.append(f"volume {v} is the development volume: production must use its own (cdr_prod_*).")
     nginx = (ROOT / "frontend" / "nginx.prod.conf").read_text(encoding="utf-8")
-    for needle in ("ssl_certificate ", "TLSv1.3", "Strict-Transport-Security", "return 301 https://", "client_max_body_size 25M", "proxy_pass http://backend:8000/api/"):
+    for needle in ("ssl_certificate ", "TLSv1.3", "Strict-Transport-Security", "return 301 https://", "client_max_body_size 25M", "proxy_pass http://backend:8000/api/", "proxy_read_timeout 300s", "add_header Content-Security-Policy", "proxy_hide_header Strict-Transport-Security"):
         if needle not in nginx:
             problems.append(f"frontend/nginx.prod.conf lacks: {needle.strip()}")
     ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
-    for needle in (".env.production", "certs/"):
+    for needle in (".env.production", "certs/", ".env.staging", "certs-staging/"):
         if needle not in ignore:
             problems.append(f".gitignore must contain {needle}")
     return problems
@@ -135,7 +145,13 @@ def main() -> int:
     if not env_path.is_file():
         print(f"{env_path.name} not found. Run: python scripts/prod_setup.py --domain <address>")
         return 2
-    problems = check_env(parse_env(env_path), not args.no_certs) + check_files()
+    env = parse_env(env_path)
+    problems = check_env(env, not args.no_certs) + check_files()
+    if env_path.name == ".env.production":
+        if env.get("RATE_LIMIT_ENABLED", "true").strip().lower() in ("false", "0", "no", "off"):
+            problems.append("RATE_LIMIT_ENABLED must not be switched off in .env.production (only staging may, for load tests).")
+        if env.get("CDR_ALLOW_LOAD_TEST", "").strip():
+            problems.append("CDR_ALLOW_LOAD_TEST must not be set in .env.production: the load-test tool must never run against production.")
     if problems:
         print("PRODUCTION CONFIGURATION: NOT READY")
         for p in problems:

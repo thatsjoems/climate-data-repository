@@ -18,11 +18,13 @@ from app.core.database import SessionLocal
 from app.core.rate_limit import limiter
 from app.core.startup_checks import enforce_production_secret, is_production, api_docs_urls
 from app.core.logging_config import configure_logging
+from app.services.monitor_loop import monitoring_lifespan
 
 configure_logging()
 logger = logging.getLogger("cdr.request")
 from app.models import models  # noqa: F401 - ensures all tables are registered on Base
-from app.api import auth, users, institutions, templates, submissions, analytics, audit, notifications, password_reset, risk_advisories, reports, climate_data, integration, integration_clients
+from app.api import auth, users, institutions, templates, submissions, analytics, audit, notifications, password_reset, risk_advisories, reports, climate_data, integration, integration_clients, mfa
+from app.api import system_status
 
 # ---- Secret management: refuse to start in production with the default secret ----
 # (Module: secure authentication). Development/training use is unaffected - this
@@ -35,6 +37,7 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     description="CDR prototype system - built as part of the EASTC 8-Week Practical Training Programme",
     version="0.1.0",
+    lifespan=monitoring_lifespan,            # the background monitor (off when MONITOR_INTERVAL_MINUTES is 0)
     **api_docs_urls(settings.ENVIRONMENT),   # no /docs in production
 )
 
@@ -112,6 +115,8 @@ app.include_router(reports.router, prefix=settings.API_V1_PREFIX)
 app.include_router(climate_data.router, prefix=settings.API_V1_PREFIX)
 app.include_router(integration_clients.router, prefix=settings.API_V1_PREFIX)
 app.include_router(integration.router, prefix=settings.API_V1_PREFIX)
+app.include_router(mfa.router, prefix=settings.API_V1_PREFIX)
+app.include_router(system_status.router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/")

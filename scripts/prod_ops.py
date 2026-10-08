@@ -4,6 +4,7 @@ Backup, status, restore drill, restore and scheduling for the PRODUCTION stack (
 
     python scripts/prod_ops.py backup  [--out backups/prod] [--keep 14] [--copy-to <folder>]
     python scripts/prod_ops.py status  [--out backups/prod] [--max-age-hours 26]
+    python scripts/prod_ops.py check     (the System Status checks; exit code 0 fine, 1 attention, 2 urgent)
     python scripts/prod_ops.py drill   [--backup <folder>] [--keep-drill]
     python scripts/prod_ops.py restore <backup folder>            (DESTRUCTIVE - replaces production data)
     python scripts/prod_ops.py schedule [--time 02:00] [--remove]  (Windows Task Scheduler; prints a cron line elsewhere)
@@ -18,6 +19,7 @@ project cdr-drill, and the one destructive command (down -v) refuses to run for 
 import argparse
 import datetime
 import hashlib
+import json
 import os
 import pathlib
 import re
@@ -164,8 +166,26 @@ def make_backup(out_dir, keep, copy_to=None):
         print(f"  retention: kept the newest {keep}, removed {len(removed)} older: {', '.join(removed)}")
     with open(out_dir / "backup.log", "a", encoding="utf-8") as log:
         log.write(f"{stamp} {'COPY-FAILED' if copy_error else 'OK'} {folder.name} revision={revision}\n")
+    write_status(out_dir, stamp, folder, revision, copy_to, copy_error)
     print("Done (local backup OK)." if copy_error else "Done.")
     return folder, copy_error
+
+
+def write_status(out_dir, stamp, folder, revision, copy_to, copy_error):
+    """
+    Leaves the result of the backup in <backups>/status/last_backup.json, a folder that the production backend can READ (and nothing else
+    of the backups: only this small file). The System Status page and the alerts use it to notice a backup that did not happen.
+    """
+    status_dir = pathlib.Path(out_dir).parent / "status"
+    status_dir.mkdir(parents=True, exist_ok=True)
+    data = {
+        "taken_utc": stamp, "result": "COPY-FAILED" if copy_error else "OK", "revision": revision,
+        "database_bytes": (folder / "db.dump").stat().st_size, "uploads_bytes": (folder / "uploads.tar").stat().st_size,
+        "off_machine": bool(copy_to) and not copy_error, "copy_error": copy_error,
+    }
+    tmp = status_dir / "last_backup.json.tmp"
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    tmp.replace(status_dir / "last_backup.json")        # replaced in one step: the application never reads half a file
 
 
 def prune(out_dir, keep, protect):
@@ -207,6 +227,17 @@ def cmd_status(a):
         print(f"WARNING: older than {a.max_age_hours} hours - the scheduled backup may not be running.")
         return 1
     return 1 if problems else 0
+
+
+def cmd_check(a):
+    """The checks of the System Status page (database, schema, backups, disk, failed sign-ins, keys, administrators), for a scheduler or a monitor."""
+    r = compose(["exec", "-T", "backend", "python", "scripts/system_check.py"], capture=True, check=False)
+    out = r.stdout or ""
+    print(out, end="")
+    if "SYSTEM CHECK" not in out:                      # docker itself failed (production not running): do not pretend that is "attention"
+        print("The check could not run inside the backend. Is production up?  " + (r.stderr or "").strip()[-200:])
+        return 2
+    return r.returncode        # 0 all fine, 1 attention, 2 urgent
 
 
 # ------------------------------------------------------------------------------------------------ drill and restore
@@ -327,15 +358,16 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("backup"); b.add_argument("--out", default="backups/prod"); b.add_argument("--keep", type=int, default=14); b.add_argument("--copy-to")
     s = sub.add_parser("status"); s.add_argument("--out", default="backups/prod"); s.add_argument("--max-age-hours", type=float, default=26)
+    sub.add_parser("check")
     d = sub.add_parser("drill"); d.add_argument("--backup"); d.add_argument("--keep-drill", action="store_true")
     r = sub.add_parser("restore"); r.add_argument("backup"); r.add_argument("--no-safety-backup", action="store_true")
     c = sub.add_parser("schedule"); c.add_argument("--time", default="02:00"); c.add_argument("--remove", action="store_true"); c.add_argument("--copy-to")
     a = ap.parse_args()
-    if not (ROOT / ".env.production").is_file() and a.cmd in ("backup", "drill", "restore"):
+    if not (ROOT / ".env.production").is_file() and a.cmd in ("backup", "check", "drill", "restore"):
         print(".env.production not found. This tool is for the production stack (scripts/prod_setup.py).")
         return 2
     try:
-        return {"backup": cmd_backup, "status": cmd_status, "drill": cmd_drill, "restore": cmd_restore, "schedule": cmd_schedule}[a.cmd](a)
+        return {"backup": cmd_backup, "status": cmd_status, "check": cmd_check, "drill": cmd_drill, "restore": cmd_restore, "schedule": cmd_schedule}[a.cmd](a)
     except Fail as exc:
         print("FAILED:", exc)
         return 1

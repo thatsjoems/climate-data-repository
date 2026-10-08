@@ -3807,3 +3807,278 @@ attempt while another is not; inventing addresses does not help; without a trust
 
 **Not verified here.** The 22 tests that need the application (they have not been run), migration `e9b3c7a1d5f2` on PostgreSQL, the Docker build, and the per-caller limit on a real server (on a single Windows machine Docker's gateway hides the callers).
 No report or presentation was changed, at the owner's instruction.
+
+
+**First run of the owner (7 October 2026) of the 368 cases: 362 passed, 2 skipped, 2 failed, 2 errors, all four in the NEW tests, none in the product.** The three limiter tests assumed
+that the installed TestClient accepts a `client=` address (it does not): they now wrap the application in a small ASGI layer that sets the connecting address, which works with any version.
+One database test called its helper twice with the same user name; it now uses a second name (the part it was testing, that the database refuses a blank list, had worked). All 40 address tests
+and 18 of the 19 key-list tests passed on that run. Expected after the fix: 368 collected, 366 passed, 2 skipped.
+
+## Seventy-seventh item - verification of stage 6a and the first clean-up (stage 2): warnings, KG-04 and KG-12
+
+**Verification run of the owner (7 October 2026) for the real client address.** Development stack, `pytest`: **368 collected, 366 passed, 2 skipped, 0 failed** (181 s), including the three rate-limit tests (one caller is stopped on the 11th
+attempt while another is not; inventing addresses does not help; without a trusted proxy the header is ignored) and the 19 tests of the key address list. Production restarted with `prod_up`; `verify_db_constraints.py`: **all 46 protections present**. KG-01 is closed.
+
+**Clean-up, three changes that do not alter what the system does:**
+
+1. **The deprecated `datetime.utcnow()` (about 2,500 warnings on every run) is replaced by one helper**, `app/core/timeutil.py` (`utcnow()`), in the 12 files that used it, including the model defaults. It returns exactly the same naive UTC value
+   (checked: within a second of the old call, no time zone), so nothing stored or compared changes. The warnings that remain come from libraries (the JWT library, passlib, reportlab), not from this code.
+2. **KG-04, the misspelt audit action.** The name of a review decision was built as `SUBMISSION_` + the decision + `D`, so a rejection was written `SUBMISSION_REJECTD`. It is now `SUBMISSION_REJECTED`; an approval is unchanged. The audit log is append-only, so entries
+   written earlier keep the old spelling (the Action filter will list both). Two tests in `test_review_audit_action.py` (approve and reject).
+3. **KG-12, one failing dataset blanked the whole dashboard.** The seven datasets now load independently; if one fails the others are shown, and a notice names the missing ones with a "Try again" button.
+
+**Still open and needing a decision:** KG-06, text dates are read month first. Whether the Bank's templates use day first or month first must be decided before this is changed, because changing it alters how existing text dates are understood.
+
+**Not verified here.** The two new tests and the dashboard notice (not run); the Docker build. The suite should now collect **370** cases. No report or presentation was changed, at the owner's instruction.
+
+
+## Seventy-eighth item - two-step sign-in for the Bank's staff (stage 6b, completed)
+
+**What it is.** After the password, the BOT analyst and the System Administrator (when `MFA_REQUIRED` is on, the production default) must enter a 6-digit code from an authenticator app. Anyone who has set it up always uses it. Institution users are not asked. Development is unchanged (off by default).
+
+**Backend (`app/core/mfa.py`, `app/api/mfa.py`).** TOTP per RFC 6238 on the standard library; the secret encrypted at rest (Fernet, key derived from `SECRET_KEY`); ten single-use recovery codes stored only as keyed hashes;
+a code is accepted one 30-second step either side and each step only once (no replay); a 5-minute step token with a purpose that `get_current_user` refuses; wrong codes counted in the same lock-out as wrong passwords and rate-limited;
+the administrator can reset someone else's (never their own; sessions ended, person notified, audited) and `scripts/reset_mfa.py` does it from the server; new column set on `users` and one CHECK (`ck_users_mfa_enabled_has_secret`), migration `f3a7c1e5b829`.
+The verification script now expects **47** protections. The enrolment answer carries the address as a **QR picture** (a small SVG drawn with the reportlab library already in the application), and as the typed key; the picture is optional and its absence never blocks set-up.
+
+**Frontend (new).** The sign-in page now has up to two steps (`components/TwoStepSignIn.tsx`): the code (or a recovery code), and first-time set-up with the QR, the typed key, the first code and the recovery codes shown once (the session is held back until the person confirms they saved them).
+`AuthContext` handles the three kinds of answer; `api/client.ts` no longer treats a wrong code (401) as an expired session and sends the person back to the start; the administrator's Users table shows who has it on and has a **Reset two-step** button. **Without this change the production sign-in would have broken:** the old page assumed every sign-in returns tokens.
+
+**Verified here (this environment has no database).** The code algorithm and the other building blocks: 30 of 30 tests of `test_mfa_core.py` with the real HMAC and Fernet libraries (the JWT tests used a minimal stand-in for the JWT library); the two QR tests that need no database; the QR picture decoded with QR readers
+(exact address recovered from 300 of 300 drawn pictures by one reader, 298 of 300 by another; the classic OpenCV reader missed 6 of 300, and every code it missed was read by the other readers, so those are the reader's limits); the migration chain (12, one head); the schema-parity tests (5 of 5);
+the type check of the frontend (only the same environment noise as before; a deliberate mistake is caught).
+
+**Not verified here.** The 30 sign-in, enrolment, lock-out and reset tests and the 3 QR tests that use the database (`test_mfa_login.py`, `test_mfa_qr.py`) have not been run; migration `f3a7c1e5b829` on PostgreSQL; the Docker build; and the screens in a real browser
+with a real authenticator app on a real phone. The suite should now collect **425** cases. No report or presentation was changed, at the owner's instruction.
+
+
+## Seventy-ninth item - monitoring and alerts (stage 7)
+
+**Verification of the previous stage (owner's run, 7 October 2026).** Development stack: **425 collected, 423 passed, 2 skipped, 0 failed** (164 s, 368 warnings, down from 2,544), including the 30 sign-in, enrolment, lock-out and reset tests and the 3 QR tests of the two-step sign-in.
+
+**What it is.** Nine checks (`app/services/monitoring_service.py`): database response, schema version against the application's, backups, disk space, failed sign-ins in the last hour (wrong passwords and wrong codes; several accounts locked), refused API keys, accounts locked now,
+API keys expiring or recently expired, and the number of active administrators. Each is a function with its inputs spelled out; one that fails is reported as "could not be checked" and never breaks the page. Results appear on **Administration, System Status** (System Administrator only, no stored secret shown),
+as in-application notifications for every active System Administrator (an urgent alert repeated after a day, an attention one after a week, a change of severity at once), and as an exit code (`prod_ops.py check`, 0 / 1 / 2).
+A background monitor (`monitor_loop.py`, a FastAPI lifespan task) runs the checks and the notifications every `MONITOR_INTERVAL_MINUTES` (10 in production, 0 and therefore off in development and the tests).
+
+**Backups reach the application safely.** The backup task writes `backups/status/last_backup.json` (atomically, one small file); only that folder is mounted into the backend, read-only, so the backend can see that a backup did not happen but cannot read or change the backups. The production checker requires the setting and the read-only mount (tested: it refuses a missing mount and a writable one).
+
+**Found by the tests.** The first version of the checker's mount rule was satisfied by an unrelated line of the same file; tightened to require the read-only mount itself. A test for "exactly 26 hours old" failed because the clock had microseconds the backup stamp does not; the test was corrected.
+
+**Verified here (no database in this environment).** The 26 cases that need no database were run against the real code with minimal stand-ins for the missing libraries: backup levels and edges, disk levels, the overall state and the exit code, and the background monitor (starts, repeats, survives a failed run, stops cleanly, off by default); the host's status file and the application's reader agree for the three states
+(copied, copy failed, no copy). The frontend type check (no new diagnostic; a deliberate mistake is caught); the schema-parity tests (5 of 5).
+
+**Not verified here.** The 25 tests that use the database (the checks over audit rows, keys, locked accounts and administrators; the endpoint's access rules; the notifications and their de-duplication), the Docker build, and the page in a browser. The suite should now collect **476** cases. No report or presentation was changed, at the owner's instruction.
+
+
+## Eightieth item - a staging environment (stage 8)
+
+**Verification of the previous stage (owner's run, 7 October 2026).** Development stack: **484 collected, 482 passed, 2 skipped, 0 failed** (213 s), including the 25 monitoring tests that use the database. Production restarted with `prod_up`; a backup was taken (the status file was written and read);
+`prod_ops.py check` answered **WARN (exit code 1)** with exactly the two real alerts: no off-machine copy of the backup (one disk) and a single administrator; the other seven checks OK; `verify_db_constraints.py`: **all 47 protections present**.
+
+**What it is.** A second copy of the production setup on the same machine, for rehearsing upgrades and for load tests. The same code and the same `docker-compose.prod.yml`, run as project `cdr-staging` (so its containers, network and data volumes are separate), with its own environment file (`.env.staging`, its own random passwords and `SECRET_KEY`),
+its own certificate folder (`certs-staging`, with a throw-away self-signed certificate made by `prod_setup.py --stack staging` using OpenSSL or Docker), ports 8080 and 8443 bound to `127.0.0.1` only, backup monitoring off (it has no backup task) and two-step sign-in off by default (so that a load test can sign in).
+`staging_up.ps1` and `staging_up.sh` were generated from the production scripts by substitution, and every line that differs was reviewed; the production scripts were not changed in behaviour. A rule is written down: **no real data in staging** without the Bank's written decision.
+
+**Changes to shared files.** The Compose file takes the folder of the backup status from `BACKUP_STATUS_HOST_DIR` and has `BACKUP_MONITORING` (defaults keep production exactly as it was); the configuration checker also requires `.env.staging` and `certs-staging/` in `.gitignore`; `prod_setup.py` has `--stack` (the production path is unchanged: it still refuses without `--domain`, writes the same file).
+
+**Verified here (no Docker in this environment).** Creating the staging environment in a temporary copy: the file, the different secrets, the localhost-only ports, the certificate (OpenSSL: subject, 30 days, names `localhost` and `127.0.0.1`), the checker passing for staging, refusing to overwrite; the production setup in another temporary copy unchanged; every difference between the two start-up scripts listed and intended.
+
+**Not verified here.** Starting the staging stack with Docker (the two stacks side by side, the ports, the volumes), and the new monitoring test (`test_backups_can_be_left_out_of_the_monitoring...`, which uses the database). The suite should now collect **485** cases. No report or presentation was changed, at the owner's instruction.
+
+
+## Eighty-first item - load testing on staging (stage 9)
+
+**Verification of the previous stage (owner's run, 7 to 8 October 2026).** Staging started with Docker: its own network (`cdr-staging_default`) and data volumes (`cdr-staging_cdr_prod_postgres_data`, `cdr-staging_cdr_prod_uploads`), role `cdr_app` created in its new database, three containers healthy, ports `127.0.0.1:8080` and `127.0.0.1:8443` only,
+beside the production and development stacks; the staging administrator was created; `verify_db_constraints.py` on staging: **all 47 protections present**. Also seen: an unrelated container named `cdr_backend` restarting in a loop (not part of any current stack; to be inspected and, if a leftover, removed).
+
+**What it is.** `backend/scripts/load_test.py` (standard library only), run inside the staging backend container and going through the staging web server. `setup` creates synthetic institutions, one user each and an analyst; `run` signs everybody in at once, has every institution upload a file of synthetic loans, has the analyst approve them,
+then has several people read the dashboards at once for a time, and optionally uploads one very large file; it prints requests, errors, requests per second and p50, p95, p99 and maximum times, compares them with **proposed** targets (to be agreed with the Bank) and exits with 3 if one is missed or if the generated files were judged invalid.
+
+**Three safeguards against production.** The tool refuses to run unless `CDR_ALLOW_LOAD_TEST=yes` (set by `.env.staging` only); the production checker refuses a `.env.production` that contains that variable or switches the rate limit off (tested with `false`, `False`, `0`, `no`, `OFF`; `true` and absence pass); the command addresses the staging project. The rate limit became a setting
+(`RATE_LIMIT_ENABLED`, default true; staging sets it false because otherwise a load test measures the limit); a warning is logged whenever it is off.
+
+**Verified here (no Docker).** The tool end to end against a stand-in server that checked every token and opened every uploaded workbook: the official header, row counts, unique loan numbers, real region and district pairs, outstanding principal not above the loan, interest rate 0 to 100, two reporting periods; the credentials file mode 0600; the results file.
+Failure paths: refusal outside staging (no variable, and a wrong value), staging not up (a clear message, not a traceback), files judged invalid (exit 3 even though the requests succeeded), server errors (counted, sampled, exit 3). 21 unit cases of `test_load_test_tool.py` run (the guard, percentile and summary, passwords against the policy, the generated loans, the workbook, the multipart body).
+
+**Not verified here.** That the REAL upload endpoint accepts a generated file as valid (`test_the_real_upload_accepts_a_generated_file_as_valid`, which uses the database), the real timings (this environment cannot run staging), and the tool inside the container. The suite should now collect **507** cases. No report or presentation was changed, at the owner's instruction.
+
+
+## Eighty-second item - first load-test results, and what they changed (stage 9, continued)
+
+**Verification of the previous stage (owner's runs, 8 October 2026).** Development stack: **507 collected, 505 passed, 2 skipped, 0 failed** (215 s, 373 warnings), including the test that the REAL upload endpoint accepts a generated file as valid (so the load-test data is sound).
+Staging restarted with the two new settings; `load_test.py setup` created 8 synthetic institutions, one user each and an analyst; `run` met all four proposed targets.
+
+**Measured (staging, synthetic data, the developer's machine, which production and staging share).** 20 readers, 56 requests a second: p95 391 ms, 0 errors; sign-in (9 at once): p95 0.5 s; approving: p95 0.8 s; **8 institutions uploading 2,000 loans each at once: every upload took about 16 s**;
+8 uploading 500 loans each: about 5.2 s; **one file of 100,000 loans (the largest allowed): accepted, 95.7 s, no error**.
+
+**Findings.** (1) Files are checked one after another (one backend process, processor-bound): about 1,000 loans a second in total, so the wait grows with the number of simultaneous uploads and with file size. (2) The largest file took 96 s against a 120 s web-server limit, an uncomfortable margin: on a slower machine the person would see a
+time-out although the server finished, and uploading again would store a second version. (3) **A defect in the load-test tool itself**: it reported a general upload judged invalid but not a large one; found by reading the results, fixed, and tested (a large file judged invalid now fails the run, exit code 3).
+
+**Changes.** The three endpoints that read a whole file now have a 300 s time-out in `frontend/nginx.prod.conf` (the rest keep 120 s), and the production checker requires it; the start-up scripts now recreate the web server container in their last step (a changed web-server file was otherwise never read).
+The tool gained: the approval of the large file and reading at that size (`read_large`), reading while it is checked (`--mixed`, `read_during_upload`), the backend container's memory (peak, now, limit) and new proposed targets.
+
+**Verified here (no Docker).** The extended tool against the stand-in server in four situations (normal; a large file with people reading meanwhile; only the large file judged invalid; a large file alone); the memory reader (both cgroup layouts, "max", unreadable); 24 unit cases of `test_load_test_tool.py`.
+
+**Not verified here.** The nginx time-out in a running web server (staging is the rehearsal: `staging_up` recreates the web server; check with `nginx -T`), the new measurements (`--big-rows 100000 --mixed`: reading during a large upload, reading at that size, memory), and that the 100,000-loan file ends `VALID` (the earlier run did not print its status; the tool now does). The suite should now collect **510** cases.
+Open for the Bank: the real file sizes and simultaneous uploads (a deadline day); background checking of large files is the proper design if 100,000-loan files are expected, and has not been built. No report or presentation was changed, at the owner's instruction.
+
+
+## Eighty-third item - the worst case measured, and a faster way to store an upload (stage 9, continued)
+
+**Verification of the previous stage (owner's runs, 8 October 2026).** nginx in the staging web server loaded the new configuration (`nginx -T`: syntax ok, a 300 s limit for the file endpoints and 120 s for the rest). The load test with the largest file and people reading at the same time (`run --big-rows 100000 --mixed`) ran to the end with **no error**:
+the file of 100,000 loans was stored as `VALID` in **210 s** (96 s when alone); people reading meanwhile saw p50 466 ms, p95 1.3 s, p99 1.8 s, slowest 4.8 s; approving the file took 11.7 s; reading the dashboards afterwards (100,000 more loans) p95 0.92 s; the backend container peaked at **2.25 GB** (the load-test tool included).
+One proposed target failed: the largest file within 120 s (it took 210 s while others were reading). Under the old 120 s limit of the web server this upload would have been cut off with a time-out error; the 300 s limit made earlier is what let it finish.
+
+**Where the time goes** (developer's machine, 100,000 loans): pandas reads the sheet about 12 s; the row checks about 14 s before this change and about 4 s after; the rest of the roughly 96 s was storing each loan as an ORM object (100,000 held in the session until the commit).
+
+**Changes.** (1) The row checks read plain tuples instead of pandas cells: **identical output to the old code on 11,200 records and 117,396 findings** of deliberately messy files (wrong types and values, headers on rows 1, 3 and 9, blank rows, repeated loan numbers, impossible coordinates, too many rows, an empty workbook, a header-only file), and about twice as fast.
+(2) Loans and findings are stored in blocks of 5,000 with bulk INSERTs (`STORE_BLOCK`), keeping the 409 answer on a conflict. (3) One log line per upload with its stages and the process's peak memory (no data in it). (4) The load-test tool reports its own peak memory so the application's share can be separated.
+Tests: `test_upload_storage_blocks.py` (a partly invalid file of 23 loans stored with blocks of 1, 4, 7, 22, 23, 24 and 5000: every loan once with its own id, the same three bad rows, the same findings as the detail endpoint reports; a clean file across blocks; the log line without any loan data).
+
+**Verified here (no database in this environment).** The validator change by the differential run above; the tool against the stand-in server; the new tests compile. **Not verified here: the bulk storage itself** (SQLAlchemy is not installed here), nor any real timing of it; the whole suite must pass, and the same worst-case run must be repeated to see the effect.
+The suite should now collect **520** cases. No report or presentation was changed, at the owner's instruction.
+
+
+## Eighty-fourth item - the answer to an upload carried every loan (stage 9, continued)
+
+**Verification of the previous stage (owner's runs, 8 October 2026).** Development stack: **520 collected, 518 passed, 2 skipped, 0 failed** (221 s), including the block-boundary tests of the bulk storage (blocks of 1, 4, 7, 22, 23, 24 and 5000). On the real PostgreSQL of staging the file of 100,000 loans was stored as `VALID` with all 100,000 records, approved and read.
+Alone it took **46 s** (96 s before); with 20 people reading, 156 s (210 s before); eight institutions uploading 500 loans each took 2.8 s each (5.3 s before). The new log line showed the stages: **checking 20.5 s, storing 14.8 s, commit about 0 s** (35.4 s inside the application), 8 uploads of 500 loans each 2.3 s.
+
+**Found by reading those numbers.** The person measured 46 s against 35 s inside the application, and the application process peaked at 526 MB at the log line but 1,487 MB later. The answers to an upload and to a review (`response_model=SubmissionDetailOut`) returned the submission object, whose `records` and `errors` relationships are ALL rows and findings: for 100,000 loans the application
+loaded every loan again and wrote them all into the answer (about a gigabyte and ten seconds; approving took 10 s for a one-row change; and the answer would have been tens of megabytes for a browser). The detail endpoint had been paged earlier; these two had been missed.
+
+**Change.** `detail_page` builds the answer for the detail endpoint, the upload and the review: the first page (100 rows, 100 findings) with the totals. The institution portal uses `status`, `valid_records` and `total_records` of the upload answer and nothing of the review answer: no screen changes, and a small file's answer is identical. Tests added (`test_upload_storage_blocks.py`): a 130-loan upload answers with 100 rows, 100 findings and the totals; a 5-loan upload answers with all 5; a review of a 120-loan submission answers with one page and the total.
+
+**Verified here.** The module compiles, the names it needs are used and imported, and the three tests compile. **Not verified here (no database in this environment):** the three new tests and the effect on time and memory, to be measured again. The suite should now collect **523** cases. Remaining cost of a large file, in order: reading the sheet with pandas (about 15 s), storing (about 15 s).
+No report or presentation was changed, at the owner's instruction.
+
+
+## Eighty-fifth item - the paged answer measured; dashboards slower from run to run (stage 9, continued)
+
+**Measured on staging after the paged answer (owner's run, 8 October 2026), the largest file (100,000 loans):** alone **36 s** (96 s at the start, 46 s after bulk storage); approving it **0.23 s** (about 10 s before: the action was cheap, the answer was what loaded every loan);
+memory of the backend container (peak, load-test tool included) **0.51 to 0.58 GB** (2.25 GB at the start), the application alone at most about 0.46 GB; the tool itself 117 MB (527 MB before, when it received and read the huge answer). While 20 people read, a mixed run: reading during the upload p95 2.8 s (target 3 s, passed narrowly).
+
+**Open: the dashboards get slower from run to run.** Reading after the large file was approved, p95: 0.92 s, 1.0 s, 1.9 s (a 5 s run), 3.6 s (target 1.5 s, failed); the number of CURRENT approved loans stayed the same (each new version replaces the previous one) but the total of stored loans grows by 100,000 per run (old versions are kept on purpose).
+The dashboards aggregate in the database, which is the right design. Hypotheses, not conclusions: a plan that scans the whole table of loans; statistics made stale by the bulk load (the application's role cannot ANALYZE; autovacuum does, about a minute later); competition with autovacuum or with the other stacks on the same machine.
+**Tool added to find out:** `backend/scripts/db_diagnose.py`, read-only: counts (all and current approved), freshness of the planner's statistics, and the real plan and time of the two main dashboard queries, saying whether each reads the whole table or goes through an index. Its plan reader has 4 tests.
+
+**Verified here.** The report script compiles and its plan reader classifies three sample plans correctly (the whole table; an index; neither). **Not verified here:** the report against PostgreSQL (none in this environment), and the cause. The suite should now collect **527** cases (the 523 expected from the previous package, not yet reported, plus these 4).
+No report or presentation was changed, at the owner's instruction.
+
+
+## Eighty-sixth item - what made the dashboards slow, measured; the summary figures made cheaper (stage 9, continued)
+
+**Verification of the previous packages (owner's runs, 8 October 2026).** Development stack: **523 collected, 521 passed, 2 skipped, 0 failed**, including the paged answers and the block storage. On staging the largest file (100,000 loans) took **36 to 37 s** alone (96 s at the start): checking 20.8 s, storing 14.9 s, commit about 0 s; the application process peaked at **488 to 495 MB** (1,487 MB before the answer was paged); approving it 0.2 s (10 s before); the container peaked at 0.51 to 0.58 GB.
+
+**A correction of mine.** I had said the number of current approved loans did not grow while the dashboards slowed (p95 0.92 s, 1.0 s, 1.9 s, 3.6 s). It did: the database held 736,800 loans, **212,000 of them in current approved submissions**, because every `load_test.py setup` adds institutions with their own approved large file. The slowing follows the data the dashboards add up, as an aggregate should. The plan that reads the whole table is right (29% of it is wanted), and the statistics were fresh.
+
+**Where the time goes (`db_diagnose.py`).** The summary figures: **1,003 ms**, of which about 850 ms is the sort for `count(distinct customer_id)` (212,000 values sorted on disk: 4 MB working memory); the by-region query: 233 ms. The application also computed the summary in **three passes** over the same loans.
+**Change.** One pass for the two totals; the borrowers counted from a DISTINCT list (hashable); 32 MB of working memory for that statement only (`SET LOCAL`). `db_diagnose.py` times the old and the new way on the real data side by side and checks the figures are equal. Tests (`test_kpi_borrowers.py`): a borrower with several loans counted once; a borrower shared by two banks counted once for the sector and once for each bank; a submission not approved adds nothing; no data gives zeros.
+The two ways of counting were also compared on awkward values (NULL, empty, a space, a different case): equal.
+
+**Verified here.** The module compiles; the meaning of the two counts is equal on awkward values (in SQLite's own SQL); the three new tests compile. **Not verified here (no database in this environment):** the new tests, and the speed of the new way (that is what the next `db_diagnose.py` run shows). The suite should now collect **530** cases.
+The load test reads far faster than people do; its p95 at 20 readers over-states what 20 real analysts would see, but it is the right test for a deadline day and for growth. No report or presentation was changed, at the owner's instruction.
+
+
+## Eighty-seventh item - the optimised summary on production, and a way back for a forgotten administrator password (stage 9, continued)
+
+**Verification of the previous packages (owner's runs, 8 October 2026).** Development stack: **530 collected, 528 passed, 2 skipped, 0 failed**. On staging's real PostgreSQL the old and the new way of computing the summary figures were run side by side on 212,000 current loans: **908 ms against 708 ms (22% less), the same figures** (53,132,954,000,000 TZS of loans; 69,104,015,378,173 TZS of collateral; 212,000 borrowers).
+Production was then updated (`prod_up.ps1`): all containers healthy; `verify_db_constraints.py` **47 of 47**; `prod_ops.py check`: database 16 to 31 ms, schema version as expected, disk 92% free, no failed sign-ins, no locked accounts; the two open warnings were the missing off-machine backup copy and the single administrator.
+A second System Administrator was created from the server with `create_admin.py --allow-additional` (the script refused without it, as designed, because an active administrator already existed); `prod_ops.py check` then reported **2 System Administrators are active**.
+
+**A gap found in use.** The owner had forgotten the password of the production administrator, and the only server-side routes were creating another administrator or resetting two-step sign-in; there was no way to set a new password from the server. Also, the sign-in answer "Incorrect username or password" is the same for a user that does not exist and for a wrong password (on purpose), and an attempt against an unknown user is not counted as a failed sign-in, which is why the check showed none while the owner saw refusals.
+**Change.** `scripts/reset_password.py` (service `app/services/account_recovery.py`): hidden prompt twice, password policy enforced, stored hashed, account unlocked, failed-sign-in count cleared, every existing session ended, a new password of their own required at the next sign-in by default, the two-step sign-in untouched, audited as `PASSWORD_RESET_CLI` without the password. Guide: `docs/ACCOUNT_RECOVERY.md`.
+Tests (`test_account_recovery.py`, 16 cases): the new password works and the old one does not; stored hashed; a locked account is unlocked; old refresh tokens stop working; change required by default and optional; weak passwords refused (short, no digit, no special character, empty, none) with nothing changed; unknown user refused; two-step sign-in untouched; audit entry without the password; only the named person changes.
+
+**Verified here.** The service and script compile; the sample passwords of the tests were checked against the real password policy. **Not verified here (no database in this environment):** the new tests (the suite should now collect **546** cases) and the script itself.
+No report or presentation was changed, at the owner's instruction.
+
+
+## Eighty-seventh item - the penetration-test pack (stage 10)
+
+**Verification of what came before (owner's runs, 8 October 2026).** Production runs the new code (`prod_up`): 47 of 47 database protections; System Status OK except the off-machine backup; two System Administrators are active (the second was made with `create_admin.py --allow-additional`, its password later reset with `reset_password.py`). The summary-figures change measured on real data: 908 ms before, 708 ms after, the same figures (212,000 current loans).
+Operational findings made while recovering the administrators' access, none of them a defect of the sign-in code: the sign-in code (server and browser) was read and is correct; a 200 from the sign-in endpoint proved a password right while the browser still refused it, which pointed to the browser or the typing, not the server; the first-time two-step set-up screen is easily mistaken for an error; PowerShell strips double quotes from native-command arguments (use stdin or escaped quotes); the password-reset script (`reset_password.py`) was missing from the owner's copy until the package was copied again.
+
+**Change.** `docs/PENTEST_CHECKLIST.md`: rules of engagement; how to build staging like production for security purposes (rate limiting on, two-step required, load-test switch off, test accounts and keys); what the testers should know (roles, entry points, token lifetimes, sign-in protection, database rights); **ten observations** the developers already know, each with a suggested treatment and whether it needs a decision from the Bank; **76 test cases** in ten groups (authentication and sessions, authorisation and tenant isolation, input handling, file upload, API keys, transport and headers, infrastructure, audit and monitoring, business logic, availability) each with the result the system is built to give; severity levels; reporting; what happens after.
+
+**The ten observations (found by reading the code and the live responses; none is fixed yet).** O1 no Content-Security-Policy; O2 tokens in `localStorage` (worse together with O1); O3 some security headers sent twice (two different HSTS lifetimes); O4 password minimum is 8 characters and no common-password check; O5 exports were not found to neutralise spreadsheet formulas (a suspicion, case C7); O6 rate limits only on sign-in, two-step and integration endpoints; O7 upload type checked by extension, declared type and parsing; O8 self-signed and trial certificates; O9 one backend process (a large upload slows others); O10 partial container hardening (the application runs as uid 10001, but the container starts as root and sets no `cap_drop`, read-only file system or `no-new-privileges`).
+
+**Verified here.** Each statement in the pack was checked against the code or a live response: token lifetimes, lock-out figures, rate limits, upload limits, database rights (SELECT, INSERT and UPDATE only; no UPDATE on `audit_logs`), the published ports (80 and 443 only), the redirect from port 80, the disabled `/docs` in production, the Dockerfile. **Not verified:** the expected results of the cases themselves (that is what the test is for), and the suspicion in O5. No code was changed. No report or presentation was changed, at the owner's instruction.
+
+
+## Eighty-eighth item - three of the pen-test observations addressed (stage 10)
+
+**Change.**
+* **O5, formula injection in exports.** Text that people type (file names, review notes, names, text quoted in audit entries) reaches the CSV and Excel exports; a cell beginning with `=`, `+`, `-` or `@` is a formula to Excel and LibreOffice. `app/core/export_safety.py`: in CSV such text gets an apostrophe first (numbers, empty cells and text that is only a number, such as `-12.5` or `+255`, are untouched so other programs still read the figures); in Excel the cell is written as text, not as a formula, with the words unchanged. Applied to all four exports (combined-exposure CSV, audit-log CSV, submission-history CSV, the Excel summary). Tests `test_export_safety.py`: the helper on awkward values, then three exports with a hostile value in them, the combined-exposure CSV unchanged in shape, and the Excel workbook with no formula cell anywhere.
+* **O1, no Content-Security-Policy.** nginx now sends one: own scripts only (the application has no inline script and no `eval`), inline styles allowed, fonts from Google Fonts, map tiles from OpenStreetMap, connections only to itself, no framing, no plug-ins, forms only to itself. The production checker requires the header (and was first found too weak: it matched the word in a comment, now it matches the `add_header` command).
+* **O3, doubled security headers.** nginx hides the application's four copies on the proxied paths, so each header is sent once. This also removes a contradiction: the application's HSTS said `includeSubDomains` for two years, which the nginx comment deliberately leaves to the Bank's later decision.
+* **O11 (new).** The browser contacts Google Fonts and OpenStreetMap: a privacy and availability point for a central bank.
+Not changed (they need the Bank's decision or a larger change): O2 (tokens in `localStorage`), O4 (password minimum 8), O6 (rate limits only on sign-in, two-step and integration), O8 (certificates), O9 (one backend process), O10 (container hardening), O11.
+
+**Verified here.** The helper on 25 awkward values; every changed module compiles; the nginx file has balanced braces and every directive ends properly; the production checker accepts the file and refuses one without the policy and one without the header hiding. **Not verified here (no browser, no database, no nginx in this environment):** the new tests, that the policy lets every page work (the map, the fonts, the QR picture, the downloads: checked by the owner on staging, `PENTEST_CHECKLIST.md` section 3a), and that nginx accepts the file (staging start-up shows it). The suite should now collect **576** cases (541 expected from the previous package, plus 35 new in `test_export_safety.py`: 30 for the helper on awkward values, 1 for a whole row, 4 for the exports). No report or presentation was changed, at the owner's instruction.
+
+
+## Eighty-ninth item - new recovery codes from the application (stage 10)
+
+**Verification of the previous package (owner's runs, 8 October 2026).** Development stack: **581 collected, 579 passed, 2 skipped, 0 failed** (239 s), including `test_export_safety`. Staging: `nginx -t` ok; the page and the API each send **one** copy of every security header (HSTS one year without `includeSubDomains`, and the Content-Security-Policy); in the browser the staging **map and pages worked with the policy on**. Production moved with `prod_up`: same headers, System Status OK except the off-machine backup, two System Administrators active.
+
+**The gap.** The ten recovery codes are shown only once, at set-up. A person who did not save them (it happened to the owner's own administrator account) had no way to get others: the server could make them, but nothing on screen asked it to. (The owner is protected by the second administrator and the server script, but a person alone in an institution would not be.)
+**Change.** A card **Two-step sign-in: recovery codes** under the password form on the Change Password page (`components/RecoveryCodesCard.tsx`), shown only to people who use two-step sign-in and not while a temporary password must be replaced. It asks for the CURRENT 6-digit code (so a stolen session cannot do it), calls the existing server endpoint, shows the ten new codes once with Copy and Download, and says the old ones are dead; the person must tick that they saved them before it closes. **A second fix in the same change:** the browser's response handler treated a 401 from this endpoint (a wrong code) as "the session has ended" and would have signed the person out; every `/auth/mfa/` endpoint is now treated like the sign-in steps (a 401 there is only a message). No server code changed: the endpoint, its audit entry and its tests already existed (`test_mfa_login.py`).
+Tests: `RecoveryCodesCard.test.tsx` (nothing is shown without two-step sign-in; the current code is sent with the spaces removed and the new codes are shown with the warning, Done disabled until saved; a wrong code shows the server's message and no codes; fewer than 6 digits cannot be sent).
+
+**Verified here.** The four front-end files parse (TypeScript parser). **Not verified here (no React, no browser in this environment):** the type check and the build (`npm run build` runs `tsc` and is the check on staging), the new front-end tests (`npm test`), and the look of the card. No report or presentation was changed, at the owner's instruction.
+
+
+## Ninetieth item - a stricter password policy (stage 10, observation O4)
+
+**Verification of the previous package (owner's runs, 8 October 2026).** On staging `npm run build` (which runs the type check) succeeded with the new recovery-codes card; production was moved with `prod_up`. The administrator's account was recovered and recovery codes were regenerated from the application itself.
+
+**Change.** `app/core/password_policy.py`, applied at every place a password is set (creating an account, Change Password, `create_admin.py`, `reset_password.py`): **12 characters for the Bank's staff** (BOT analysts and System Administrators), 8 for institution users, an unknown role gets 12; the letter, digit and special-character rule as before; **common passwords refused** (a well-known word with only digits or symbols added in front or behind, with look-alike characters undone: `Admin1234!`, `P@ssw0rd2026`, `Welcome@123`, `MyPassword2026!`; and passwords of four or fewer different characters); **the username may not appear in the password**. Temporary passwords are checked against the strictest rule. The password page follows the person's role (12 or 8) and explains the rule; the server names every unmet rule. Existing passwords keep working until their owner changes them. Documented in `docs/PASSWORDS.md`.
+**A bug found by the table of examples before shipping.** The first version turned every digit into a letter before looking for the word, so the digits added behind it ("1234") became extra letters and hid `admin`. Fixed by cutting the added digits and symbols first, then undoing look-alikes inside the word. The table (12 acceptable and 18 refused passwords, and 3,000 generated temporary passwords) was run before and after.
+**Tests.** `test_password_policy.py` gained: the minimum by role; nine good passwords accepted; fourteen common passwords refused; each unmet rule named; the username rule (and the 4-character limit); temporary passwords always acceptable; through the application: a staff account needs 12 and an institution account keeps 8, a common password is refused on creation, a staff member changing their own password meets the same rule, and a password set from the server meets the rule for that person's role. Seven existing test passwords (`Passw0rd!23`, itself a common password) were replaced.
+**A language slip, corrected.** An example phrase in Swahili had been put into the page text and the code comments; it is replaced by an English example everywhere (the product is in English only). The word list keeps a few Swahili common passwords because they are real passwords people choose.
+
+**Verified here.** The table above; every changed file compiles and the changed page parses. **Not verified here (no database, no browser, no React build):** the new and the changed tests, and the page (the staging build is the check). The suite should now collect **616** cases (581 collected in the owner's last run, plus 35 new in `test_password_policy.py`). No report or presentation was changed, at the owner's instruction.
+
+
+## Ninety-first item - container hardening (stage 10, observation O10)
+
+**Verification of the previous package (owner's runs, 8 October 2026).** Development stack: **616 collected, 614 passed, 2 skipped, 0 failed** (203 s), including the 35 new password-policy tests. Staging built and started (the front-end build with the type check passed). Production moved with `prod_up`: System Status OK except the off-machine backup; two System Administrators active; one failed sign-in in the last hour (the owner's own try).
+
+**Change.** In `docker-compose.prod.yml` (shared by production and staging): the **backend** and the **web server** get `no-new-privileges` and `cap_drop: ALL`, keeping only what their start-up needs. Backend: `CHOWN`, `SETUID`, `SETGID` (give the uploads volume to the application's own user, then run the application as `cdr`, uid 10001). Web server: `NET_BIND_SERVICE`, `CHOWN`, `SETUID`, `SETGID`, and `DAC_OVERRIDE` (the certificate key on a Linux server is often readable only by its owner and nginx starts as root). The database container is left alone (it needs several more capabilities; a decision for the Bank). A **read-only root file system** was considered and not done: the report, chart and PDF libraries write cache files and nothing here can prove they all cope. The production checker now refuses a compose file that loses the hardening for either service (proved by removing each in turn). Documented in `DOCKER.md`; the pen-test pack (O10, case G2) updated.
+
+**Verified here.** The compose file parses and shows the intended settings per service; the checker accepts it and refuses it with the backend's capabilities removed and with the web server's `no-new-privileges` removed. **Not verified here (no Docker in this environment): that the containers start and work with the capabilities dropped.** This is the risk of the change (a missing capability stops the start-up, for example if the image's `su` needs one that was not foreseen), so it must be tried on staging first: `staging_up` (all services must reach `healthy`), then `docker inspect` of the two containers, then a short load test (`load_test.py run --rows 200 --duration 5`) and a report download. If a service does not start, the logs name the failing call; the way back is the previous compose file (`git`/the previous package), and production is untouched until `prod_up` is run. No report or presentation was changed, at the owner's instruction.
+
+
+## Ninety-second item - the container hardening tried on staging (stage 10, observation O10)
+
+**Verified on staging (owner's run, 8 October 2026).** With the hardening in `docker-compose.prod.yml` the three services started and the backend reached `Healthy` (1.9 s); `docker inspect` of the backend shows `[no-new-privileges:true] drop=[ALL] add=[CAP_CHOWN CAP_SETGID CAP_SETUID]`, as intended. The backend therefore starts, gives the uploads volume to its own user and runs the application as the unprivileged user with only those three capabilities.
+
+**A side effect found at once.** The load-test tool then said "Not set up yet" although `setup` had been run. Cause (read from the code): the tool keeps its saved accounts in the uploads volume when `os.access(/app/uploads, W_OK)` is true; `docker compose exec` runs as root, root no longer has `DAC_OVERRIDE` and the volume belongs to `cdr`, so the answer is no and the tool looked in `/tmp`, which is empty. The file is intact. This is the hardening working as designed, not a defect. **Remedy:** run the tool as the application's user, `exec -u cdr` (documented in `LOAD_TESTING.md` and `DOCKER.md`); the tool's message now says so when it falls back to `/tmp` although the uploads volume exists (test added). Commands that only talk to the database are not affected.
+
+**Still to check on staging:** the web server reaching `healthy` (it started; its health check takes a little longer), the load test as `cdr`, and a PDF and an Excel report download. Production is not yet running the hardening. No report or presentation was changed, at the owner's instruction.
+
+
+## Ninety-third item - rate limits per signed-in person (stage 10, observation O6)
+
+**Verification of the previous packages (owner's runs, 8 October 2026).** The container hardening ran on staging (all three services `healthy`; `docker inspect` showed `no-new-privileges`, `drop=[ALL]`, `add=[CHOWN SETGID SETUID]`; a load test as the application's user and the PDF, Excel and CSV report downloads all worked) and was then moved to production (`prod_up`: all services `healthy`, same settings, System Status OK except the off-machine backup).
+
+**A correction of mine.** O6 said routes other than sign-in, two-step and the integration endpoints had no rate limit. **That was wrong:** `Limiter(..., default_limits=["200/minute"])` with `SlowAPIMiddleware` limits every route; I had looked only for `@limiter.limit` decorators.
+**The real weakness.** The limit was counted by ADDRESS only. Behind the Bank's network every user arrives from one address and shared one allowance of 200 a minute; a dashboard page is about ten requests, so a busy minute of twenty analysts could throttle all of them although none misbehaved. And a password-reset request (public) and the token refresh had only that general limit.
+**Change.** The bucket of a request is now the signed-in person when the access token is valid (signature and expiry checked), else the real address; a forged or expired token is counted against the sender's address, so nobody can use up another person's allowance. General limit 300 a minute; password-reset request 10 and token refresh 30 a minute per address. `app/core/rate_limit.py`, `app/api/auth.py`, `app/api/password_reset.py`; documented in `docs/RATE_LIMITS.md`; the pen-test pack (O6, new cases A17 and A18) corrected.
+**Tests.** `test_rate_limit_per_user.py`: two people behind one address (the 301st request of one is 429, the colleague's first is 200); the password-reset and refresh limits; which bucket a request goes into (valid token, forged token, expired token, no or malformed header).
+
+**Verified here.** The choice of bucket was run with stand-ins for the two libraries missing in this environment (`slowapi`, `jose`): a valid token gives the person, a forged or unknown token, no header, a non-Bearer header and an empty token give the real address (including the proxy case with `X-Forwarded-For`). Everything compiles. **Not verified here (no database, no `slowapi`, no `jose`):** the new tests, that signature and expiry are checked by the real `decode_access_token`, and the behaviour through the application. The suite should now collect **629** cases (616 in the owner's last run, plus 13 new). No report or presentation was changed, at the owner's instruction.
+
+
+## Ninety-fourth item - dates in uploaded files: no more silent guessing (stage 10, known gap KG-06)
+
+**Verification of the previous packages (owner's runs, 8 October 2026).** Development stack: **630 collected, 628 passed, 2 skipped, 0 failed** (203 s), including the per-person rate-limit tests. Staging and production moved with `prod_up`: all services `healthy`.
+
+**The gap (KG-06), and what reading the code showed.** Text dates in a loan file were read by `pd.to_datetime`, which assumes the MONTH comes first when a date is ambiguous: `04/05/2026` became 5 April although a writer in Tanzania means 4 May. The decision "day first or month first?" had been waiting for the Bank. Reading the code showed something worse that no decision would have fixed: **a number in a date column was turned into a date of 1970** (`45000` became 1970-01-01), and nothing marked the row. (An earlier comparison of old and new code had missed it because both did the same.)
+**Change.** `app/services/date_rules.py`: no guess is made where the Bank has not chosen. A real date cell, year-first text, month-in-letters text and day-or-month-first text that can mean only one thing (one of the first two numbers above 12, or both equal) are accepted; an ambiguous date (both 12 or less), a number, a two-digit year, an impossible date and a year outside 1900 to 2100 are refused as a finding on the row with the reason and the way to write it ("04/05/2026 could be 4 May 2026 or 5 April 2026: write it as YYYY-MM-DD (2026-05-04 or 2026-04-05) or use a date cell"); a refused date is never stored. The rule that maturity cannot precede disbursement is unchanged. Applied to the three date columns. Documented in `docs/UPLOAD_DATES.md` (what is accepted, why, and the one place to change if the Bank later fixes a convention).
+**What this does not decide.** The Bank's choice of convention is still open; the system no longer depends on it. Files that were already accepted keep their stored dates; only new uploads are read under the rules. Institutions that wrote ambiguous text dates will now see findings and must correct the file (a real date cell avoids the problem).
+**Tests.** `test_date_rules.py` (47): the accepted forms, the ambiguous ones, everything refused (numbers, two-digit years, impossible days, implausible years), empty cells, the hints, and through the application a file with good and doubtful dates (the good ones stored, the doubtful ones refused with the reason and never stored, `25/03/2029` read day first because it can only be that) and the unchanged maturity rule.
+
+**Verified here.** The rules on 35 forms; the whole upload checker on a seven-row file (ISO, ambiguous, date cell with a day-first date, a number, maturity before disbursement, month names, empty): each row came out as the table in `UPLOAD_DATES.md` says; the pure parts of the new tests. **Not verified here (no database):** the two tests through the application. The suite should now collect **677** cases (630 in the owner's last run, plus 47). No report or presentation was changed, at the owner's instruction.

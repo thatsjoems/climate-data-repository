@@ -54,7 +54,11 @@ apiClient.interceptors.response.use(
     // Never attempt to "refresh" a failed login or a failed refresh itself -
     // those 401s mean "wrong credentials" / "refresh token itself is dead",
     // not "access token expired", and treating them as such would loop.
-    const isAuthEndpoint = originalRequest?.url?.includes('/auth/login') || originalRequest?.url?.includes('/auth/refresh')
+    const url: string = originalRequest?.url || ''
+    // The steps of signing in (password, code, set-up) answer 401 for a WRONG code: that is a message for the person, never a reason
+    // to refresh a token or to send them back to the start.
+    const isSignInStep = url.includes('/auth/login') || url.includes('/auth/mfa/')   // verify, setup and the new recovery codes: a wrong code is a 401 that is only a message
+    const isAuthEndpoint = isSignInStep || url.includes('/auth/refresh')
 
     if (error.response?.status === 401 && !isAuthEndpoint && !originalRequest._retry) {
       originalRequest._retry = true
@@ -75,7 +79,7 @@ apiClient.interceptors.response.use(
       // Login's own 401 (wrong password) must NOT redirect - the Login page
       // handles that error message itself. A retried request that still
       // fails, or a dead refresh token, means the session is truly over.
-      if (originalRequest?.url?.includes('/auth/login')) {
+      if (isSignInStep) {
         return Promise.reject(error)
       }
       clearSessionAndRedirect()

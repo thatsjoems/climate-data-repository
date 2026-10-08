@@ -21,7 +21,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         headers={"WWW-Authenticate": "Bearer"},
     )
     payload = decode_access_token(token)
-    if payload is None:
+    # A token made for a step of the sign-in (the code check, or enrolment) carries a `purpose` and is never an access token.
+    if payload is None or payload.get("purpose"):
         raise credentials_exception
     user_id = payload.get("sub")
     if user_id is None:

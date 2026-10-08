@@ -15,6 +15,18 @@ from app.core.rate_limit import limiter
 from app.main import app
 
 
+class _ConnectsFrom:
+    """Wraps the application so every request appears to come from this address (the proxy's), whatever TestClient version is installed."""
+
+    def __init__(self, application, host):
+        self.application, self.host = application, host
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            scope = {**scope, "client": (self.host, 50000)}
+        await self.application(scope, receive, send)
+
+
 def _reset():
     reset = getattr(limiter, "reset", None)
     if reset:
@@ -33,7 +45,7 @@ def behind_a_proxy(db_session, monkeypatch):
     limiter.enabled = True
     _reset()
     try:
-        with TestClient(app, client=("10.0.0.5", 50000)) as proxy:      # every request arrives from the proxy's address
+        with TestClient(_ConnectsFrom(app, "10.0.0.5")) as proxy:      # every request arrives from the proxy's address
             yield proxy
     finally:
         limiter.enabled = False
@@ -67,7 +79,7 @@ def test_without_a_trusted_proxy_the_header_is_not_believed(db_session, monkeypa
     limiter.enabled = True
     _reset()
     try:
-        with TestClient(app, client=("10.0.0.5", 50000)) as direct:
+        with TestClient(_ConnectsFrom(app, "10.0.0.5")) as direct:
             codes = [_attempt(direct, f"7.7.7.{n}").status_code for n in range(11)]
         assert codes[:10] == [401] * 10 and codes[10] == 429       # varying the header changes nothing: one connection, one allowance
     finally:

@@ -42,7 +42,7 @@ def test_institution_user_cannot_create_user(client, db_session):
         "/api/users",
         json={
             "full_name": "New Person", "username": "newperson", "email": "n@example.com",
-            "password": "Passw0rd!23", "role": "INSTITUTION_USER",
+            "password": "Quiet-Lake!2026", "role": "INSTITUTION_USER",
         },
         headers=auth_header(token),
     )

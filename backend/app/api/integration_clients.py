@@ -21,6 +21,7 @@ from app.core.integration_auth import generate_api_key
 from app.models.models import ApiClient, RoleEnum, User
 from app.schemas.schemas import ApiClientCreate, ApiClientCreated, ApiClientOut
 from app.services.audit_service import record_audit
+from app.core.timeutil import utcnow
 
 router = APIRouter(prefix="/integration-clients", tags=["Integration access"])
 
@@ -28,7 +29,7 @@ router = APIRouter(prefix="/integration-clients", tags=["Integration access"])
 def _status(client: ApiClient) -> str:
     if client.revoked_at is not None:
         return "REVOKED"
-    if client.expires_at <= datetime.utcnow():
+    if client.expires_at <= utcnow():
         return "EXPIRED"
     return "ACTIVE"
 
@@ -57,7 +58,7 @@ def create_api_client(
     if taken:
         raise HTTPException(status_code=409, detail="A live key with this name already exists; revoke it first or choose another name")
 
-    now = datetime.utcnow()
+    now = utcnow()
     client = None
     for _ in range(3):   # a clash of the 40-bit public prefix is vanishingly rare; retry rather than fail
         key, prefix, key_hash = generate_api_key()
@@ -105,7 +106,7 @@ def revoke_api_client(
         raise HTTPException(status_code=404, detail="Key not found")
     if client.revoked_at is not None:
         raise HTTPException(status_code=409, detail="This key is already revoked")
-    client.revoked_at = datetime.utcnow()
+    client.revoked_at = utcnow()
     client.revoked_by_user_id = current_user.id
     db.commit()
     db.refresh(client)

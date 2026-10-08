@@ -9,13 +9,14 @@ already used for institution access requests.
 """
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from app.core.account_status import authentication_block_reason
 from app.core.database import get_db
 from app.core.deps import require_roles
+from app.core.rate_limit import limiter
 from app.core.security import hash_password
 from app.core.password_policy import generate_secure_temp_password
 from app.models.models import PasswordResetRequest, AccessRequestStatus, User, RoleEnum
@@ -26,6 +27,7 @@ from app.schemas.schemas import (
 from app.services.audit_service import record_audit
 from app.services.notification_service import notify_roles, notify_user
 from app.services.email_service import send_email
+from app.core.timeutil import utcnow
 
 router = APIRouter(prefix="/password-reset-requests", tags=["Password Recovery"])
 
@@ -42,7 +44,8 @@ def _to_out(req: PasswordResetRequest, user: User) -> PasswordResetRequestOut:
 
 
 @router.post("", status_code=202)
-def submit_password_reset_request(payload: PasswordResetRequestCreate, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def submit_password_reset_request(request: Request, payload: PasswordResetRequestCreate, db: Session = Depends(get_db)):
     """
     Public endpoint - no authentication required.
     Always returns the same generic message, whether or not the account
@@ -111,7 +114,7 @@ def approve_password_reset(
     req.status = AccessRequestStatus.APPROVED
     req.review_notes = payload.notes
     req.reviewed_by_user_id = current_user.id
-    req.reviewed_at = datetime.utcnow()
+    req.reviewed_at = utcnow()
     db.commit()
     db.refresh(req)
 
@@ -167,7 +170,7 @@ def reject_password_reset(
     req.status = AccessRequestStatus.REJECTED
     req.review_notes = payload.notes
     req.reviewed_by_user_id = current_user.id
-    req.reviewed_at = datetime.utcnow()
+    req.reviewed_at = utcnow()
     db.commit()
     db.refresh(req)
 

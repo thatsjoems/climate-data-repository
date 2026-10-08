@@ -21,6 +21,7 @@ from datetime import datetime
 import pandas as pd
 
 from app.services.template_generator import REGION_DISTRICTS, HAZARD_OPTIONS
+from app.core.timeutil import utcnow
 
 EXPECTED_COLUMNS = [
     "region", "district", "year", "month", "rainfall_mm",
@@ -62,7 +63,7 @@ REQUIRED_COLUMNS = ["region", "year"]
 MAX_CLIMATE_UPLOAD_COLUMNS = 60
 
 VALID_HAZARD_SEVERITY = {"LOW", "MEDIUM", "HIGH", None}
-CURRENT_YEAR = datetime.utcnow().year
+CURRENT_YEAR = utcnow().year
 
 
 @dataclass

@@ -19,6 +19,7 @@ wait_healthy() {
   echo "$1 did not become healthy. See: docker compose -f docker-compose.prod.yml --env-file .env.production logs $1"; exit 1
 }
 
+mkdir -p backups/status   # where the backup task leaves its result for the monitor
 echo "1/4 Starting the database and the backend ..."
 docker compose "${C[@]}" up -d --build db backend
 wait_healthy backend
@@ -35,7 +36,7 @@ docker compose "${C[@]}" up -d --force-recreate backend
 wait_healthy backend
 
 echo "4/4 Starting the web server ..."
-docker compose "${C[@]}" up -d --build frontend
+docker compose "${C[@]}" up -d --build --force-recreate frontend
 wait_healthy frontend
 
 echo; echo "Production is up: https://$(env_value CDR_DOMAIN)"

@@ -69,3 +69,27 @@ docker compose exec backend pytest -v
   (not 5432) — e.g. if you want to inspect it with pgAdmin or DBeaver instead of `psql`.
 - To point the frontend at a differently-hosted backend, rebuild with:
   `docker compose build --build-arg VITE_API_URL=https://your-backend-url/api frontend`
+
+
+## Container hardening (production and staging)
+
+`docker-compose.prod.yml` limits what the application and the web server can do if one of them is ever taken over:
+
+| Service | `no-new-privileges` | Capabilities kept (everything else is dropped) | Why those |
+|---|---|---|---|
+| backend | yes | `CHOWN`, `SETUID`, `SETGID` | The start-up gives the uploads volume to the application's own user and then runs the application as that user (`cdr`, uid 10001). |
+| frontend (nginx) | yes | `NET_BIND_SERVICE`, `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE` | Ports 80 and 443; handing its temporary folders to its worker user; reading the certificate key, which on a Linux server is often readable only by its owner (nginx starts as root). |
+| db | not set | Docker's defaults | The database image needs several more; changing it risks the data for little gain. A decision for the Bank. |
+
+Not done, deliberately: a read-only root file system (the report generators, the PDF and the chart libraries write cache files, and nothing here can prove they all cope); running the container as a non-root user from its first process (the volume's owner must be fixed first). Both are possible later with a test of every report and export.
+
+The production checker (`scripts/check_production_config.py`) refuses a compose file that loses these lines for the backend or the web server.
+
+**To check on a running stack** (staging first):
+
+    docker compose -p cdr-staging -f docker-compose.prod.yml --env-file .env.staging ps
+    docker inspect cdr-staging-backend-1 --format "{{.HostConfig.SecurityOpt}} drop={{.HostConfig.CapDrop}} add={{.HostConfig.CapAdd}}"
+
+All services must be `healthy`, and then the load test (`LOAD_TESTING.md`, a short run) and a report download show the application still works as the unprivileged user.
+
+**What this changes for the person at the keyboard.** `docker compose exec` gives a shell as root, and root no longer has the capability that lets it write anywhere regardless of ownership. The application's own folder (`/app/uploads`) belongs to the user `cdr`. So a command that reads or writes FILES there must run as that user: add `-u cdr` after `exec`. Today that means only the load-test tool (`exec -u cdr backend python scripts/load_test.py ...`, `LOAD_TESTING.md`). Commands that only talk to the database (`create_admin.py`, `reset_password.py`, `reset_mfa.py`, `db_diagnose.py`, `verify_db_constraints.py`, `system_check.py`) are not affected. If the load-test tool says "Not set up yet" although `setup` was run, this is the reason, and its message says so.

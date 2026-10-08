@@ -8,7 +8,8 @@ from app.core.database import get_db
 from app.core.deps import require_roles, get_current_user
 from app.core.security import hash_password
 from app.core.password_policy import validate_password_strength
-from app.models.models import User, RoleEnum, Institution
+from app.core.timeutil import utcnow
+from app.models.models import User, RoleEnum, Institution, RefreshToken
 from app.schemas.schemas import UserCreate, UserOut
 from app.services.audit_service import record_audit
 from app.services.notification_service import notify_user, notify_roles
@@ -47,7 +48,7 @@ def create_user(
     if payload.institution_id and not db.query(Institution).filter(Institution.id == payload.institution_id).first():
         raise HTTPException(status_code=400, detail="The selected institution does not exist.")
 
-    problems = validate_password_strength(payload.password)
+    problems = validate_password_strength(payload.password, role=payload.role, username=payload.username)
     if problems:
         raise HTTPException(status_code=400, detail="Password must " + "; ".join(problems) + ".")
 
@@ -134,4 +135,36 @@ def activate_user(
         message="Your account has been reactivated. You can now log in again.",
         notif_type="ACCOUNT_ACTIVATED",
     )
+    return user
+
+
+@router.post("/{user_id}/mfa/reset", response_model=UserOut)
+def reset_mfa(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.SYSTEM_ADMIN)),
+):
+    """
+    For someone who lost their phone and their recovery codes: removes their two-step sign-in so they enrol again at their next sign-in
+    (when the Bank requires it, they must). Their open sessions are ended. The administrator never sees the secret or any code.
+
+    Two safeguards: you cannot reset your own (a stolen session must not be able to remove the protection; use a recovery code, or the
+    command-line tool on the server), and the person is told in the system that it happened. Resetting is always audited.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot reset your own two-step sign-in.")
+    user.mfa_enabled = False
+    user.mfa_secret_encrypted = None
+    user.mfa_recovery_hashes = None
+    user.mfa_last_step = None
+    user.mfa_enrolled_at = None
+    db.query(RefreshToken).filter(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)).update({"revoked_at": utcnow()})
+    db.commit()
+    db.refresh(user)
+    record_audit(db, current_user.id, "MFA_RESET", "User", user.id, f"Two-step sign-in of {user.username} reset by {current_user.username}")
+    notify_user(db, user.id, message=f"Your two-step sign-in was reset by the System Administrator ({current_user.full_name}). "
+                "You will set it up again at your next sign-in. If you did not ask for this, tell the Bank of Tanzania now.", notif_type="SECURITY")
     return user

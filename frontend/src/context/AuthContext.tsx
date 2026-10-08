@@ -9,11 +9,37 @@ export interface CurrentUser {
   role: 'SYSTEM_ADMIN' | 'BOT_USER' | 'INSTITUTION_USER'
   institution_id: string | null
   must_change_password: boolean
+  mfa_enabled?: boolean
+}
+
+// Signing in has up to two steps. After the password the server either signs the person in ('done') or asks for the 6-digit code
+// ('code'), or, for the Bank's staff who have not set up two-step sign-in yet, asks them to set it up ('setup').
+export type SignInResult =
+  | { status: 'done' }
+  | { status: 'code'; mfaToken: string }
+  | { status: 'setup'; mfaToken: string }
+
+export interface SetupInfo {
+  secret: string
+  otpauth_uri: string
+  issuer: string
+  account: string
+  qr_svg: string | null
+}
+
+// Set-up ends with the recovery codes, which are shown ONCE. The session is held back until the person has seen them (finish()),
+// so the page does not move on before they are saved.
+export interface PendingSession {
+  recoveryCodes: string[]
+  finish: () => void
 }
 
 interface AuthContextType {
   user: CurrentUser | null
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<SignInResult>
+  verifyCode: (mfaToken: string, entry: { code?: string; recoveryCode?: string }) => Promise<void>
+  beginMfaSetup: (mfaToken: string) => Promise<SetupInfo>
+  confirmMfaSetup: (mfaToken: string, code: string) => Promise<PendingSession>
   logout: () => void
   refreshUser: () => Promise<void>
   isLoading: boolean
@@ -30,22 +56,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function login(username: string, password: string) {
+  function commitSession(data: any) {
+    localStorage.setItem('cdr_token', data.access_token)
+    localStorage.setItem('cdr_refresh_token', data.refresh_token)
+    localStorage.setItem('cdr_user', JSON.stringify(data.user))
+    setUser(data.user)
+  }
+
+  async function login(username: string, password: string): Promise<SignInResult> {
     setIsLoading(true)
     setError(null)
     try {
       const res = await apiClient.post('/auth/login', { username, password })
-      localStorage.setItem('cdr_token', res.data.access_token)
-      localStorage.setItem('cdr_refresh_token', res.data.refresh_token)
-      localStorage.setItem('cdr_user', JSON.stringify(res.data.user))
-      setUser(res.data.user)
+      if (res.data.access_token) {
+        commitSession(res.data)
+        return { status: 'done' }
+      }
+      if (res.data.mfa_required && res.data.mfa_token) return { status: 'code', mfaToken: res.data.mfa_token }
+      if (res.data.mfa_setup_required && res.data.mfa_token) return { status: 'setup', mfaToken: res.data.mfa_token }
+      throw new Error('Unexpected answer from the server')
     } catch (err: any) {
       const msg = err?.response?.data?.detail || 'Login failed. Please try again.'
-      setError(msg)
+      setError(typeof msg === 'string' ? msg : 'Login failed. Please try again.')
       throw err
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // The second step: the 6-digit code from the authenticator app, or one recovery code. Errors are shown by the step itself.
+  async function verifyCode(mfaToken: string, entry: { code?: string; recoveryCode?: string }) {
+    const body = entry.recoveryCode
+      ? { mfa_token: mfaToken, recovery_code: entry.recoveryCode.trim() }
+      : { mfa_token: mfaToken, code: (entry.code || '').trim() }
+    const res = await apiClient.post('/auth/mfa/verify', body)
+    commitSession(res.data)
+  }
+
+  async function beginMfaSetup(mfaToken: string): Promise<SetupInfo> {
+    const res = await apiClient.post('/auth/mfa/setup/begin', { mfa_token: mfaToken })
+    return res.data
+  }
+
+  async function confirmMfaSetup(mfaToken: string, code: string): Promise<PendingSession> {
+    const res = await apiClient.post('/auth/mfa/setup/confirm', { mfa_token: mfaToken, code: code.trim() })
+    return { recoveryCodes: res.data.recovery_codes || [], finish: () => commitSession(res.data) }
   }
 
   function logout() {
@@ -69,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, refreshUser, isLoading, error }}>
+    <AuthContext.Provider value={{ user, login, verifyCode, beginMfaSetup, confirmMfaSetup, logout, refreshUser, isLoading, error }}>
       {children}
     </AuthContext.Provider>
   )

@@ -9,9 +9,11 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.export_safety import csv_safe_row
 from app.core.deps import require_roles
 from app.models.models import AuditLog, User, RoleEnum
 from app.schemas.schemas import AuditLogPage, AuditFilterOptions, AuditFilterUser
+from app.core.timeutil import utcnow
 
 router = APIRouter(prefix="/audit-logs", tags=["Audit Log"])
 
@@ -111,16 +113,16 @@ def export_audit_logs_csv(
             out = io.StringIO()
             out_writer = csv.writer(out)
             for r in rows:
-                out_writer.writerow([
+                out_writer.writerow(csv_safe_row([
                     r.created_at.isoformat(), r.user_id or "", r.action,
                     r.entity_type or "", r.entity_id or "", r.details or ""
-                ])
+                ]))
             yield out.getvalue()
             offset += len(rows)
             if len(rows) < 1000:
                 break
 
-    filename = f"CDR_Audit_Log_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.csv"
+    filename = f"CDR_Audit_Log_{utcnow().strftime('%Y%m%d_%H%M')}.csv"
     return StreamingResponse(
         generate_csv(),
         media_type="text/csv",

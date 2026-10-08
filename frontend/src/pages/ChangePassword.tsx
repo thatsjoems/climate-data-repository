@@ -2,18 +2,23 @@ import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import RecoveryCodesCard from '../components/RecoveryCodesCard'
 
 interface Rule {
   label: string
   test: (pw: string) => boolean
 }
 
-const RULES: Rule[] = [
-  { label: 'At least 8 characters', test: (pw) => pw.length >= 8 },
+// The Bank's own staff (analysts and administrators) need 12 characters, institution users 8. The server also refuses very common passwords
+// ("Admin1234!") and any password that contains the username; those it explains itself if the new password is rejected.
+function rulesFor(minLength: number): Rule[] {
+  return [
+  { label: `At least ${minLength} characters`, test: (pw) => pw.length >= minLength },
   { label: 'At least one letter', test: (pw) => /[A-Za-z]/.test(pw) },
   { label: 'At least one number', test: (pw) => /[0-9]/.test(pw) },
   { label: 'At least one special character (e.g. ! @ # $ %)', test: (pw) => /[^A-Za-z0-9]/.test(pw) },
-]
+  ]
+}
 
 export default function ChangePassword() {
   const { user, refreshUser } = useAuth()
@@ -26,7 +31,9 @@ export default function ChangePassword() {
   const [loading, setLoading] = useState(false)
 
   const isForced = !!user?.must_change_password
-  const allRulesMet = RULES.every((r) => r.test(newPassword))
+  const minLength = user?.role === 'INSTITUTION_USER' ? 8 : 12
+  const rules = rulesFor(minLength)
+  const allRulesMet = rules.every((r) => r.test(newPassword))
   const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword
 
   async function handleSubmit(e: FormEvent) {
@@ -112,7 +119,8 @@ export default function ChangePassword() {
           />
 
           <div style={{ marginTop: '0.9rem' }}>
-            {RULES.map((r) => {
+            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted, #64748B)', marginBottom: '0.4rem' }}>A phrase of several unrelated words is best, for example <em>lantern-river-orange-72!</em>. Very common passwords such as Admin1234! are refused.</div>
+            {rules.map((r) => {
               const met = r.test(newPassword)
               return (
                 <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: met ? '#0B7D62' : 'var(--color-muted)', marginBottom: '0.25rem' }}>
@@ -134,6 +142,8 @@ export default function ChangePassword() {
           </button>
         </form>
       </section>
+
+      {!isForced && <RecoveryCodesCard />}
 
       {!isForced && (
         <button onClick={() => navigate(-1)} style={{ background: 'transparent', color: 'var(--color-primary)', border: 'none', padding: 0, cursor: 'pointer', fontSize: '0.85rem' }}>

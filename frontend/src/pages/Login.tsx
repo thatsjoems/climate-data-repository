@@ -3,11 +3,14 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import apiClient from '../api/client'
 import botLogo from '../assets/bot_logo.png'
+import { CodeStep, SetupStep } from '../components/TwoStepSignIn'
 
 export default function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const { login, isLoading, error } = useAuth()
+  // After the password the server may ask for a second step (the code, or first-time set-up): the page then shows that step.
+  const [step, setStep] = useState<{ mode: 'code' | 'setup'; mfaToken: string } | null>(null)
   const navigate = useNavigate()
   // Demo credentials must never be advertised in production (item 7 of the
   // September 2026 external review): the backend already skips SEEDING them
@@ -26,11 +29,28 @@ export default function Login() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     try {
-      await login(username, password)
-      navigate('/')
+      const result = await login(username, password)
+      if (result.status === 'done') navigate('/')
+      else setStep({ mode: result.status, mfaToken: result.mfaToken })
     } catch {
       // error is already surfaced via AuthContext
     }
+  }
+
+  if (step) {
+    const common = { mfaToken: step.mfaToken, onDone: () => navigate('/'), onBack: () => { setStep(null); setPassword('') } }
+    return (
+      <div className="login-page">
+        <div className="login-card">
+          <div className="login-brand">
+            <img src={botLogo} alt="Bank of Tanzania" className="login-logo" />
+            <h1>Climate Data Repository</h1>
+            <p className="login-subtitle">Bank of Tanzania</p>
+          </div>
+          {step.mode === 'code' ? <CodeStep {...common} /> : <SetupStep {...common} />}
+        </div>
+      </div>
+    )
   }
 
   return (

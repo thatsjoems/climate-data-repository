@@ -55,6 +55,17 @@ services:
       # The web server in front is the only thing that can reach the backend (it publishes no port). Its X-Forwarded-For is believed
       # for requests from these private networks; set it to the proxy's own network if BOT ICT puts another proxy in front.
       TRUSTED_PROXIES: "${TRUSTED_PROXIES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
+      # Two-step sign-in for the Bank's staff (BOT analysts and System Administrators): on in production. Each of them enrols with an
+      # authenticator app at their next sign-in. Set MFA_REQUIRED=false in .env.production only to get back in if nobody can enrol (see docs/MFA.md).
+      MFA_REQUIRED: "${MFA_REQUIRED:-true}"
+      # Monitoring (docs/MONITORING.md). Every few minutes the backend checks itself and tells the System Administrators in the application
+      # about anything that needs attention. The backup task leaves its result in ./backups/status, which the backend may only read.
+      MONITOR_INTERVAL_MINUTES: "${MONITOR_INTERVAL_MINUTES:-10}"
+      BACKUP_STATUS_DIR: /backup-status
+      BACKUP_MAX_AGE_HOURS: "${BACKUP_MAX_AGE_HOURS:-26}"
+      BACKUP_MONITORING: "${BACKUP_MONITORING:-true}"      # staging switches it off: it has no backup task of its own
+      RATE_LIMIT_ENABLED: "${RATE_LIMIT_ENABLED:-true}"      # only staging switches it off, for load tests (the checker refuses it in .env.production)
+      CDR_ALLOW_LOAD_TEST: "${CDR_ALLOW_LOAD_TEST:-}"        # the load-test tool runs only where this is yes (staging)
       ACCESS_TOKEN_EXPIRE_MINUTES: "${ACCESS_TOKEN_EXPIRE_MINUTES:-15}"
       REFRESH_TOKEN_EXPIRE_DAYS: "${REFRESH_TOKEN_EXPIRE_DAYS:-7}"
       SMTP_HOST: "${SMTP_HOST:-}"
@@ -65,12 +76,24 @@ services:
     # No "ports": only the web server in front of it can reach the backend.
     volumes:
       - cdr_prod_uploads:/app/uploads
+      - ${BACKUP_STATUS_HOST_DIR:-./backups/status}:/backup-status:ro      # only the small status file of the backup task, never the backups
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"]
       interval: 15s
       timeout: 6s
       retries: 8
       start_period: 40s
+    # Container hardening (docs/DOCKER.md). Nothing inside can gain extra privileges (for example through a setuid program), and every Linux capability is
+    # dropped except the three the start-up needs: CHOWN to give the uploads volume to the application's own user, SETUID and SETGID to run the application as
+    # that unprivileged user (cdr, uid 10001) instead of root.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
 
   frontend:
     build:
@@ -91,6 +114,19 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+    # Container hardening (docs/DOCKER.md): no extra privileges, and only the capabilities nginx needs to start: to bind ports 80 and 443 (NET_BIND_SERVICE), to
+    # hand its temporary folders to its worker user and drop to it (CHOWN, SETUID, SETGID), and to read the certificate key (DAC_OVERRIDE: on a Linux server
+    # the key file is often readable only by its owner, and nginx starts as root).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - NET_BIND_SERVICE
+      - DAC_OVERRIDE
 
 volumes:
   cdr_prod_postgres_data:

@@ -32,7 +32,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
         "ck_api_clients_key_hash_length", "ck_api_clients_revoker_needs_revocation", "ck_api_clients_scope_valid", "ck_api_clients_allowed_networks_not_blank",
     },
     "climate_ingestion_batches": {"ck_climate_ingestion_batches_one_uploader"},
-    "users": {"ck_users_institution_user_has_institution"},
+    "users": {"ck_users_institution_user_has_institution", "ck_users_mfa_enabled_has_secret"},
     "submissions": {
         "ck_submissions_reporting_period_format",
         "ck_submissions_version_number_positive",

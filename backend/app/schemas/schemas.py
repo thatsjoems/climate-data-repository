@@ -22,10 +22,19 @@ class ChangePasswordRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
+    """
+    The sign-in answer. Without two-step sign-in it is exactly what it always was (access_token, refresh_token, user). When a second
+    step is needed the tokens are absent and `mfa_required` (enter the code) or `mfa_setup_required` (enrol first) is true, with a short
+    `mfa_token` that only the MFA endpoints accept. `recovery_codes` appears once, on enrolment.
+    """
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
-    user: "UserOut"
+    user: Optional["UserOut"] = None
+    mfa_required: bool = False
+    mfa_setup_required: bool = False
+    mfa_token: Optional[str] = None
+    recovery_codes: Optional[list[str]] = None
 
 
 class RefreshRequest(BaseModel):
@@ -93,6 +102,7 @@ class UserOut(BaseModel):
     institution_id: Optional[str] = None
     is_active: bool
     must_change_password: bool = False
+    mfa_enabled: bool = False
     created_at: datetime
 
 
@@ -488,3 +498,35 @@ class IntegrationWhoAmI(BaseModel):
     scope: str
     expires_at: datetime
     access: str
+
+
+# ---------- TWO-STEP SIGN-IN ----------
+class MfaVerifyRequest(BaseModel):
+    mfa_token: str
+    code: Optional[str] = Field(default=None, max_length=12)
+    recovery_code: Optional[str] = Field(default=None, max_length=32)
+
+
+class MfaSetupRequest(BaseModel):
+    mfa_token: str
+
+
+class MfaConfirmRequest(BaseModel):
+    mfa_token: str
+    code: str = Field(max_length=12)
+
+
+class MfaBeginResponse(BaseModel):
+    secret: str
+    otpauth_uri: str
+    issuer: str
+    account: str
+    qr_svg: Optional[str] = None      # the same address as a QR code to scan; None if it could not be drawn (the typed key always works)
+
+
+class MfaCodeRequest(BaseModel):
+    code: str = Field(max_length=12)
+
+
+class RecoveryCodesResponse(BaseModel):
+    recovery_codes: list[str]

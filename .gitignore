@@ -22,6 +22,8 @@ Thumbs.db
 # Production secrets and the TLS private key: never in git
 .env.production
 certs/
+.env.staging
+certs-staging/
 
 # Backups hold real data (database dumps and uploaded files): never in git
 backups/

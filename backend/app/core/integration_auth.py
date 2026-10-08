@@ -20,6 +20,7 @@ from app.core.database import get_db
 from app.core.security import hash_refresh_token
 from app.models.models import ApiClient
 from app.services.audit_service import record_audit
+from app.core.timeutil import utcnow
 
 KEY_PATTERN = re.compile(r"^cdrk_([0-9a-f]{10})_([A-Za-z0-9_-]{32,})$")
 LAST_USED_RESOLUTION = timedelta(seconds=60)   # "last used" is written at most once a minute per key
@@ -74,7 +75,7 @@ def get_api_client(request: Request, db: Session = Depends(get_db)) -> ApiClient
         _refuse(db, request, "wrong secret", prefix)
     if client.revoked_at is not None:
         _refuse(db, request, "revoked", prefix)
-    now = datetime.utcnow()
+    now = utcnow()
     if client.expires_at <= now:
         _refuse(db, request, "expired", prefix)
     if client.allowed_networks and not ip_allowed(client_ip(request), client.allowed_networks):

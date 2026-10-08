@@ -13,11 +13,13 @@ import io
 from datetime import datetime
 
 from app.core.database import get_db
+from app.core.export_safety import csv_safe_row
 from app.core.deps import require_roles
 from app.models.models import User, RoleEnum
 from app.services.report_service import generate_summary_report_pdf, generate_summary_report_excel, generate_summary_report_image
 from app.services import analytics_service
 from app.services.audit_service import record_audit
+from app.core.timeutil import utcnow
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -52,7 +54,7 @@ def download_summary_report(
         "Automated summary report (PDF) generated"
     )
 
-    filename = f"CDR_Summary_Report_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.pdf"
+    filename = f"CDR_Summary_Report_{utcnow().strftime('%Y%m%d_%H%M')}.pdf"
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
@@ -87,7 +89,7 @@ def download_summary_report_excel(
         "Automated summary report (Excel) generated"
     )
 
-    filename = f"CDR_Summary_Report_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.xlsx"
+    filename = f"CDR_Summary_Report_{utcnow().strftime('%Y%m%d_%H%M')}.xlsx"
     return StreamingResponse(
         io.BytesIO(excel_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -123,7 +125,7 @@ def download_summary_report_image(
         "Automated summary report (Image) generated"
     )
 
-    filename = f"CDR_Summary_Report_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.png"
+    filename = f"CDR_Summary_Report_{utcnow().strftime('%Y%m%d_%H%M')}.png"
     return StreamingResponse(
         io.BytesIO(image_bytes),
         media_type="image/png",
@@ -162,18 +164,18 @@ def download_combined_exposure_csv(
         "hazard_types_recorded", "climate_data_quality", "total_loan_exposure_tzs", "total_collateral_value_tzs", "record_count",
     ])
     for r in rows:
-        writer.writerow([
+        writer.writerow(csv_safe_row([
             r["region"], r["reporting_period"],
             r["avg_rainfall_mm"] if r["avg_rainfall_mm"] is not None else "",
             r["avg_temperature_c"] if r["avg_temperature_c"] is not None else "",
             "; ".join(r["hazard_types_recorded"]),
             r["climate_data_quality"] or "",
             r["total_loan_exposure_tzs"], r["total_collateral_value_tzs"], r["record_count"],
-        ])
+        ]))
 
     record_audit(db, current_user.id, "REPORT_GENERATED", "Report", None, "Combined exposure CSV export generated")
 
-    filename = f"CDR_Combined_Exposure_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.csv"
+    filename = f"CDR_Combined_Exposure_{utcnow().strftime('%Y%m%d_%H%M')}.csv"
     return StreamingResponse(
         iter([buffer.getvalue()]),
         media_type="text/csv",

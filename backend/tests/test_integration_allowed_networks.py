@@ -94,4 +94,4 @@ def test_the_database_refuses_a_blank_list(db_session):
     with pytest.raises(IntegrityError):
         _row(db_session, allowed_networks="   ")
     db_session.rollback()
-    _row(db_session, allowed_networks=None)
+    _row(db_session, username="bot_db_two", allowed_networks=None)

@@ -28,6 +28,8 @@ from app.schemas.schemas import (
 )
 from app.services.audit_service import record_audit
 from app.services.notification_service import notify_user
+from app.core.timeutil import utcnow
+from app.core.mfa import make_step_token, mfa_required_for
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -40,7 +42,7 @@ def _issue_token_pair(db: Session, user: User) -> tuple[str, str]:
     db.add(RefreshToken(
         user_id=user.id,
         token_hash=hash_refresh_token(raw_refresh),
-        expires_at=datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        expires_at=utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
     ))
     db.commit()
     return access_token, raw_refresh
@@ -57,7 +59,7 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
     if not user:
         raise generic_error
 
-    is_locked = bool(user.locked_until and user.locked_until > datetime.utcnow())
+    is_locked = bool(user.locked_until and user.locked_until > utcnow())
 
     # Password is checked BEFORE the lockout status is revealed (item 8 of the
     # September 2026 external review). The lockout message used to be raised
@@ -73,7 +75,7 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
         if not is_locked:
             user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
             if user.failed_login_attempts >= settings.MAX_FAILED_LOGIN_ATTEMPTS:
-                user.locked_until = datetime.utcnow() + timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
+                user.locked_until = utcnow() + timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
                 record_audit(db, user.id, "LOGIN_LOCKED", "User", user.id,
                              f"Account locked after {user.failed_login_attempts} failed attempts")
             else:
@@ -85,7 +87,7 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
         raise generic_error
 
     if is_locked:
-        minutes_left = max(1, int((user.locked_until - datetime.utcnow()).total_seconds() // 60) + 1)
+        minutes_left = max(1, int((user.locked_until - utcnow()).total_seconds() // 60) + 1)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"This account is temporarily locked due to repeated failed login attempts. "
@@ -104,10 +106,17 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
                    "Please contact the Bank of Tanzania administrator.",
         )
 
+    # Two-step sign-in. The password alone is not enough for someone who has enrolled, or whom the Bank requires to enrol: they get a short
+    # step token instead of tokens. The failed-attempt counter is NOT reset here, so wrong codes after a right password still run into the lock-out.
+    if user.mfa_enabled:
+        return TokenResponse(mfa_required=True, mfa_token=make_step_token(user.id, "mfa"))
+    if mfa_required_for(user):
+        return TokenResponse(mfa_setup_required=True, mfa_token=make_step_token(user.id, "mfa_setup"))
+
     # Successful login: reset lockout counters
     user.failed_login_attempts = 0
     user.locked_until = None
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = utcnow()
     db.commit()
 
     access_token, refresh_token = _issue_token_pair(db, user)
@@ -117,7 +126,8 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
 
 
 @router.post("/refresh", response_model=AccessTokenResponse)
-def refresh_access_token(payload: RefreshRequest, db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+def refresh_access_token(request: Request, payload: RefreshRequest, db: Session = Depends(get_db)):
     """
     Exchanges a still-valid refresh token for a new short-lived access token.
     Rotation: the presented refresh token is revoked and a brand new one is
@@ -130,7 +140,7 @@ def refresh_access_token(payload: RefreshRequest, db: Session = Depends(get_db))
     token_hash = hash_refresh_token(payload.refresh_token)
     stored = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
 
-    if not stored or stored.revoked_at is not None or stored.expires_at < datetime.utcnow():
+    if not stored or stored.revoked_at is not None or stored.expires_at < utcnow():
         raise invalid_error
 
     user = db.query(User).filter(User.id == stored.user_id).first()
@@ -138,7 +148,7 @@ def refresh_access_token(payload: RefreshRequest, db: Session = Depends(get_db))
         raise invalid_error
 
     # Rotate: consume this token, issue a new pair
-    stored.revoked_at = datetime.utcnow()
+    stored.revoked_at = utcnow()
     db.commit()
 
     access_token, new_refresh_token = _issue_token_pair(db, user)
@@ -157,7 +167,7 @@ def logout(payload: RefreshRequest, db: Session = Depends(get_db)):
     token_hash = hash_refresh_token(payload.refresh_token)
     stored = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
     if stored and stored.revoked_at is None:
-        stored.revoked_at = datetime.utcnow()
+        stored.revoked_at = utcnow()
         db.commit()
         record_audit(db, stored.user_id, "LOGOUT", "User", stored.user_id, "User logged out")
     return {"status": "ok"}
@@ -184,7 +194,7 @@ def change_password(
     if not verify_password(payload.current_password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="Your current password is incorrect")
 
-    problems = validate_password_strength(payload.new_password)
+    problems = validate_password_strength(payload.new_password, role=current_user.role, username=current_user.username)
     if problems:
         raise HTTPException(
             status_code=400,

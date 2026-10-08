@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.database import engine, SessionLocal
 from app.core.security import hash_password
 from app.models.models import User, Institution, RoleEnum, InstitutionType, ClimateRecord, ClimateIngestionBatch
+from app.core.timeutil import utcnow
 
 def ensure_schema():
     """Bring the database to the latest Alembic revision without deleting data.
@@ -149,7 +150,7 @@ try:
         regions = ["Dodoma", "Morogoro", "Mwanza", "Mbeya", "Dar es Salaam", "Singida"]
         hazards = [None, None, "Drought", "Flood", None, "Cyclone"]
         random.seed(42)  # fixed seed for reproducible demo output
-        seed_run_time = datetime.utcnow()
+        seed_run_time = utcnow()
         synthetic_batch = ClimateIngestionBatch(
             source="SYNTHETIC_SEED",
             dataset_name="CDR Synthetic Demo Dataset",

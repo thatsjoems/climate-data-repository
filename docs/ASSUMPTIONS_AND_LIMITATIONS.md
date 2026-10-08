@@ -55,3 +55,7 @@ Figure 4). Two concrete details from that report were adopted here:
 **Before any production use:** this is a training prototype (EASTC 8-week
 programme) - it has not undergone penetration testing, does not have production
 security certification, and the demo SECRET_KEY MUST be changed.
+
+
+## Penetration testing
+The system has **not** been penetration tested. The preparation pack for the Bank's ICT department (rules of engagement, how to build the test environment, eleven observations the developers already know (six of them already addressed), and a checklist of 79 cases with the expected result) is `docs/PENTEST_CHECKLIST.md`.

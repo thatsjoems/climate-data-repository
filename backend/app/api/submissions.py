@@ -11,16 +11,20 @@ WORKFLOW / VERSIONING RULES (see docs/SUBMISSION_LIFECYCLE.md for full detail):
   analytics only ever count the latest attempt (see analytics_service.py).
 - A reviewer can never approve/reject their own upload (maker-checker).
 """
+import logging
 import os
 import re
+import resource
+import time
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response, Query
-from sqlalchemy import func
+from sqlalchemy import func, insert
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
+from app.core.export_safety import csv_safe_row
 from app.core.config import settings
 from app.core.deps import get_current_user, require_roles
 from app.models.models import (
@@ -33,8 +37,14 @@ from app.services.template_generator import FIELD_NAMES
 from app.services.audit_service import record_audit
 from app.services.notification_service import notify_roles, notify_user
 from app.services.storage_service import storage
+from app.core.timeutil import utcnow
 
 router = APIRouter(prefix="/submissions", tags=["Submissions"])
+upload_log = logging.getLogger("cdr.upload")
+
+# The loans and findings of an upload are stored in blocks of this many rows, with bulk INSERTs. One ORM object per loan, 100,000 of them held in
+# the session until the commit, was slow and used about a gigabyte (docs/LOAD_TESTING.md). A block is also the unit of memory while storing.
+STORE_BLOCK = 5000
 
 # Statuses that are still "active" for a given institution+reporting_period -
 # i.e. eligible to be superseded by a newer upload, and eligible to block a
@@ -48,6 +58,33 @@ ACTIVE_STATUSES = (
 # version remains the authoritative fallback until a replacement itself passes
 # validation and review. This prevents an invalid correction from erasing a
 # previously approved dataset from analytics.
+
+
+def detail_page(db: Session, submission: Submission, record_offset: int = 0, record_limit: int = 100,
+                error_offset: int = 0, error_limit: int = 100) -> SubmissionDetailOut:
+    """
+    One submission with ONE PAGE of its rows and ONE PAGE of its findings, and the totals of all of them.
+
+    Used by the detail endpoint and by the answers to an upload and to a review. Those two used to return the submission object itself, whose `records`
+    and `errors` are ALL of its rows and findings: for a file of 100,000 loans the application then loaded every loan into memory and wrote them all
+    into the answer (about a gigabyte and ten seconds, and an answer far too large for a browser). Found by a load test (docs/LOAD_TESTING.md).
+    """
+    records_total = db.query(func.count(SubmissionRecord.id)).filter(SubmissionRecord.submission_id == submission.id).scalar() or 0
+    errors_total = db.query(func.count(VErrorModel.id)).filter(VErrorModel.submission_id == submission.id).scalar() or 0
+    records = (
+        db.query(SubmissionRecord).filter(SubmissionRecord.submission_id == submission.id)
+        .order_by(SubmissionRecord.row_number, SubmissionRecord.id).offset(record_offset).limit(record_limit).all()
+    )
+    errors = (
+        db.query(VErrorModel).filter(VErrorModel.submission_id == submission.id)
+        .order_by(VErrorModel.row_number, VErrorModel.id).offset(error_offset).limit(error_limit).all()
+    )
+    return SubmissionDetailOut(
+        **SubmissionOut.model_validate(submission).model_dump(),
+        errors=[ValidationErrorOut.model_validate(e) for e in errors],
+        records=[SubmissionRecordOut.model_validate(r) for r in records],
+        records_total=records_total, errors_total=errors_total,
+    )
 
 
 @router.post("/upload", response_model=SubmissionDetailOut, status_code=201)
@@ -67,6 +104,7 @@ def upload_submission(
     if not re.match(r"^\d{4}-Q[1-4]$", reporting_period.strip()):
         raise HTTPException(status_code=400, detail=f"Invalid reporting period format '{reporting_period}' - expected YYYY-Qn, e.g. 2026-Q3")
 
+    started = time.perf_counter()
     file_bytes = file.file.read()
 
     # ---- Secure upload: hard size ceiling before any parsing happens ----
@@ -105,6 +143,7 @@ def upload_submission(
         # Clean up the orphaned file on disk - a failed upload must not leave permanent debris.
         storage.delete(saved_path)
         raise HTTPException(status_code=400, detail=f"This file could not be processed: {exc}")
+    validated = time.perf_counter()
 
     # Cross-version loan IDs are intentionally allowed here: a new upload for
     # the same institution + reporting period is a correction/replacement
@@ -208,25 +247,36 @@ def upload_submission(
         storage.delete(saved_path)
         raise HTTPException(status_code=409, detail="This submission conflicts with another submission already being processed. Please retry.")
 
-    for r in records:
-        db.add(SubmissionRecord(
-            submission_id=submission.id,
-            row_number=r["row_number"],
-            is_valid=r.get("is_valid", False),
-            **{f: r.get(f) for f in FIELD_NAMES},
-            disbursement_date_value=r.get("disbursement_date_value"),
-            maturity_date_value=r.get("maturity_date_value"),
-            collateral_pledged_date_value=r.get("collateral_pledged_date_value"),
-        ))
-
-    for issue in issues:
-        db.add(VErrorModel(
-            submission_id=submission.id,
-            row_number=issue.row_number,
-            column_name=issue.column_name,
-            error_description=issue.description,
-            severity=issue.severity,
-        ))
+    try:
+        for start in range(0, len(records), STORE_BLOCK):
+            db.execute(insert(SubmissionRecord), [
+                dict(
+                    submission_id=submission.id,
+                    row_number=r["row_number"],
+                    is_valid=r.get("is_valid", False),
+                    **{field: r.get(field) for field in FIELD_NAMES},
+                    disbursement_date_value=r.get("disbursement_date_value"),
+                    maturity_date_value=r.get("maturity_date_value"),
+                    collateral_pledged_date_value=r.get("collateral_pledged_date_value"),
+                )
+                for r in records[start:start + STORE_BLOCK]
+            ])
+        for start in range(0, len(issues), STORE_BLOCK):
+            db.execute(insert(VErrorModel), [
+                dict(
+                    submission_id=submission.id,
+                    row_number=issue.row_number,
+                    column_name=issue.column_name,
+                    error_description=issue.description,
+                    severity=issue.severity,
+                )
+                for issue in issues[start:start + STORE_BLOCK]
+            ])
+    except IntegrityError:
+        db.rollback()
+        storage.delete(saved_path)
+        raise HTTPException(status_code=409, detail="This submission conflicts with another submission already being processed. Please retry.")
+    stored = time.perf_counter()
 
     # Supersede only earlier non-final attempts. An APPROVED baseline is never
     # automatically superseded by an upload; it is superseded only inside the
@@ -263,6 +313,12 @@ def upload_submission(
         storage.delete(saved_path)
         raise HTTPException(status_code=409, detail="This submission conflicts with another submission already being processed. Please retry.")
     db.refresh(submission)
+    committed = time.perf_counter()
+    upload_log.info(
+        "upload stored: rows=%d findings=%d status=%s validate_s=%.1f store_s=%.1f commit_s=%.1f total_s=%.1f process_peak_mb=%.0f",
+        total, len(issues), overall_status.value, validated - started, stored - validated, committed - stored, committed - started,
+        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024,
+    )
 
     record_audit(
         db, current_user.id, "SUBMISSION_CREATED", "Submission", submission.id,
@@ -278,7 +334,7 @@ def upload_submission(
         related_entity_type="Submission",
         related_entity_id=submission.id,
     )
-    return submission
+    return detail_page(db, submission)
 
 
 @router.get("", response_model=list[SubmissionOut])
@@ -344,12 +400,12 @@ def export_submission_history_csv(
         "valid_records", "invalid_records", "review_notes", "created_at",
     ])
     for s in rows:
-        writer.writerow([
+        writer.writerow(csv_safe_row([
             s.file_name, s.reporting_period, s.status.value, s.total_records,
             s.valid_records, s.invalid_records, s.review_notes or "", s.created_at.isoformat(),
-        ])
+        ]))
 
-    filename = f"CDR_Submission_History_{_dt.utcnow().strftime('%Y%m%d_%H%M')}.csv"
+    filename = f"CDR_Submission_History_{utcnow().strftime('%Y%m%d_%H%M')}.csv"
     return StreamingResponse(
         iter([buffer.getvalue()]),
         media_type="text/csv",
@@ -382,22 +438,7 @@ def get_submission(
     if current_user.role == RoleEnum.INSTITUTION_USER and submission.institution_id != current_user.institution_id:
         raise HTTPException(status_code=403, detail="You do not have permission to view this submission")
 
-    records_total = db.query(func.count(SubmissionRecord.id)).filter(SubmissionRecord.submission_id == submission.id).scalar() or 0
-    errors_total = db.query(func.count(VErrorModel.id)).filter(VErrorModel.submission_id == submission.id).scalar() or 0
-    records = (
-        db.query(SubmissionRecord).filter(SubmissionRecord.submission_id == submission.id)
-        .order_by(SubmissionRecord.row_number, SubmissionRecord.id).offset(record_offset).limit(record_limit).all()
-    )
-    errors = (
-        db.query(VErrorModel).filter(VErrorModel.submission_id == submission.id)
-        .order_by(VErrorModel.row_number, VErrorModel.id).offset(error_offset).limit(error_limit).all()
-    )
-    return SubmissionDetailOut(
-        **SubmissionOut.model_validate(submission).model_dump(),
-        errors=[ValidationErrorOut.model_validate(e) for e in errors],
-        records=[SubmissionRecordOut.model_validate(r) for r in records],
-        records_total=records_total, errors_total=errors_total,
-    )
+    return detail_page(db, submission, record_offset, record_limit, error_offset, error_limit)
 
 
 @router.get("/{submission_id}/download")
@@ -519,12 +560,12 @@ def review_submission(
 
     submission.review_notes = payload.notes
     submission.reviewed_by_user_id = current_user.id
-    submission.reviewed_at = datetime.utcnow()
+    submission.reviewed_at = utcnow()
     db.commit()
     db.refresh(submission)
 
     record_audit(
-        db, current_user.id, f"SUBMISSION_{decision}D", "Submission",
+        db, current_user.id, "SUBMISSION_APPROVED" if decision == "APPROVE" else "SUBMISSION_REJECTED", "Submission",
         submission.id, payload.notes or ""
     )
 
@@ -537,4 +578,4 @@ def review_submission(
         related_entity_type="Submission",
         related_entity_id=submission.id,
     )
-    return submission
+    return detail_page(db, submission)
