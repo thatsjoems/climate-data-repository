@@ -1061,3 +1061,38 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .hazard-glow {
   filter: blur(14px);
 }
+
+/* ---- Portfolio charts (PortfolioCharts.tsx) ---- */
+.portfolio-heading { font-size: 0.92rem; margin: 1.1rem 0 0.5rem; color: var(--color-primary-dark); }
+.portfolio-crumbs { font-weight: 400; margin-left: 0.6rem; font-size: 0.82rem; }
+.portfolio-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+.portfolio-grid-single { grid-template-columns: 1fr; }
+.portfolio-panel { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 0.8rem 1rem; background: var(--color-card); }
+.portfolio-panel h3 { font-size: 0.85rem; margin: 0 0 0.6rem; }
+.donut-chart {
+  width: 120px; height: 120px; border-radius: 50%; flex-shrink: 0;
+  -webkit-mask: radial-gradient(circle, transparent 38%, #000 39%);
+  mask: radial-gradient(circle, transparent 38%, #000 39%);
+}
+.hbar-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.hbar-row { display: grid; grid-template-columns: minmax(70px, 28%) 1fr auto; align-items: center; gap: 0.5rem; font-size: 0.78rem; }
+.hbar-row.is-clickable { cursor: pointer; }
+.hbar-row.is-clickable:hover .hbar-label { text-decoration: underline; }
+.hbar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar-track { background: #EDEBE3; border-radius: 3px; height: 10px; overflow: hidden; display: block; }
+.hbar-fill { display: block; height: 100%; border-radius: 3px; }
+.hbar-value { font-variant-numeric: tabular-nums; min-width: 4.5rem; text-align: right; }
+.link-button { background: none; border: none; padding: 0; color: var(--color-primary-dark); text-decoration: underline; cursor: pointer; font: inherit; }
+
+/* ---- Map layer tick-box lists (CheckboxDropdown.tsx) ---- */
+.layer-dropdown { position: relative; display: inline-block; }
+.layer-dropdown-button { font-size: 0.8rem; padding: 0.3rem 0.6rem; cursor: pointer; }
+.layer-dropdown-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 2000; min-width: 190px;
+  background: var(--color-card); border: 1px solid var(--color-border); border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18); padding: 0.5rem 0.65rem;
+  display: flex; flex-direction: column; gap: 0.3rem;
+}
+.layer-dropdown-row { display: flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; cursor: pointer; }
+.layer-dropdown-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.layer-dropdown-apply { margin-top: 0.3rem; align-self: stretch; text-align: center; }

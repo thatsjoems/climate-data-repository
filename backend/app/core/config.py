@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     MFA_REQUIRED: bool = False
     MFA_ISSUER: str = "Climate Data Repository (BOT)"   # the name the authenticator app shows
 
+    # Bank internal systems (see docs/INTEGRATION_ACCESS.md, "RTIS and BSIS"). Empty base URL = not connected. The Bank's ICT
+    # department supplies the address, the credential and the health-check path of each system; nothing else is assumed here.
+    RTIS_BASE_URL: str = ""
+    RTIS_API_KEY: str = ""
+    RTIS_HEALTH_PATH: str = "/health"
+    BSIS_BASE_URL: str = ""
+    BSIS_API_KEY: str = ""
+    BSIS_HEALTH_PATH: str = "/health"
+    EXTERNAL_SYSTEM_TIMEOUT_SECONDS: float = 5.0
+
     # Set to "production" to make the app refuse to start with an insecure
     # default SECRET_KEY - see main.py startup check.
     ENVIRONMENT: str = "development"

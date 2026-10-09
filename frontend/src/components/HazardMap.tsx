@@ -4,6 +4,9 @@ import L from 'leaflet'
 import apiClient from '../api/client'
 import { REGION_BOUNDARIES } from '../data/regionBoundaries'
 import { HAZARD_COLORS as HAZARD_HEX } from '../data/hazardColors'
+import { hazardAmountsByRegion } from '../data/mapLayers'
+import { buildIdwSurface } from './mapSurface'
+import CheckboxDropdown from './CheckboxDropdown'
 
 export interface RegionMapPoint {
   region: string
@@ -56,81 +59,14 @@ const FINANCIAL_GRADIENTS: Record<string, { from: [number, number, number]; to: 
   Collateral: { from: [255, 251, 214], to: [204, 163, 0] },    // pale yellow -> deep yellow/gold
 }
 
+const FINANCIAL_OPTIONS = Object.keys(FINANCIAL_GRADIENTS)   // Loan, Collateral
+
 function lerpColor(from: [number, number, number], to: [number, number, number], t: number): string {
   const clamped = Math.max(0, Math.min(1, t))
   const r = Math.round(from[0] + (to[0] - from[0]) * clamped)
   const g = Math.round(from[1] + (to[1] - from[1]) * clamped)
   const b = Math.round(from[2] + (to[2] - from[2]) * clamped)
   return `rgb(${r},${g},${b})`
-}
-
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371
-  const p1 = (lat1 * Math.PI) / 180
-  const p2 = (lat2 * Math.PI) / 180
-  const dp = ((lat2 - lat1) * Math.PI) / 180
-  const dl = ((lon2 - lon1) * Math.PI) / 180
-  const a = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2
-  return 2 * R * Math.asin(Math.sqrt(a))
-}
-
-// Inverse Distance Weighting (IDW) - the same real, published spatial
-// interpolation technique national hazard-mapping studies use (for example,
-// Al-Hemoud et al. 2023, "Hazard Assessment and Hazard Mapping for Kuwait",
-// Int. J. Disaster Risk Science, which interpolates rainfall/drought indices
-// from a small number of weather stations into a smooth national surface
-// using IDW in ArcGIS). Built here in plain JavaScript/Canvas - no GIS
-// library was available to install in this environment - to turn this
-// project's own sparse per-region hazard exposure into the same kind of
-// smooth, continuous, country-wide surface, rather than isolated dots.
-function buildIdwSurface(
-  dataPoints: { lat: number; lon: number; value: number }[],
-  bounds: { south: number; north: number; west: number; east: number },
-  colorRgb: [number, number, number],
-  gridSize = 140,
-): string {
-  const canvas = document.createElement('canvas')
-  canvas.width = gridSize
-  canvas.height = gridSize
-  const ctx = canvas.getContext('2d')
-  if (!ctx || dataPoints.length === 0) return ''
-  const imageData = ctx.createImageData(gridSize, gridSize)
-  const maxValue = Math.max(...dataPoints.map((p) => p.value), 0.0001)
-  const power = 2.2
-  const minOpacity = 0
-  const maxOpacity = 235 // out of 255 - never fully solid, base map stays faintly visible
-
-  for (let row = 0; row < gridSize; row++) {
-    const lat = bounds.north - (row / (gridSize - 1)) * (bounds.north - bounds.south)
-    for (let col = 0; col < gridSize; col++) {
-      const lon = bounds.west + (col / (gridSize - 1)) * (bounds.east - bounds.west)
-      let weightedSum = 0
-      let weightSum = 0
-      for (const p of dataPoints) {
-        const d = haversineKm(lat, lon, p.lat, p.lon)
-        const w = 1 / Math.pow(Math.max(d, 1), power)
-        weightedSum += w * p.value
-        weightSum += w
-      }
-      const interpolatedValue = weightSum > 0 ? weightedSum / weightSum : 0
-      // The line above is intentionally NOT the bug it looks like: weightedSum
-      // and weightSum are DIFFERENT accumulators (sum of weight*value vs sum
-      // of weight) - weightedSum / weightSum IS the correct IDW weighted
-      // average. Normalize that against this layer's own max value to get a
-      // 0..1 intensity, then map to an alpha channel - never a fixed/solid
-      // color, so the surface genuinely reads as low-to-high concentration.
-      const normalizedIntensity = Math.max(0, Math.min(1, interpolatedValue / maxValue))
-      const alpha = Math.round(minOpacity + normalizedIntensity * (maxOpacity - minOpacity))
-
-      const idx = (row * gridSize + col) * 4
-      imageData.data[idx] = colorRgb[0]
-      imageData.data[idx + 1] = colorRgb[1]
-      imageData.data[idx + 2] = colorRgb[2]
-      imageData.data[idx + 3] = alpha
-    }
-  }
-  ctx.putImageData(imageData, 0, 0)
-  return canvas.toDataURL()
 }
 
 // Defined OUTSIDE the component so it is the same array reference on every
@@ -176,13 +112,15 @@ export default function HazardMap({
   filterReportingPeriod?: string
   filterHazardType?: string
 }) {
-  const [hazardChoice, setHazardChoice] = useState<string>('')
-  const [financialChoice, setFinancialChoice] = useState<string>('')
+  // Both lists allow more than one choice at a time: [] = None, every layer = All. The lists change
+  // these only when "Apply" is pressed (see CheckboxDropdown).
+  const [hazardChoices, setHazardChoices] = useState<string[]>([])
+  const [financialChoices, setFinancialChoices] = useState<string[]>([])
   const [hazardRows, setHazardRows] = useState<HazardExposureRow[]>([])
   const [loanPoints, setLoanPoints] = useState<ExposurePoint[]>([])
   const [collateralPoints, setCollateralPoints] = useState<ExposurePoint[]>([])
   const [loadingLayer, setLoadingLayer] = useState(false)
-  // Deliberately NEVER filtered by region (see idwImageUrl below): IDW needs
+  // Deliberately NEVER filtered by region (see hazardSurfaces below): IDW needs
   // every region's coordinate as an anchor - including the zero-value ones -
   // to interpolate a gradient at all. `points` (the prop) IS correctly
   // filtered for the circle markers below, which should shrink to just the
@@ -190,17 +128,22 @@ export default function HazardMap({
   // hazard surface's anchor coordinates.
   const [allRegionPoints, setAllRegionPoints] = useState<RegionMapPoint[]>([])
 
+  // One key for "which hazards / financial layers are chosen", so the effects below run when the choice changes,
+  // not on every render (an array is a new object each time).
+  const hazardKey = hazardChoices.join('|')
+  const financialKey = financialChoices.join('|')
+
   // The hazard chosen in Dashboard Filters drives this map's hazard layer, so the two
-  // controls cannot disagree: choosing Flood there draws the Flood layer here. "None"
-  // (no hazard recorded) clears the layer. Clearing the filter leaves the analyst's own
-  // choice of layer alone.
+  // controls cannot disagree: choosing Flood there draws the Flood layer here (and only it).
+  // "None" (no hazard recorded) clears the layers. Clearing the filter leaves the analyst's own
+  // choice of layers alone.
   useEffect(() => {
     if (!filterHazardType) return
-    setHazardChoice(HAZARD_OPTIONS.includes(filterHazardType) ? filterHazardType : '')
+    setHazardChoices(HAZARD_OPTIONS.includes(filterHazardType) ? [filterHazardType] : [])
   }, [filterHazardType])
 
   useEffect(() => {
-    if (!hazardChoice) return
+    if (hazardChoices.length === 0) return
     setLoadingLayer(true)
     const params = new URLSearchParams()
     if (filterInstitutionId) params.set('filter_institution_id', filterInstitutionId)
@@ -209,17 +152,18 @@ export default function HazardMap({
     apiClient.get(`/analytics/hazard-exposure?${params.toString()}`)
       .then((res) => setHazardRows(res.data || []))
       .finally(() => setLoadingLayer(false))
-  }, [hazardChoice, filterInstitutionId, filterRegion, filterReportingPeriod])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hazardKey, filterInstitutionId, filterRegion, filterReportingPeriod])
 
   useEffect(() => {
-    if (!hazardChoice) return
+    if (hazardChoices.length === 0) return
     if (allRegionPoints.length > 0) return  // fetched once; region coordinates don't change during a session
     apiClient.get('/analytics/map-points').then((res) => setAllRegionPoints(res.data || []))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hazardChoice])
+  }, [hazardKey])
 
   useEffect(() => {
-    if (!financialChoice) return
+    if (financialChoices.length === 0) return
     setLoadingLayer(true)
     const params = new URLSearchParams()
     if (filterInstitutionId) params.set('filter_institution_id', filterInstitutionId)
@@ -231,22 +175,14 @@ export default function HazardMap({
         setCollateralPoints(res.data.collateral_points || [])
       })
       .finally(() => setLoadingLayer(false))
-  }, [financialChoice, filterInstitutionId, filterRegion, filterReportingPeriod])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [financialKey, filterInstitutionId, filterRegion, filterReportingPeriod])
 
-  const hazardAmountByRegion: Record<string, number> = {}
-  if (hazardChoice) {
-    for (const row of hazardRows) {
-      if (row.hazard_type === hazardChoice) {
-        hazardAmountByRegion[row.region] = (hazardAmountByRegion[row.region] || 0) + row.exposed_loan_amount_tzs
-      }
-    }
-  }
-
-  // The smooth IDW surface (see buildIdwSurface above) - only recomputed
-  // when the chosen hazard or the underlying data actually changes, since
-  // it is a genuine per-pixel computation, not free.
-  const idwImageUrl = useMemo(() => {
-    if (!hazardChoice) return ''
+  // One smooth IDW surface (see buildIdwSurface) for EACH chosen hazard, each in its own colour and scaled to
+  // its own highest value - only recomputed when the choice or the underlying data actually changes, since it
+  // is a genuine per-pixel computation, not free.
+  const hazardSurfaces = useMemo(() => {
+    if (hazardChoices.length === 0) return []
     // Every region is included as a data point - even ones with ZERO
     // recorded exposure under this hazard. This is what makes IDW actually
     // fade smoothly with distance: with only the hazard-positive regions as
@@ -263,46 +199,56 @@ export default function HazardMap({
     // mathematically undefined as a "surface" - IDW with one input point
     // returns that point's exact value at every pixel with no distance
     // decay at all, painting the entire map the same solid colour instead
-    // of a hotspot over the selected region. `hazardAmountByRegion` below
-    // still comes from the correctly filter-scoped `hazardRows`, so the
-    // selected region's own value is still exactly what the filter says -
+    // of a hotspot over the selected region. The amounts below still come
+    // from the correctly filter-scoped `hazardRows`, so the selected
+    // region's own value is still exactly what the filter says -
     // only the anchor coordinate list stays nationwide.
     const anchorPoints = allRegionPoints.length > 0 ? allRegionPoints : points
-    const dataPoints = anchorPoints.map((p) => ({
-      lat: p.latitude, lon: p.longitude, value: hazardAmountByRegion[p.region] || 0,
-    }))
-    if (dataPoints.every((p) => p.value === 0)) return ''
-    return buildIdwSurface(dataPoints, BOUNDS_OBJ, HAZARD_COLORS[hazardChoice])
+    const surfaces: { hazard: string; url: string }[] = []
+    for (const hazard of hazardChoices) {
+      const amounts = hazardAmountsByRegion(hazardRows, hazard)
+      const dataPoints = anchorPoints.map((p) => ({ lat: p.latitude, lon: p.longitude, value: amounts[p.region] || 0 }))
+      if (dataPoints.every((p) => p.value === 0)) continue
+      const url = buildIdwSurface(dataPoints, BOUNDS_OBJ, HAZARD_COLORS[hazard])
+      if (url) surfaces.push({ hazard, url })
+    }
+    return surfaces
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hazardChoice, JSON.stringify(hazardAmountByRegion), allRegionPoints])
+  }, [hazardKey, hazardRows, allRegionPoints, points])
 
-  const gradient = financialChoice ? FINANCIAL_GRADIENTS[financialChoice] : null
-  const activePoints = financialChoice === 'Loan' ? loanPoints : financialChoice === 'Collateral' ? collateralPoints : []
-  const maxFinancialAmount = activePoints.reduce((max, p) => Math.max(max, p.amount_tzs), 0)
+  // Each chosen financial layer is drawn at the real coordinates entered on the template, in its own colour
+  // scale (its own largest amount is its darkest dot).
+  const financialLayers = FINANCIAL_OPTIONS.filter((label) => financialChoices.includes(label)).map((label) => {
+    const pts = label === 'Loan' ? loanPoints : collateralPoints
+    return {
+      label, gradient: FINANCIAL_GRADIENTS[label], pts,
+      max: pts.reduce((max, p) => Math.max(max, p.amount_tzs), 0),
+    }
+  })
+  const hazardSwatches = Object.fromEntries(HAZARD_OPTIONS.map((h) => [h, HAZARD_HEX[h]]))
+  const financialSwatches = Object.fromEntries(
+    FINANCIAL_OPTIONS.map((label) => [label, lerpColor(FINANCIAL_GRADIENTS[label].from, FINANCIAL_GRADIENTS[label].to, 1)]),
+  )
 
   return (
     <div>
       <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'center', marginBottom: '0.5rem', fontSize: '0.8rem', flexWrap: 'wrap' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          Hazard layer:
-          <select value={hazardChoice} onChange={(e) => setHazardChoice(e.target.value)}>
-            <option value="">None</option>
-            {HAZARD_OPTIONS.map((h) => (
-              <option key={h} value={h}>{h}</option>
-            ))}
-          </select>
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          Financial layer:
-          <select value={financialChoice} onChange={(e) => setFinancialChoice(e.target.value)}>
-            <option value="">None</option>
-            {Object.keys(FINANCIAL_GRADIENTS).map((label) => (
-              <option key={label} value={label}>{label}</option>
-            ))}
-          </select>
-        </span>
+        <CheckboxDropdown
+          label="Hazard layer"
+          options={HAZARD_OPTIONS}
+          selected={hazardChoices}
+          onApply={setHazardChoices}
+          swatches={hazardSwatches}
+        />
+        <CheckboxDropdown
+          label="Financial layer"
+          options={FINANCIAL_OPTIONS}
+          selected={financialChoices}
+          onApply={setFinancialChoices}
+          swatches={financialSwatches}
+        />
         {loadingLayer && <span style={{ color: 'var(--color-muted)' }}>Loading...</span>}
-        <span style={{ color: 'var(--color-muted)' }}>(pick one from each - shown together, e.g. Flood + Loan)</span>
+        <span style={{ color: 'var(--color-muted)' }}>(tick one or more boxes in each list, then press Apply - for example Flood + Drought with Loan + Collateral)</span>
       </div>
 
       <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--color-border)' }}>
@@ -328,25 +274,26 @@ export default function HazardMap({
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {idwImageUrl && (
-            <ImageOverlay url={idwImageUrl} bounds={TANZANIA_BOUNDS} opacity={0.75} />
-          )}
-
-          {gradient && activePoints.map((p, i) => (
-            <CircleMarker
-              key={`${financialChoice}-${i}`}
-              center={[p.latitude, p.longitude]}
-              radius={1.4}
-              pathOptions={{
-                color: lerpColor(gradient.from, gradient.to, maxFinancialAmount > 0 ? p.amount_tzs / maxFinancialAmount : 0),
-                fillColor: lerpColor(gradient.from, gradient.to, maxFinancialAmount > 0 ? p.amount_tzs / maxFinancialAmount : 0),
-                fillOpacity: 0.85,
-                weight: 0,
-              }}
-            >
-              <Tooltip>{financialChoice}: {formatTZS(p.amount_tzs)}</Tooltip>
-            </CircleMarker>
+          {hazardSurfaces.map((surface) => (
+            <ImageOverlay key={surface.hazard} url={surface.url} bounds={TANZANIA_BOUNDS} opacity={0.75} />
           ))}
+
+          {/* Collateral first, Loan on top of it, so a loan dot is never hidden under a collateral dot. */}
+          {[...financialLayers].reverse().map((layer) =>
+            layer.pts.map((p, i) => {
+              const color = lerpColor(layer.gradient.from, layer.gradient.to, layer.max > 0 ? p.amount_tzs / layer.max : 0)
+              return (
+                <CircleMarker
+                  key={`${layer.label}-${i}`}
+                  center={[p.latitude, p.longitude]}
+                  radius={1.4}
+                  pathOptions={{ color, fillColor: color, fillOpacity: 0.85, weight: 0 }}
+                >
+                  <Tooltip>{layer.label}: {formatTZS(p.amount_tzs)}</Tooltip>
+                </CircleMarker>
+              )
+            })
+          )}
 
           {points.map((p) => (
             <Marker
@@ -375,30 +322,39 @@ export default function HazardMap({
           )}
         </MapContainer>
 
-        {(hazardChoice || gradient) && (
-          <div style={{
-            position: 'absolute', bottom: 8, right: 8, zIndex: 1000,
-            background: 'rgba(255,255,255,0.92)', border: '1px solid rgba(0,0,0,0.15)',
-            borderRadius: 8, padding: '0.4rem 0.6rem', fontSize: '0.68rem', lineHeight: 1.5,
-          }}>
-            {hazardChoice && (
-              <>
-                <strong style={{ display: 'block', marginBottom: 2 }}>{hazardChoice} concentration</strong>
-                <div style={{ width: 70, height: 8, borderRadius: 4, background: `linear-gradient(to right, ${HAZARD_HEX[hazardChoice]}11, ${HAZARD_HEX[hazardChoice]}FF)` }} />
-                <div style={{ display: 'flex', justifyContent: 'space-between', width: 70, marginBottom: gradient ? 4 : 0 }}>
-                  <span>Low</span><span>High</span>
+        {(hazardChoices.length > 0 || financialLayers.length > 0) && (
+          <div
+            data-testid="map-legend"
+            style={{
+              position: 'absolute', bottom: 8, right: 8, zIndex: 1000,
+              background: 'rgba(255,255,255,0.92)', border: '1px solid rgba(0,0,0,0.15)',
+              borderRadius: 8, padding: '0.4rem 0.6rem', fontSize: '0.68rem', lineHeight: 1.5,
+              maxHeight: 300, overflowY: 'auto',
+            }}
+          >
+            {hazardChoices.map((hazard) => {
+              const hasSurface = hazardSurfaces.some((s) => s.hazard === hazard)
+              return (
+                <div key={hazard} style={{ marginBottom: 4 }}>
+                  <strong style={{ display: 'block', marginBottom: 2 }}>
+                    {hazard} concentration{!hasSurface && !loadingLayer ? ' (no exposure recorded)' : ''}
+                  </strong>
+                  <div style={{ width: 70, height: 8, borderRadius: 4, background: `linear-gradient(to right, ${HAZARD_HEX[hazard]}11, ${HAZARD_HEX[hazard]}FF)` }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', width: 70 }}>
+                    <span>Low</span><span>High</span>
+                  </div>
                 </div>
-              </>
-            )}
-            {gradient && (
-              <>
-                <strong style={{ display: 'block', margin: '2px 0 2px' }}>{financialChoice} (dot color)</strong>
-                <div style={{ width: 70, height: 8, borderRadius: 4, background: `linear-gradient(to right, ${lerpColor(gradient.from, gradient.to, 0)}, ${lerpColor(gradient.from, gradient.to, 1)})` }} />
+              )
+            })}
+            {financialLayers.map((layer) => (
+              <div key={layer.label} style={{ marginBottom: 4 }}>
+                <strong style={{ display: 'block', margin: '2px 0 2px' }}>{layer.label} (dot color)</strong>
+                <div style={{ width: 70, height: 8, borderRadius: 4, background: `linear-gradient(to right, ${lerpColor(layer.gradient.from, layer.gradient.to, 0)}, ${lerpColor(layer.gradient.from, layer.gradient.to, 1)})` }} />
                 <div style={{ display: 'flex', justifyContent: 'space-between', width: 70 }}>
                   <span>Low</span><span>High</span>
                 </div>
-              </>
-            )}
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -408,7 +364,8 @@ export default function HazardMap({
         published national hazard-mapping studies use - from this system's
         own ingested TMA climate exposure per region, the same evidence
         Combined Climate-Financial Exposure uses; it is never PMO or any
-        external source. Financial dots (when a layer is chosen) sit at the
+        external source. Each ticked hazard has its own surface and colour.
+        Financial dots (for each ticked financial layer: Loan, Collateral or both) sit at the
         ACTUAL latitude/longitude an institution entered on its own submitted
         template for each loan or collateral, colored from pale to saturated
         by that one record's own amount.

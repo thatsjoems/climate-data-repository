@@ -226,6 +226,12 @@ class Submission(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     institution = relationship("Institution", back_populates="submissions")
+
+    @property
+    def institution_name(self):
+        """Name of the submitting institution, so lists can show who sent each file."""
+        return self.institution.name if self.institution else None
+
     records = relationship("SubmissionRecord", back_populates="submission", cascade="all, delete-orphan")
     errors = relationship("ValidationError", back_populates="submission", cascade="all, delete-orphan")
 

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.models.models import User, RoleEnum
-from app.schemas.schemas import KPISummary, ClimateTrendPoint, HazardExposurePoint, CombinedExposurePoint, RegionMapPoint, ExposurePointsOut, KPISourceOut
+from app.schemas.schemas import KPISummary, ClimateTrendPoint, HazardExposurePoint, CombinedExposurePoint, RegionMapPoint, ExposurePointsOut, KPISourceOut, PortfolioBreakdownItem
 from app.services import analytics_service
 
 router = APIRouter(prefix="/analytics", tags=["Analytics & Dashboard"])
@@ -43,6 +43,34 @@ def kpi_summary(
     return analytics_service.get_kpi_summary(
         db, institution_id=_scope_for(current_user), filter_institution_id=filter_institution_id,
         filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+    )
+
+
+# The closed lists mirror analytics_service.BREAKDOWN_DIMENSIONS / BREAKDOWN_METRICS.
+BREAKDOWN_GROUP_PATTERN = (
+    r"^(borrower_type|business_size|currency|loan_type|sector|asset_classification|region|district|ward"
+    r"|collateral_type|collateral_sector|collateral_region|institution)$"
+)
+BREAKDOWN_METRIC_PATTERN = r"^(loan|outstanding|collateral|records|borrowers)$"
+
+
+@router.get("/portfolio-breakdown", response_model=list[PortfolioBreakdownItem])
+def portfolio_breakdown(
+    group_by: str = Query(pattern=BREAKDOWN_GROUP_PATTERN, description="Dimension to group by, e.g. sector, region, institution, collateral_type"),
+    metric: str = Query(default="loan", pattern=BREAKDOWN_METRIC_PATTERN),
+    limit: int = Query(default=6, ge=1, le=25, description="Largest groups to return; the rest are folded into 'Others'"),
+    filter_institution_id: str | None = Query(default=None),
+    filter_region: str | None = Query(default=None),
+    filter_district: str | None = Query(default=None, description="Drill-down below a region"),
+    filter_reporting_period: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.INSTITUTION_USER, RoleEnum.BOT_USER)),
+):
+    """Chart data for the dashboard (loan by sector, by region, by bank; collateral by type ...)."""
+    return analytics_service.get_portfolio_breakdown(
+        db, group_by=group_by, metric=metric, limit=limit, institution_id=_scope_for(current_user),
+        filter_institution_id=filter_institution_id, filter_region=filter_region,
+        filter_district=filter_district, filter_reporting_period=filter_reporting_period,
     )
 
 

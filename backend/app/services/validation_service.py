@@ -6,8 +6,10 @@ template_generator.py). Reads an uploaded Excel file and validates it against
 that exact structure. Returns: (list of parsed records, list of validation
 issues found).
 """
+import csv
 import io
 import math
+import re
 import pandas as pd
 
 from app.services.date_rules import EMPTY, OK, date_problem_hint, read_date
@@ -80,13 +82,42 @@ def _date_hint(val) -> str:
     return f": {hint}" if hint else ""
 
 
+# "5,000,000" or "1,250,000.50": thousands grouping, which Excel writes into a CSV file for a cell formatted with separators.
+# Only this exact shape is accepted, so "5,00,0" or "1,5" (a decimal comma) is still refused rather than guessed.
+_GROUPED_NUMBER = re.compile(r"^-?\d{1,3}(,\d{3})+(\.\d+)?$")
+
+
 def _clean_float(val):
     if val is None or (isinstance(val, float) and pd.isna(val)) or _clean_str(val) == "":
         return None
     try:
         return float(val)
     except (TypeError, ValueError):
+        if isinstance(val, str) and _GROUPED_NUMBER.match(val.strip()):
+            return float(val.strip().replace(",", ""))
         return "INVALID"
+
+
+def read_csv_as_frame(file_bytes: bytes) -> "pd.DataFrame":
+    """
+    A CSV file as the same raw grid of cells that reading the Excel sheet gives (no header row assumed), so the one validation
+    below serves both formats. The template has title lines above its header and rows of different widths, which is why the
+    standard csv module is used and every row is padded, instead of pandas.read_csv (which refuses rows of unequal width).
+
+    Text is read as UTF-8 (with or without the byte-order mark Excel adds) or, failing that, Windows-1252. The separator is the one
+    of comma, semicolon or tab that appears most in the first 30 lines (Excel uses a semicolon in some regional settings).
+    Empty cells become None, exactly like empty Excel cells.
+    """
+    try:
+        text = file_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = file_bytes.decode("cp1252", errors="replace")
+    head = "\n".join(text.splitlines()[:30])
+    delimiter = max((",", ";", "\t"), key=head.count)
+    rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+    width = max((len(r) for r in rows), default=0)
+    grid = [[(c.strip() or None) for c in r] + [None] * (width - len(r)) for r in rows]
+    return pd.DataFrame(grid, dtype=object)
 
 
 def validate_excel_file(
@@ -106,18 +137,26 @@ def validate_excel_file(
     records: list[dict] = []
 
     # ---- 1. File-level validation ----
-    if not (filename.lower().endswith(".xlsx") or filename.lower().endswith(".xls")):
-        issues.append(ValidationIssue(None, None, "Invalid file type - must be .xlsx or .xls"))
+    lowered = filename.lower()
+    if not lowered.endswith((".xlsx", ".xls", ".csv")):
+        issues.append(ValidationIssue(None, None, "Invalid file type - must be .xlsx, .xls or .csv"))
         return records, issues
 
-    try:
-        raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name="Loan_Collateral_Data", header=None)
-    except Exception:
+    if lowered.endswith(".csv"):
         try:
-            raw = pd.read_excel(io.BytesIO(file_bytes), header=None)
+            raw = read_csv_as_frame(file_bytes)
         except Exception as exc:
-            issues.append(ValidationIssue(None, None, f"Could not read the Excel file: {exc}"))
+            issues.append(ValidationIssue(None, None, f"Could not read the CSV file: {exc}"))
             return records, issues
+    else:
+        try:
+            raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name="Loan_Collateral_Data", header=None)
+        except Exception:
+            try:
+                raw = pd.read_excel(io.BytesIO(file_bytes), header=None)
+            except Exception as exc:
+                issues.append(ValidationIssue(None, None, f"Could not read the Excel file: {exc}"))
+                return records, issues
 
     # The template's header row is fixed (row 9, 1-indexed) with an example
     # row directly below it (row 10) - locate it defensively in case a user

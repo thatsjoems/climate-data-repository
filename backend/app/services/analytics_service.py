@@ -18,7 +18,7 @@ This explicit version-selection rule prevents duplicate exposure across
 correction attempts.
 """
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text
+from sqlalchemy import func, text, literal_column
 import re
 from app.models.models import (
     Institution, Submission, SubmissionRecord, ClimateRecord, SubmissionStatus
@@ -713,3 +713,92 @@ def get_kpi_sources(
             "row_validity_pct": round(100.0 * (r.valid_records or 0) / total, 1) if total else None,
         })
     return out
+
+
+# ---------------------------------------------------------------------------
+# Portfolio breakdown (dashboard charts: loan by sector / region / bank, collateral by type ...)
+# ---------------------------------------------------------------------------
+
+# group_by name -> the column to group on. A closed list: the client never supplies a column name.
+BREAKDOWN_DIMENSIONS = {
+    "borrower_type": SubmissionRecord.client_type,
+    "business_size": SubmissionRecord.business_size,
+    "currency": SubmissionRecord.currency,
+    "loan_type": SubmissionRecord.loan_type,
+    "sector": SubmissionRecord.loan_economic_activity,
+    "asset_classification": SubmissionRecord.asset_classification,
+    "region": SubmissionRecord.region,
+    "district": SubmissionRecord.district,
+    "ward": SubmissionRecord.ward,
+    "collateral_type": SubmissionRecord.collateral_type,
+    "collateral_sector": SubmissionRecord.collateral_economic_activity,
+    "collateral_region": SubmissionRecord.collateral_region,
+    "institution": Institution.name,
+}
+BREAKDOWN_METRICS = ("loan", "outstanding", "collateral", "records", "borrowers")
+UNSPECIFIED_LABEL = "Unspecified"
+OTHERS_LABEL = "Others"
+
+
+def get_portfolio_breakdown(
+    db: Session, group_by: str, metric: str = "loan", limit: int = 6,
+    institution_id: str | None = None, filter_institution_id: str | None = None,
+    filter_region: str | None = None, filter_district: str | None = None,
+    filter_reporting_period: str | None = None,
+) -> list[dict]:
+    """
+    Totals of one measure grouped by one dimension, over the same population as every other
+    dashboard figure (current, APPROVED, valid rows; tenant scope applied first).
+
+    Returns at most `limit` groups, largest first; the rest are folded into one "Others" group so
+    the shares always add up to 100%. Rows with no value in the dimension form "Unspecified".
+    `filter_district` drills one level below a region filter (region -> district -> ward).
+    """
+    if group_by not in BREAKDOWN_DIMENSIONS:
+        raise ValueError(f"Unknown group_by: {group_by}")
+    if metric not in BREAKDOWN_METRICS:
+        raise ValueError(f"Unknown metric: {metric}")
+
+    column = BREAKDOWN_DIMENSIONS[group_by]
+    # Inline literals (not bind parameters): PostgreSQL must see the SELECT and GROUP BY expressions as identical.
+    label = func.coalesce(func.nullif(func.trim(column), literal_column("''")), literal_column(f"'{UNSPECIFIED_LABEL}'")).label("label")
+    if metric == "loan":
+        measure = func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0)
+    elif metric == "outstanding":
+        measure = func.coalesce(func.sum(SubmissionRecord.outstanding_principal_tzs), 0.0)
+    elif metric == "collateral":
+        measure = func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0)
+    elif metric == "borrowers":
+        measure = func.count(func.distinct(SubmissionRecord.customer_id))
+    else:
+        measure = func.count(SubmissionRecord.id)
+
+    query = _active_records_query(
+        db, institution_id, filter_institution_id=filter_institution_id,
+        filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+    )
+    if group_by == "institution":
+        query = query.join(Institution, Institution.id == Submission.institution_id)
+    if filter_district:
+        query = query.filter(SubmissionRecord.district == filter_district)
+
+    rows = (
+        query.with_entities(label, measure.label("value"), func.count(SubmissionRecord.id).label("records"))
+        .group_by(label)
+        .all()
+    )
+    groups = sorted(
+        ({"label": r.label, "value": float(r.value or 0), "record_count": int(r.records)} for r in rows),
+        key=lambda g: (-g["value"], g["label"]),
+    )
+    limit = max(1, limit)
+    if len(groups) > limit:
+        head, tail = groups[: limit - 1], groups[limit - 1:]
+        groups = head + [{
+            "label": OTHERS_LABEL, "value": sum(g["value"] for g in tail),
+            "record_count": sum(g["record_count"] for g in tail),
+        }]
+    total = sum(g["value"] for g in groups)
+    for g in groups:
+        g["share_pct"] = round(100.0 * g["value"] / total, 1) if total > 0 else 0.0
+    return groups

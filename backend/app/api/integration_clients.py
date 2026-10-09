@@ -10,6 +10,7 @@ The key is returned once, at creation. It is never stored, listed or written to 
 """
 from datetime import datetime, timedelta
 
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -21,6 +22,7 @@ from app.core.integration_auth import generate_api_key
 from app.models.models import ApiClient, RoleEnum, User
 from app.schemas.schemas import ApiClientCreate, ApiClientCreated, ApiClientOut
 from app.services.audit_service import record_audit
+from app.services import external_systems
 from app.core.timeutil import utcnow
 
 router = APIRouter(prefix="/integration-clients", tags=["Integration access"])
@@ -84,6 +86,23 @@ def create_api_client(
         details_json={"key_prefix": client.key_prefix, "valid_days": payload.valid_days, "scope": client.scope, "allowed_networks": client.allowed_networks},
     )
     return ApiClientCreated(**_out(client), api_key=key)
+
+
+class PlatformStatusOut(BaseModel):
+    name: str
+    kind: str
+    configured: bool
+    connected: bool
+    detail: str
+
+
+@router.get("/platform-status", response_model=list[PlatformStatusOut])
+def platform_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
+):
+    """Connection status of ArcGIS, QGIS, BSIS and RTIS for the dashboard sidebar (see app/services/external_systems.py)."""
+    return [PlatformStatusOut(**vars(st)) for st in external_systems.all_statuses(db)]
 
 
 @router.get("", response_model=list[ApiClientOut])

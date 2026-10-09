@@ -70,6 +70,13 @@ services:
       REFRESH_TOKEN_EXPIRE_DAYS: "${REFRESH_TOKEN_EXPIRE_DAYS:-7}"
       SMTP_HOST: "${SMTP_HOST:-}"
       SMTP_FROM_EMAIL: "${SMTP_FROM_EMAIL:-}"
+      # Bank systems the repository calls (docs/INTEGRATION_ACCESS.md, "RTIS and BSIS"). Blank = not connected.
+      RTIS_BASE_URL: "${RTIS_BASE_URL:-}"
+      RTIS_API_KEY: "${RTIS_API_KEY:-}"
+      RTIS_HEALTH_PATH: "${RTIS_HEALTH_PATH:-/health}"
+      BSIS_BASE_URL: "${BSIS_BASE_URL:-}"
+      BSIS_API_KEY: "${BSIS_API_KEY:-}"
+      BSIS_HEALTH_PATH: "${BSIS_HEALTH_PATH:-/health}"
     depends_on:
       db:
         condition: service_healthy

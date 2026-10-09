@@ -178,6 +178,7 @@ class SubmissionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     institution_id: str
+    institution_name: Optional[str] = None
     submitted_by_user_id: str
     file_name: str
     reporting_period: str
@@ -219,6 +220,13 @@ class KPISummary(BaseModel):
     total_loan_exposure_tzs: float
     total_collateral_value_tzs: float
     total_borrowers: int
+
+
+class PortfolioBreakdownItem(BaseModel):
+    label: str
+    value: float
+    record_count: int
+    share_pct: float
 
 
 class ClimateTrendPoint(BaseModel):

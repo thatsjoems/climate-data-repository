@@ -6,6 +6,7 @@ import HazardMap, { RegionMapPoint } from '../components/HazardMap'
 import { HAZARD_COLORS, HAZARD_NONE_COLOR } from '../data/hazardColors'
 import PagerBar from '../components/PagerBar'
 import IntegrationAccess from '../components/IntegrationAccess'
+import PortfolioCharts from '../components/PortfolioCharts'
 
 // Rows and findings of a submission are shown this many at a time (see PagerBar).
 const DETAIL_PAGE = 50
@@ -25,6 +26,7 @@ interface KPI {
 interface Submission {
   id: string
   institution_id: string
+  institution_name?: string
   file_name: string
   reporting_period: string
   status: string
@@ -363,6 +365,9 @@ export default function InternalPortal() {
   // The seven datasets load independently: if one fails the others are still shown, and the page says which one is missing
   // (before, a single failure left the whole dashboard empty).
   const [loadWarnings, setLoadWarnings] = useState<string[]>([])
+  // The filters the portfolio charts were last loaded with: they change only when the filters are applied or reset,
+  // exactly like the Summary Figures (not while a dropdown is being changed).
+  const [chartQuery, setChartQuery] = useState('')
 
   async function loadAll() {
     const missing: string[] = []
@@ -383,6 +388,7 @@ export default function InternalPortal() {
       part('map points', apiClient.get(`/analytics/map-points?${buildFilterQuery({ validated_only: validatedOnly })}`), setMapPoints),
     ])
     setLoadWarnings(missing)
+    setChartQuery(buildFilterQuery())
   }
 
   async function reloadClimateExposureViews(nextValidatedOnly: boolean) {
@@ -407,6 +413,7 @@ export default function InternalPortal() {
     setHazardExposure(hazardRes.data)
     setCombinedExposure(combinedRes.data)
     setMapPoints(mapRes.data)
+    setChartQuery(buildFilterQuery())
     if (showKpiSources) loadKpiSources()
   }
 
@@ -510,6 +517,7 @@ export default function InternalPortal() {
 
   function resetDashboardFilters() {
     setFilterInstitutionId(''); setFilterRegion(''); setFilterReportingPeriod(''); setFilterHazardType('')
+    setChartQuery('')
     apiClient.get(`/analytics/kpi-summary?validated_only=${validatedOnly}`).then((r) => setKpi(r.data))
     apiClient.get(`/analytics/hazard-exposure?validated_only=${validatedOnly}`).then((r) => setHazardExposure(r.data))
     apiClient.get(`/analytics/combined-climate-financial-exposure?validated_only=${validatedOnly}`).then((r) => setCombinedExposure(r.data))
@@ -713,18 +721,26 @@ export default function InternalPortal() {
     label, value, color: label === 'None' ? HAZARD_NONE_COLOR : HAZARD_COLORS[label] || '#94A3B8',
   }))
 
-  const platforms: PlatformStatus[] = [
+  // Real status from the server (a recently used read key for QGIS/ArcGIS, a successful health check for BSIS/RTIS);
+  // until it answers, or if it fails, every platform shows as not connected.
+  const [platforms, setPlatforms] = useState<PlatformStatus[]>([
     { name: 'ArcGIS', connected: false },
     { name: 'QGIS', connected: false },
     { name: 'BSIS', connected: false },
     { name: 'RTIS', connected: false },
-  ]
+  ])
+  useEffect(() => {
+    apiClient.get('/integration-clients/platform-status')
+      .then((res) => setPlatforms(res.data.map((p: { name: string; connected: boolean }) => ({ name: p.name, connected: p.connected }))))
+      .catch(() => { /* keep "not connected" */ })
+  }, [])
 
   const sidebarItems: SidebarItem[] = [
     { key: 'overview', icon: '📊', label: 'Overview', active: true, onClick: () => scrollTo('top-anchor') },
     { key: 'automated-reports', icon: '📑', label: 'Automated Reports', onClick: () => scrollTo('reports-section') },
     { key: 'filters', icon: '🔍', label: 'Dashboard Filters', onClick: () => scrollTo('dashboard-filters') },
     { key: 'summary-figures', icon: '🔢', label: 'Summary Figures', onClick: () => scrollTo('kpi-section') },
+    { key: 'portfolio', icon: '📈', label: 'Loan & Collateral Charts', onClick: () => scrollTo('portfolio-section') },
     { key: 'map', icon: '🗺️', label: 'Geospatial Map', onClick: () => scrollTo('map-section') },
     { key: 'climate', icon: '🌦️', label: 'Climate & Hazard Data', onClick: () => scrollTo('hazard-section') },
     { key: 'quality', icon: '📋', label: 'Climate Data Quality', onClick: () => scrollTo('quality-section') },
@@ -758,10 +774,10 @@ export default function InternalPortal() {
       <section className="card" id="reports-section">
         <h2>⬇️ Automated Reports</h2>
         <p className="note">
-          Compiles the current KPI summary, climate hazard exposure, combined climate-financial
-          exposure, and recent Risk Advisory Reports into PDF, Excel, or a single-image snapshot
-          — the same figures shown on this dashboard, ready to file or share instead of copying
-          numbers manually.
+          Compiles the current KPI summary, loan and collateral charts, climate hazard exposure, combined
+          climate-financial exposure, and recent Risk Advisory Reports into PDF, Excel, or a single-image
+          snapshot (following the Dashboard Filters you have applied) — the same figures shown on this
+          dashboard, ready to file or share instead of copying numbers manually.
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
           <button className="btn-accent" onClick={handleGenerateReport} disabled={reportGenerating}>
@@ -950,6 +966,8 @@ export default function InternalPortal() {
           )}
         </section>
       )}
+
+      {kpi && <PortfolioCharts filterQuery={chartQuery} />}
 
       <section className="card" id="map-section">
         <h2>🗺️ Geospatial Overview — Hazard Exposure & Portfolio</h2>
@@ -1375,13 +1393,14 @@ export default function InternalPortal() {
         <table>
           <thead>
             <tr>
-              <th>File</th><th>Period</th><th>Status</th><th>Valid/Total</th><th>Row validity</th><th>Date</th>
+              <th>Institution</th><th>File</th><th>Period</th><th>Status</th><th>Valid/Total</th><th>Row validity</th><th>Date</th>
               {(user?.role === 'BOT_USER' || user?.role === 'SYSTEM_ADMIN') && <th>Notes + Decision</th>}
             </tr>
           </thead>
           <tbody>
             {filteredSubmissions.map((s) => (
               <tr key={s.id}>
+                <td><strong>{s.institution_name || institutions.find((i) => i.id === s.institution_id)?.name || '—'}</strong></td>
                 <td>{s.file_name}</td>
                 <td>{s.reporting_period}</td>
                 <td><span className={`badge badge-${s.status.toLowerCase()}`}>{s.status === 'APPROVED' ? 'Approved✅' : s.status === 'REJECTED' ? 'Rejected❌' : s.status}</span></td>
@@ -1415,7 +1434,7 @@ export default function InternalPortal() {
               </tr>
             ))}
             {filteredSubmissions.length === 0 && (
-              <tr><td colSpan={7}>No submissions match this filter.</td></tr>
+              <tr><td colSpan={8}>No submissions match this filter.</td></tr>
             )}
           </tbody>
         </table>
@@ -1424,7 +1443,7 @@ export default function InternalPortal() {
       {selectedSubmission && (
         <section className="card" id="submission-details">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <h2 style={{ margin: 0 }}>Submission Details: {selectedSubmission.submission.file_name}</h2>
+            <h2 style={{ margin: 0 }}>Submission Details: {selectedSubmission.submission.institution_name || institutions.find((i) => i.id === selectedSubmission.submission.institution_id)?.name || '—'} · {selectedSubmission.submission.file_name}</h2>
             <button className="btn-secondary btn-sm" onClick={() => setSelectedSubmission(null)}>Close</button>
           </div>
           <p className="note">

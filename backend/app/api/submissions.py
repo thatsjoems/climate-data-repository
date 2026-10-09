@@ -20,7 +20,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response, Query
 from sqlalchemy import func, insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
@@ -115,13 +115,14 @@ def upload_submission(
             detail=f"File is too large ({len(file_bytes) / (1024*1024):.1f} MB). "
                    f"Maximum allowed is {settings.MAX_UPLOAD_SIZE_MB} MB.",
         )
-    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Only .xlsx or .xls files are accepted")
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls", ".csv")):
+        raise HTTPException(status_code=400, detail="Only .xlsx, .xls or .csv files are accepted")
     # Content-type check in addition to extension - a mismatched declared type
     # (e.g. a renamed .exe claiming .xlsx) is rejected before it ever touches disk.
     allowed_content_types = {
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
-        "application/vnd.ms-excel",  # .xls
+        "application/vnd.ms-excel",  # .xls (Windows browsers also send this for a .csv)
+        "text/csv", "application/csv",  # .csv
         "application/octet-stream",  # some browsers/clients send this generically - extension check above still applies
     }
     if file.content_type and file.content_type not in allowed_content_types:
@@ -130,7 +131,7 @@ def upload_submission(
     # Persist the raw file via the storage abstraction (never trust the
     # client's filename for the path) - see app/services/storage_service.py
     # for why this is a single narrow call rather than direct os.* here.
-    saved_path = storage.save(file_bytes, "xlsx")
+    saved_path = storage.save(file_bytes, "csv" if file.filename.lower().endswith(".csv") else "xlsx")
 
     try:
         records, issues = validate_excel_file(
@@ -354,7 +355,7 @@ def list_submissions(
     caller breaks, while a future/high-volume caller can opt into paging
     without a new endpoint.
     """
-    query = db.query(Submission)
+    query = db.query(Submission).options(joinedload(Submission.institution))
     # Data isolation: an institution user only sees submissions belonging to their own institution.
     # institution_id is never taken from the request - only from the authenticated user's own record.
     if current_user.role == RoleEnum.INSTITUTION_USER:
@@ -462,9 +463,10 @@ def download_submission_file(
         raise HTTPException(status_code=404, detail="The original file is no longer available on the server")
 
     from fastapi.responses import FileResponse
+    is_csv = (submission.file_name or "").lower().endswith(".csv")
     return FileResponse(
         submission.file_path,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type="text/csv" if is_csv else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=submission.file_name,
     )
 

@@ -99,6 +99,19 @@ re-verified tile-by-tile.
 
 
 
+## Update: choosing more than one hazard and financial layer (at BOT's request)
+
+The two lists above the map ("Hazard layer" and "Financial layer") are now tick-box lists instead of single-choice lists:
+
+- Open a list, tick the boxes you want, and press **Apply**. Nothing on the map changes until Apply; closing the list any other way (a click elsewhere, Escape) keeps the previous choice.
+- **Hazard layer:** None, All, Flood, Drought, Landslide, Cyclone. Any number can be ticked, for example Flood and Drought together. The map draws one surface for each ticked hazard, each in its own colour (the same colours as the hazard pie chart), and the legend lists each one. A hazard with no recorded exposure under the current filters is named in the legend as such instead of silently drawing nothing.
+- **Financial layer:** None, All, Loan, Collateral. All ticks both; Loan or Collateral can also be chosen alone. Each ticked layer is drawn as dots at the real latitude and longitude entered on the template (the loan's own location for Loan, the collateral's own for Collateral), in its own pale-to-saturated colour scale. Collateral is drawn first so a loan dot is never hidden under it.
+- "All" is ticked when every box is, and "None" when no box is; the closed list shows the choice ("Flood, Drought", "All", "None").
+- The hazard chosen in Dashboard Filters still drives the hazard list: choosing Flood there ticks only Flood here.
+- The data is the same as before (`GET /api/analytics/hazard-exposure`, `/map-points` and `/exposure-points`); nothing changed on the server. The choice rules are in `frontend/src/data/mapLayers.ts`, the list in `CheckboxDropdown.tsx`, and the tests in `mapLayers.test.ts`, `CheckboxDropdown.test.tsx` and `HazardMap.test.tsx`.
+
+**Known limit:** each of Loan and Collateral returns at most 20,000 points (`get_exposure_points`), so choosing All can draw up to 40,000 dots. The map draws them on one canvas, but a very large portfolio may feel slower than choosing one layer; narrow it with the Dashboard Filters if so.
+
 ## API
 
 `GET /api/analytics/map-points` (BOT_USER and INSTITUTION_USER, scoped to

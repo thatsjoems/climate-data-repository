@@ -246,10 +246,10 @@ export default function InstitutionPortal() {
                 <option key={p} value={p}>{p}</option>
               ))}
             </select>
-            <label>Completed Excel file</label>
+            <label>Completed file (Excel .xlsx / .xls, or CSV .csv)</label>
             <input
               type="file"
-              accept=".xlsx,.xls"
+              accept=".xlsx,.xls,.csv"
               onChange={(e) => setFile(e.target.files ? e.target.files[0] : null)}
             />
             <button className="btn-accent" type="submit" disabled={uploading} style={{ alignSelf: 'stretch', textAlign: 'center' }}>

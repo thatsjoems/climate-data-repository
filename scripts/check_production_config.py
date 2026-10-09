@@ -148,6 +148,12 @@ def main() -> int:
     env = parse_env(env_path)
     problems = check_env(env, not args.no_certs) + check_files()
     if env_path.name == ".env.production":
+        for system in ("RTIS", "BSIS"):
+            url = env.get(f"{system}_BASE_URL", "").strip()
+            if url and not url.lower().startswith("https://"):
+                problems.append(f"{system}_BASE_URL must start with https:// in production (the credential is sent to it).")
+            if url and not env.get(f"{system}_API_KEY", "").strip():
+                problems.append(f"{system}_BASE_URL is set but {system}_API_KEY is empty.")
         if env.get("RATE_LIMIT_ENABLED", "true").strip().lower() in ("false", "0", "no", "off"):
             problems.append("RATE_LIMIT_ENABLED must not be switched off in .env.production (only staging may, for load tests).")
         if env.get("CDR_ALLOW_LOAD_TEST", "").strip():

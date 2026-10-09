@@ -74,8 +74,67 @@ def _table(headers: list[str], rows: list[list[str]], col_widths=None) -> Table:
     return t
 
 
+def _bar_drawing(rows, width_cm: float = 16.5):
+    """A small horizontal bar chart (reportlab graphics) for [(label, value, share), ...], at most 6 bars."""
+    from reportlab.graphics.shapes import Drawing, Rect, String
+    shown = rows[:6]
+    row_h, label_w, value_w = 16, 4.2 * cm, 3.4 * cm
+    height = max(len(shown), 1) * row_h + 6
+    drawing = Drawing(width_cm * cm, height)
+    if not shown:
+        return drawing
+    track_w = width_cm * cm - label_w - value_w
+    max_val = max(v for _, v, _ in shown) or 1.0
+    for i, (label, value, share) in enumerate(shown):
+        y = height - (i + 1) * row_h
+        drawing.add(String(0, y + 4, label if len(label) <= 26 else label[:25] + "...", fontSize=8))
+        drawing.add(Rect(label_w, y + 2, max(track_w * value / max_val, 1.5), 9, fillColor=colors.HexColor("#C99A2E"), strokeColor=None))
+        drawing.add(String(label_w + track_w + 6, y + 4, f"{_compact(value)} ({share}%)", fontSize=8))
+    return drawing
+
+
 def _fmt_tzs(amount: float) -> str:
     return f"{amount:,.0f} TZS"
+
+
+def _compact(n: float) -> str:
+    """55,660,000,000,000 -> '55.66 T' (the dashboard's own compact form)."""
+    a = abs(n)
+    if a >= 1e12:
+        return f"{n / 1e12:.2f} T"
+    if a >= 1e9:
+        return f"{n / 1e9:.2f} B"
+    if a >= 1e6:
+        return f"{n / 1e6:.2f} M"
+    if a >= 1e3:
+        return f"{n / 1e3:.1f} K"
+    return f"{n:.0f}"
+
+
+# The portfolio charts of the dashboard, as tables (title, group_by, metric): the same figures in the same order.
+PORTFOLIO_TABLES = [
+    ("Loan by borrower type", "borrower_type", "loan"),
+    ("Loan by currency", "currency", "loan"),
+    ("Loan by sector", "sector", "loan"),
+    ("Loan by region", "region", "loan"),
+    ("Loan by bank", "institution", "loan"),
+    ("Collateral by type", "collateral_type", "collateral"),
+    ("Collateral by sector", "collateral_sector", "collateral"),
+    ("Collateral by region", "collateral_region", "collateral"),
+]
+
+
+def _portfolio_tables(db: Session, filter_institution_id, filter_region, filter_reporting_period):
+    """[(title, [(label, value, share_pct), ...]), ...] for every portfolio chart; 10 groups each."""
+    out = []
+    for title, group_by, metric in PORTFOLIO_TABLES:
+        groups = analytics_service.get_portfolio_breakdown(
+            db, group_by=group_by, metric=metric, limit=10, institution_id=None,
+            filter_institution_id=filter_institution_id, filter_region=filter_region,
+            filter_reporting_period=filter_reporting_period,
+        )
+        out.append((title, [(g["label"], g["value"], g["share_pct"]) for g in groups]))
+    return out
 
 
 def generate_summary_report_pdf(
@@ -180,10 +239,27 @@ def generate_summary_report_pdf(
         col_widths=[2.6 * cm, 2 * cm, 1.9 * cm, 1.7 * cm, 2.8 * cm, 3.2 * cm, 3.3 * cm],
     ))
 
+    # ---- Portfolio breakdown (the dashboard's loan and collateral charts) ----
+    story.append(PageBreak())
+    story.append(Paragraph("4. Loan Structure and Collateral Exposure", styles["SectionHeading"]))
+    story.append(Paragraph(
+        "The figures behind the dashboard charts (approved submissions only; ten largest groups, the rest under Others).",
+        styles["BodyNote"],
+    ))
+    for title, rows in _portfolio_tables(db, filter_institution_id, filter_region, filter_reporting_period):
+        story.append(Paragraph(title, styles["BodyNote"]))
+        story.append(_bar_drawing(rows))
+        story.append(_table(
+            ["Group", "Amount", "Share"],
+            [[label, _fmt_tzs(value), f"{share}%"] for label, value, share in rows] or [["No approved data", "-", "-"]],
+            col_widths=[8 * cm, 5.5 * cm, 3 * cm],
+        ))
+        story.append(Spacer(1, 8))
+
     # ---- Recent Risk Advisory Reports ----
     story.append(PageBreak())
     notes = db.query(RiskAdvisoryNote).order_by(RiskAdvisoryNote.created_at.desc()).limit(15).all()
-    story.append(Paragraph("4. Recent Risk Advisory Reports", styles["SectionHeading"]))
+    story.append(Paragraph("5. Recent Risk Advisory Reports", styles["SectionHeading"]))
     story.append(Paragraph(
         "Analyst-authored climate risk assessments. Risk levels and recommendations are the "
         "authoring analyst's own professional judgement, not a system-computed score.",
@@ -299,6 +375,14 @@ def generate_summary_report_excel(
     ])
 
     # ---- Risk Advisory Reports ----
+    # ---- Portfolio breakdown ----
+    ws_pf = wb.create_sheet("Portfolio Breakdown")
+    pf_rows = []
+    for title, rows in _portfolio_tables(db, filter_institution_id, filter_region, filter_reporting_period):
+        for label, value, share in rows:
+            pf_rows.append([title, label, value, share])
+    write_sheet(ws_pf, ["Chart", "Group", "Amount (TZS)", "Share (%)"], pf_rows)
+
     ws4 = wb.create_sheet("Risk Advisory Reports")
     notes = db.query(RiskAdvisoryNote).order_by(RiskAdvisoryNote.created_at.desc()).all()
     note_rows = []
@@ -395,7 +479,20 @@ def generate_summary_report_image(
     bar_h, bar_gap = 34, 14
     # Height grows with the number of hazard bars actually shown, so a
     # filtered/sparse report never has a large empty gap at the bottom.
-    H = 180 + 36 + 100 + 50 + 30 + 18 + 18 + 12 + n_bars * (bar_h + bar_gap) + 90
+    # The dashboard's loan and collateral charts, as small bar panels in two columns (the same figures as the on-screen charts).
+    panels = _portfolio_tables(db, filter_institution_id, filter_region, filter_reporting_period)
+    panel_rows_shown = 5
+    row_h, panel_head_h, panel_pad, panel_gap = 26, 42, 14, 16
+
+    def _panel_h(rows) -> int:
+        return panel_head_h + max(min(len(rows), panel_rows_shown), 1) * row_h + panel_pad
+
+    pair_heights = [
+        max(_panel_h(panels[i][1]), _panel_h(panels[i + 1][1]) if i + 1 < len(panels) else 0) + panel_gap
+        for i in range(0, len(panels), 2)
+    ]
+    portfolio_h = 50 + sum(pair_heights)
+    H = 180 + 36 + 100 + 50 + 30 + 18 + 18 + 12 + n_bars * (bar_h + bar_gap) + portfolio_h + 90
     img = Image.new("RGB", (W, H), _BG)
     draw = ImageDraw.Draw(img)
 
@@ -466,6 +563,34 @@ def generate_summary_report_image(
     else:
         draw.text((40, y), "No data available for the current filters.", font=f_bar_label, fill=_TEXT_MUTED)
         y += 40
+
+    # ---- Loan structure and collateral exposure (the dashboard's portfolio charts) ----
+    y += 10
+    draw.text((40, y), "Loan Structure & Collateral Exposure", font=f_section, fill=_TEXT_DARK)
+    y += 40
+    panel_w = (W - 80 - 30) // 2
+    for pair_index, start in enumerate(range(0, len(panels), 2)):
+        for col in range(2):
+            idx = start + col
+            if idx >= len(panels):
+                break
+            title, rows = panels[idx]
+            px = 40 + col * (panel_w + 30)
+            ph = _panel_h(rows)
+            draw.rounded_rectangle([px, y, px + panel_w, y + ph], radius=10, fill=(255, 255, 255), outline=_BORDER, width=1)
+            draw.text((px + 16, y + 12), title, font=f_bar_label, fill=_TEXT_DARK)
+            shown = rows[:panel_rows_shown]
+            if not shown:
+                draw.text((px + 16, y + panel_head_h), "No approved data", font=f_small, fill=_TEXT_MUTED)
+                continue
+            max_val = max(v for _, v, _ in shown) or 1.0
+            track_x0, track_w = px + 170, panel_w - 170 - 150
+            for r_i, (label, value, share) in enumerate(shown):
+                ry = y + panel_head_h + r_i * row_h
+                draw.text((px + 16, ry), (label if len(label) <= 18 else label[:17] + "..."), font=f_small, fill=_TEXT_DARK)
+                draw.rectangle([track_x0, ry + 3, track_x0 + max(int(track_w * value / max_val), 2), ry + 15], fill=_BOT_GOLD)
+                draw.text((track_x0 + track_w + 10, ry), f"{_compact(value)} ({share}%)", font=f_small, fill=_TEXT_DARK)
+        y += pair_heights[pair_index]
 
     # ---- Footer ----
     y = H - 60

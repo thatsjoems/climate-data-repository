@@ -90,6 +90,19 @@ The reply is the batch (`source`, `records_received`, `records_accepted`, `recor
 - **Every read is audited**: the client's name, the path and the filters, and how many rows. Every refusal is audited with its real reason (wrong secret, unknown, revoked, expired), while the caller only ever sees one message. The key is never written anywhere.
 - A sending key brings files in; it does not fetch anything by itself. A scheduled job, TMA or PMO must call it, and calling BSIS and RTIS still needs those systems' specifications.
 
+## RTIS and BSIS (connection status; data exchange waits for the Bank's specification)
+
+The sidebar of the BOT dashboard shows **Connected / Not Connected** for ArcGIS, QGIS, BSIS and RTIS. It is worked out by the server (`GET /api/integration-clients/platform-status`, BOT analysts only), never assumed:
+
+| System | Connected means |
+|---|---|
+| QGIS, ArcGIS | A READ key whose name contains `qgis` or `arcgis` exists (not revoked, not expired) **and was used in the last 30 days**. Name each key after the tool, as in the example above. |
+| BSIS, RTIS | The repository called the system's health-check address with its credential and got a 2xx answer within `EXTERNAL_SYSTEM_TIMEOUT_SECONDS` (5). Redirects are never followed, so the credential cannot be sent to another address. In production the address must be `https://`. |
+
+To connect BSIS or RTIS, BOT ICT supplies the address, a credential and the health-check path, and they are set in `.env.production` (`RTIS_BASE_URL`, `RTIS_API_KEY`, `RTIS_HEALTH_PATH`, and the same three for `BSIS_`), then `scripts/prod_up` is run again. The credential is read only from the environment; it is never shown, stored in the database or written to the audit log.
+
+**What this does not do yet.** It proves the link works. What data moves between the repository and RTIS or BSIS (for example the list of supervised institutions from BSIS) depends on those systems' interface specifications, which the project has not been given. When BOT ICT provides them, the exchange is added in `app/services/external_systems.py` next to the health check, with its own tests.
+
 ## After upgrading an existing production stack
 
 Run `scripts/prod_up.ps1` (or `.sh`) again: it rebuilds the backend (which creates the `api_clients` table by migration `c6e9b2d4f713`) and re-applies the restricted-role grants. Then `python scripts/prod_ops.py backup` and `python scripts/prod_ops.py drill`.
