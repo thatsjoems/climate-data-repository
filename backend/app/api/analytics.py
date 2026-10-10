@@ -12,13 +12,15 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.models.models import User, RoleEnum
-from app.schemas.schemas import KPISummary, ClimateTrendPoint, HazardExposurePoint, CombinedExposurePoint, RegionMapPoint, ExposurePointsOut, KPISourceOut, PortfolioBreakdownItem
+from app.schemas.schemas import KPISummary, ClimateTrendPoint, HazardExposurePoint, CombinedExposurePoint, RegionMapPoint, ExposurePointsOut, KPISourceOut, PortfolioBreakdownItem, HazardSummaryOut
 from app.services import analytics_service
 
 router = APIRouter(prefix="/analytics", tags=["Analytics & Dashboard"])
 
 # The hazard types the system knows (the same list the map layer offers); "None" = no hazard recorded.
 HAZARD_PATTERN = r"^(Flood|Drought|Landslide|Cyclone|None)$"
+# The hazard summary describes a hazard that was recorded, so "None" is not offered.
+HAZARD_SUMMARY_PATTERN = r"^(Flood|Drought|Landslide|Cyclone)$"
 
 
 def _scope_for(current_user: User) -> str | None:
@@ -71,6 +73,22 @@ def portfolio_breakdown(
         db, group_by=group_by, metric=metric, limit=limit, institution_id=_scope_for(current_user),
         filter_institution_id=filter_institution_id, filter_region=filter_region,
         filter_district=filter_district, filter_reporting_period=filter_reporting_period,
+    )
+
+
+@router.get("/hazard-summary", response_model=HazardSummaryOut)
+def hazard_summary(
+    filter_hazard_type: str = Query(pattern=HAZARD_SUMMARY_PATTERN, description="Flood, Drought, Landslide or Cyclone"),
+    filter_reporting_period: str | None = Query(default=None, pattern=r"^\d{4}-Q[1-4]$", description="For example 2026-Q2"),
+    filter_region: str | None = Query(default=None, max_length=100),
+    validated_only: bool = Query(default=True, description="Restrict to fully human-reviewed climate readings only"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
+):
+    """Climate Data - Hazard Summary of the dashboard: the districts where one hazard was recorded, and how severe."""
+    return analytics_service.get_hazard_summary(
+        db, hazard_type=filter_hazard_type, reporting_period=filter_reporting_period,
+        region=filter_region, validated_only=validated_only,
     )
 
 

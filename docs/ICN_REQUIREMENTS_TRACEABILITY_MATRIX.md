@@ -4082,3 +4082,31 @@ Tests: `RecoveryCodesCard.test.tsx` (nothing is shown without two-step sign-in; 
 **Tests.** `test_date_rules.py` (47): the accepted forms, the ambiguous ones, everything refused (numbers, two-digit years, impossible days, implausible years), empty cells, the hints, and through the application a file with good and doubtful dates (the good ones stored, the doubtful ones refused with the reason and never stored, `25/03/2029` read day first because it can only be that) and the unchanged maturity rule.
 
 **Verified here.** The rules on 35 forms; the whole upload checker on a seven-row file (ISO, ambiguous, date cell with a day-first date, a number, maturity before disbursement, month names, empty): each row came out as the table in `UPLOAD_DATES.md` says; the pure parts of the new tests. **Not verified here (no database):** the two tests through the application. The suite should now collect **677** cases (630 in the owner's last run, plus 47). No report or presentation was changed, at the owner's instruction.
+
+
+## Ninety-fifth item - Climate Data - Hazard Summary panel (Concept Note, Figure 3)
+
+**Verification of the previous packages (owner's runs, 9 October 2026).** Development stack: **733 passed, 2 skipped, 0 failed**; frontend **40 passed** (run in a throw-away Node container). Production moved with `prod_up`: all services healthy; `verify_db_constraints.py` 47 of 47; `system_check.py` OK except the missing off-machine backup. **A mistake of mine:** I told the owner to run `pytest` inside production. It gave 209 failures and 27 errors, none a defect: production requires two-step sign-in for staff (the tests' staff sign-ins got no full token, 401) and its hardening stops root writing to the application's uploads folder (`PermissionError`). The tests use an in-memory database, so no data was touched. `docs/DOCKER.md` now says to run the tests on the development stack only and gives production's own checks.
+
+**Change.** The dashboard's "Climate Data - Hazard Summary" panel: for one hazard (Drought, Flood, Landslide, Cyclone), a period and a region, the districts where it was recorded and their highest severity, worst first. `GET /api/analytics/hazard-summary` (BOT analysts only), `get_hazard_summary` in `analytics_service.py`, `HazardSummary.tsx`. Climate readings only (VALIDATED by default, FLAGGED never); no loans are read. Details and limits in `docs/HAZARD_SUMMARY.md`.
+
+**What it does not do, on purpose.** No affected population (no population figures exist in the repository, none is estimated), no colour map by district (no boundary data), three severity grades rather than the mock-up's five (the database rule allows LOW, MEDIUM, HIGH). A district without a reading is absent, never "normal". These need Bank decisions (GO_LIVE_READINESS, item 11).
+
+**Tests.** `test_hazard_summary.py` (14, five of them one test run with five refused inputs) and `HazardSummary.test.tsx` (8).
+
+**Verified here.** Everything compiles (`py_compile`); the new response model accepts a sample answer. **Not verified here (no database, no `sqlalchemy`, no Node packages):** the tests themselves, the TypeScript build and the look of the panel. The suite should now collect **749** tests (735 before, 14 new), and the frontend 48 (40 before, 8 new).
+
+## Ninety-sixth item - Coordinates must lie in the region and district named (official ward boundaries)
+
+**Verification of the previous package (owner's runs, 10 October 2026).** Development stack: **747 passed, 2 skipped, 0 failed**; frontend **48 passed** (8 files). The Hazard Summary panel was checked in the browser (all seven points). Production was rebuilt with `prod_up`: `verify_db_constraints.py` 47 of 47, `/api/health` ok, `system_check.py` **OK** after an off-machine copy was made (a folder in OneDrive, as no external drive exists; a daily task `CDR-Backup` at 02:00 now points at it).
+
+**Request.** An institution must not be able to give coordinates of one place (Katavi) under another (Morogoro); a point should have to lie in the region, district and ward chosen.
+
+**Change.** The coordinates of the loan and of the collateral are checked against the NBS 2022 ward boundaries (4,344 wards, 31 regions, 150 districts), `backend/app/services/boundary_service.py`, data `backend/app/data/tanzania_ward_boundaries.json.gz` built by `backend/scripts/build_boundaries.py`. Another **region or district = error** (the row is rejected, the message names where the point really is and, if it fits, a forgotten minus sign or swapped latitude/longitude); another **ward = warning**; a point in no ward (lake, sea, another country) = warning; 500 m tolerance at every edge. Without the data file the old region-centre check (300 km, warning) still runs. The template's example row now lies inside Bereko ward and its instructions state the rule. See `COORDINATE_VALIDATION.md`.
+
+**Decided with the owner.** Region and district rejected, ward only a warning (51 wards are spelt differently in the two lists; 9 of the repository's wards are not found even after near-matching, 47 NBS wards are not in the dropdown list). The NBS files are public downloads; the page states no licence, so BOT is asked to confirm (`GO_LIVE_READINESS.md`, item 12).
+
+**Tests.** `test_boundaries.py` (28 tests).
+
+**Verified here.** The service was run against the real data: the Katavi-under-Morogoro case, district and ward mismatches, the sea, the tolerance and the hints; 6,000 checks took 0.46 s (0.08 ms each) with 27 MB of memory; the upload validation was run on real Excel files for the same cases; 27 of the 28 tests were run with a small stand-in for the test fixtures. **Not verified here (no database, no `sqlalchemy`, no `pytest`):** the one test that uploads through the API, and the whole suite. It should now collect **777** tests (749 before, 28 new).
+

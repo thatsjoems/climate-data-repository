@@ -282,6 +282,99 @@ def get_hazard_exposure(
     return rows
 
 
+_SEVERITY_RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3}
+
+
+def get_hazard_summary(
+    db: Session, hazard_type: str, reporting_period: str | None = None,
+    region: str | None = None, validated_only: bool = True,
+) -> dict:
+    """
+    The climate side of one hazard: in which districts it was recorded, and how severe.
+    Only recorded readings are counted (TMA/PMO or manual climate ingestion); nothing is
+    estimated, and a district with no reading of the hazard is simply absent - never shown
+    as "normal". It does not look at any institution's loans, so it needs no tenant scope
+    (like the climate trends) and does not depend on any submission being approved.
+
+    validated_only: only fully reviewed readings (quality_flag VALIDATED), the supervisory
+    default used by Hazard Exposure; when False every reading that is not FLAGGED counts.
+    Period matching is the same as Hazard Exposure: the reading's own reporting_period, or,
+    for older readings that have none, its year and month.
+    """
+    if validated_only:
+        quality = ClimateRecord.quality_flag == "VALIDATED"
+    else:
+        quality = ClimateRecord.quality_flag != "FLAGGED"
+
+    filters = [quality, ClimateRecord.hazard_type == hazard_type]
+    if region:
+        filters.append(ClimateRecord.region == region)
+    if reporting_period:
+        period_filter = ClimateRecord.reporting_period == reporting_period
+        parsed = _quarter_to_months(reporting_period)
+        if parsed:
+            year, months = parsed
+            period_filter = period_filter | (
+                (ClimateRecord.reporting_period.is_(None))
+                & (ClimateRecord.year == year)
+                & (ClimateRecord.month.in_(months))
+            )
+        filters.append(period_filter)
+
+    rows = db.query(ClimateRecord.region, ClimateRecord.district, ClimateRecord.hazard_severity).filter(*filters).all()
+
+    per_district: dict[tuple[str, str], dict] = {}
+    regions: set[str] = set()
+    without_district = 0
+    highest: str | None = None
+    for row_region, row_district, severity in rows:
+        regions.add(row_region)
+        if _SEVERITY_RANK.get(severity, 0) > _SEVERITY_RANK.get(highest, 0):
+            highest = severity
+        district = (row_district or "").strip()
+        if not district:
+            without_district += 1
+            continue
+        entry = per_district.setdefault(
+            (row_region, district),
+            {"region": row_region, "district": district, "readings": 0, "highest_severity": None},
+        )
+        entry["readings"] += 1
+        if _SEVERITY_RANK.get(severity, 0) > _SEVERITY_RANK.get(entry["highest_severity"], 0):
+            entry["highest_severity"] = severity
+
+    districts = sorted(
+        per_district.values(),
+        key=lambda d: (-_SEVERITY_RANK.get(d["highest_severity"], 0), -d["readings"], d["region"], d["district"]),
+    )
+    by_severity = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "NOT_GRADED": 0}
+    for d in districts:
+        by_severity[d["highest_severity"] or "NOT_GRADED"] += 1
+
+    # What the pickers may offer: the periods and regions that have readings of the chosen quality, whatever else is chosen.
+    periods = [
+        p for (p,) in db.query(ClimateRecord.reporting_period).filter(quality, ClimateRecord.reporting_period.isnot(None))
+        .distinct().all()
+    ]
+    available_regions = [r for (r,) in db.query(ClimateRecord.region).filter(quality).distinct().all()]
+
+    return {
+        "hazard_type": hazard_type,
+        "reporting_period": reporting_period,
+        "region": region,
+        "validated_only": validated_only,
+        "districts_affected": len(districts),
+        "regions_affected": len(regions),
+        "readings": len(rows),
+        "readings_without_district": without_district,
+        "highest_severity": highest,
+        "districts_by_severity": by_severity,
+        "districts": districts,
+        "available_periods": sorted(periods, reverse=True),
+        "available_regions": sorted(available_regions),
+    }
+
+
 def get_exposure_points(
     db: Session, institution_id: str | None = None,
     filter_institution_id: str | None = None, filter_region: str | None = None,

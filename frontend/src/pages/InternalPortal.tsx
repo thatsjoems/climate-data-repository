@@ -7,6 +7,7 @@ import { HAZARD_COLORS, HAZARD_NONE_COLOR } from '../data/hazardColors'
 import PagerBar from '../components/PagerBar'
 import IntegrationAccess from '../components/IntegrationAccess'
 import PortfolioCharts from '../components/PortfolioCharts'
+import HazardSummary from '../components/HazardSummary'
 
 // Rows and findings of a submission are shown this many at a time (see PagerBar).
 const DETAIL_PAGE = 50
@@ -1010,6 +1011,8 @@ export default function InternalPortal() {
           </div>
         )}
       </section>
+
+      <HazardSummary />
 
       <section className="card" id="hazard-section">
         <h2>🌦️ Climate Hazard Exposure Distribution</h2>

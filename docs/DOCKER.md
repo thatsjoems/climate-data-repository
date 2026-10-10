@@ -57,6 +57,21 @@ table) runs a query; `\q` exits.
 docker compose exec backend pytest -v
 ```
 
+**Run the tests on the development stack only, never inside production or staging.** They are written for the development settings (two-step
+sign-in off, a writable uploads folder). Inside production they fail for the right reasons, not because of a defect: two-step sign-in is required for
+staff (so a test that signs in as an analyst or administrator gets no full token and the next request is refused with 401), and the hardening of the
+container (`cap_drop: ALL`, `docs/DOCKER.md` above) means `docker compose exec` as root cannot write to the uploads folder that belongs to the
+application's user (`PermissionError: ... 'uploads/...'`). On the first run in production this gave 209 failures and 27 errors, none of them a code
+defect (the same code passes on the development stack). The tests use an in-memory database, so production's data was not touched.
+
+To check production after `prod_up`, use its own checks (they read, never write):
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production exec backend python scripts/verify_db_constraints.py
+docker compose -f docker-compose.prod.yml --env-file .env.production exec backend python scripts/system_check.py
+curl.exe -k https://localhost/api/health
+```
+
 ## Notes
 
 - The backend container reads its configuration from environment variables set in

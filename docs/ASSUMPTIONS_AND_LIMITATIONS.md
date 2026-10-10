@@ -17,6 +17,9 @@ Figure 4). Two concrete details from that report were adopted here:
   institutions to submit geographical coordinates for loans/collateral going forward -
   independently confirming the plan already agreed for this project: add lat/long fields once
   BOT provides its own official data template, rather than guessing a structure now.
+- Coordinates are checked against the NBS 2022 ward boundaries (see `COORDINATE_VALIDATION.md`): another region or
+  district rejects the row, another ward is a warning, with a 500 m tolerance. The boundaries are a public NBS download
+  whose licence BOT should confirm; village/street level is not checked.
 
 ## Data Used
 

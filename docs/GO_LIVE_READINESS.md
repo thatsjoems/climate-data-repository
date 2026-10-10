@@ -29,6 +29,8 @@ Measured against the Concept Note timeline: Phase I (development, security confi
 | 8 | **Independent penetration test** using `docs/PENTEST_CHECKLIST.md`, and fixing its findings | BOT ICT security | The system has not been tested by anyone independent. |
 | 9 | Decisions on observations O2 (tokens in browser storage), O9 (one large upload slows others), O10 (read-only file system) | BOT ICT | Each is a documented, accepted-or-not risk. |
 | 10 | Phase II: focal persons from each bank, accounts, training, pilot submissions | FSD | Not a software task. |
+| 11 | **Sources for the rest of the Hazard Summary panel** (`HAZARD_SUMMARY.md`): district boundaries for a colour map, population per district for "affected population" and a rule for what "affected" means, and whether five severity grades are wanted instead of three | BOT ICT + TMA/PMO | Until decided, the panel shows districts, severity and readings from recorded data only, and shows no population. |
+| 12 | **Boundary data for coordinate checks** (`COORDINATE_VALIDATION.md`): confirm with NBS that the ward boundaries may be embedded (the page states no licence); reconcile the ward names (9 in the repository's list not found, 47 in the NBS file not in the list); confirm 150 or 151 districts; decide when a newer boundary file replaces this one | BOT ICT + NBS | Until confirmed, the system uses the NBS public download as published. |
 
 ## Run these before declaring Phase I complete
 

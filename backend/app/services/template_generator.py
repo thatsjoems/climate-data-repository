@@ -160,13 +160,13 @@ def generate_loan_collateral_template() -> bytes:
         "loan_economic_activity": "Agriculture", "loan_purpose": "Working capital",
         "asset_classification": "Current",
         "region": "Dodoma", "district": "Kondoa", "ward": "Bereko", "village": "Bereko",
-        "loan_latitude": -4.9, "loan_longitude": 35.78,
+        "loan_latitude": -4.4566, "loan_longitude": 35.7547,
         "collateral_type": "Residential mortgage", "collateral_pledged_date": "2026-03-15",
         "collateral_value_tzs": 120000000, "collateral_forced_sale_value_tzs": 95000000,
         "collateral_economic_activity": "Real estate/Mortgage",
         "collateral_region": "Dodoma", "collateral_district": "Kondoa",
         "collateral_ward": "Bereko", "collateral_village": "Bereko",
-        "collateral_latitude": -4.9, "collateral_longitude": 35.78,
+        "collateral_latitude": -4.4566, "collateral_longitude": 35.7547,
         "insurance_coverage": "YES", "insurance_policy_type": "Property climate cover",
         "insurance_provider_name": "Example Insurance Co.", "insurance_value_protected_tzs": 100000000,
     }
@@ -289,7 +289,7 @@ def generate_loan_collateral_template() -> bytes:
     legend["A4"] = "Fill in the 'Loan_Collateral_Data' sheet. Row 10 (highlighted) is an EXAMPLE - replace or delete it."
     legend["A5"] = "Dropdowns: Region -> District -> Ward -> Street/Village are linked - select Region first, then District, then Ward."
     legend["A6"] = "This applies separately to the loan's own location AND the collateral's location - they are independent."
-    legend["A7"] = "Latitude/Longitude should be within the selected region - large mismatches will be flagged on upload."
+    legend["A7"] = "Latitude/Longitude must be inside the Region and District you select (a row whose point is in another region or district is rejected; another ward is a warning). Tanzania is south of the equator: latitudes are negative."
     legend["A8"] = "Required fields: " + ", ".join(REQUIRED_COLUMNS)
     for row in range(3, 9):
         legend[f"A{row}"].font = Font(size=10, italic=(row != 8))

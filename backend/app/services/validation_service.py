@@ -20,6 +20,7 @@ from app.services.template_generator import (
 )
 from app.services import geo_lookup as geo
 from app.services.geo_reference import get_region_coordinates
+from app.services import boundary_service
 
 # A row's GPS coordinates are flagged (not rejected outright - see the
 # reasoning in docs/ASSUMPTIONS_AND_LIMITATIONS.md) when they fall further
@@ -278,14 +279,43 @@ def validate_excel_file(
             lon = None
             ok = False
         if lat is not None and lon is not None and region and geo.is_valid_region(region):
-            centroid = get_region_coordinates(region)
-            if centroid:
-                dist = _haversine_km(lat, lon, centroid[0], centroid[1])
+            finding = boundary_service.check_location(region, district, ward, lat, lon)
+            named = ward or district or region
+            if finding is not None and finding.kind in ("region", "district", "ward"):
+                where = finding.actual
+                is_error = finding.kind in ("region", "district")
+                hint = boundary_service.hint_for_typing_mistake(region, district, ward, lat, lon)
+                issues.append(ValidationIssue(
+                    row_number, lat_field,
+                    f"{label_prefix} coordinates ({lat}, {lon}) are in {where.ward} ward, {where.district} district, "
+                    f"{where.region} region, not in {named}"
+                    + (f" ({region} region)" if named != region else "")
+                    + (f" - {hint}" if hint else "")
+                    + (". The row is rejected; correct the coordinates or the place." if is_error
+                       else ". Please check whether the ward or the coordinates are right."),
+                    severity="ERROR" if is_error else "WARNING",
+                ))
+                if is_error:
+                    ok = False
+            elif finding is None or finding.kind == "outside":
+                # Nothing to report against a boundary: the boundary data cannot judge this place (it is not in it), or the
+                # point is in no ward at all (a lake, the sea, another country), which does not say which place was
+                # meant. The coarse distance from the region's centre still catches a gross mistake in both cases.
+                dist = _haversine_km(lat, lon, *centroid) if (centroid := get_region_coordinates(region)) else 0
+                hint = boundary_service.hint_for_typing_mistake(region, district, ward, lat, lon) if finding is not None else None
+                suffix = f" - {hint}" if hint else ""
                 if dist > GPS_MISMATCH_WARNING_KM:
                     issues.append(ValidationIssue(
                         row_number, lat_field,
                         f"{label_prefix} coordinates ({lat}, {lon}) are {dist:.0f} km from the centre of "
-                        f"'{region}' - please double check they belong to this region",
+                        f"'{region}' - please double check they belong to this region{suffix}",
+                        severity="WARNING",
+                    ))
+                elif finding is not None:
+                    issues.append(ValidationIssue(
+                        row_number, lat_field,
+                        f"{label_prefix} coordinates ({lat}, {lon}) are not on mapped land (a lake, the sea or "
+                        f"outside Tanzania) - please double check them{suffix}",
                         severity="WARNING",
                     ))
 

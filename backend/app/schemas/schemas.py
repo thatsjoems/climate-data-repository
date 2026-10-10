@@ -229,6 +229,30 @@ class PortfolioBreakdownItem(BaseModel):
     share_pct: float
 
 
+class HazardSummaryDistrict(BaseModel):
+    region: str
+    district: str
+    readings: int
+    highest_severity: Optional[str] = None   # LOW, MEDIUM or HIGH; None when no reading of the district was graded
+
+
+class HazardSummaryOut(BaseModel):
+    """Climate-side summary of one hazard (Concept Note, Figure 3, "Climate Data - Hazard Summary")."""
+    hazard_type: str
+    reporting_period: Optional[str] = None
+    region: Optional[str] = None
+    validated_only: bool
+    districts_affected: int            # districts with at least one reading of this hazard
+    regions_affected: int
+    readings: int
+    readings_without_district: int     # readings recorded for a region only; they cannot be placed in a district
+    highest_severity: Optional[str] = None
+    districts_by_severity: dict[str, int]   # HIGH, MEDIUM, LOW, NOT_GRADED
+    districts: list[HazardSummaryDistrict]  # worst first
+    available_periods: list[str]       # reporting periods that have climate readings, newest first
+    available_regions: list[str]
+
+
 class ClimateTrendPoint(BaseModel):
     year: int
     month: Optional[int] = None
