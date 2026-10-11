@@ -21,8 +21,23 @@ function summary(over: Partial<HazardSummaryData> = {}): HazardSummaryData {
 }
 
 function lastUrl(get: { mock: { calls: unknown[][] } }): URL {
-  const calls = get.mock.calls
+  // The request for the district outlines is a different one; these tests are about the summary.
+  const calls = get.mock.calls.filter((c) => String(c[0]).startsWith('/analytics/hazard-summary'))
   return new URL(String(calls[calls.length - 1][0]), 'http://x')
+}
+
+function square(key: string, region: string, district: string, lon: number, lat: number) {
+  return { key, region, district, rings: [[[lon, lat], [lon + 1, lat], [lon + 1, lat + 1], [lon, lat + 1], [lon, lat]]] }
+}
+
+/** Answers the summary request with `data` and the outlines request with `outlines` (or fails it). */
+function serve(data: HazardSummaryData, outlines: unknown | Error) {
+  return vi.spyOn(apiClient, 'get').mockImplementation(((url: string) => {
+    if (String(url).startsWith('/analytics/district-shapes')) {
+      return outlines instanceof Error ? Promise.reject(outlines) : Promise.resolve({ data: { districts: outlines } })
+    }
+    return Promise.resolve({ data })
+  }) as any)
 }
 
 describe('HazardSummary', () => {
@@ -107,5 +122,59 @@ describe('HazardSummary', () => {
     vi.spyOn(apiClient, 'get').mockRejectedValue(new Error('network'))
     render(<HazardSummary />)
     expect(await screen.findByText('The hazard summary could not be loaded.')).toBeInTheDocument()
+  })
+  it('draws the district map from the outlines and colours each district by its severity', async () => {
+    const withKeys = summary({
+      districts: [
+        { region: 'Dodoma', district: 'Bahi', readings: 2, highest_severity: 'HIGH', map_key: 'dodoma|bahi' },
+        { region: 'Dodoma', district: 'Chamwino', readings: 2, highest_severity: 'MEDIUM', map_key: 'dodoma|chamwino' },
+        { region: 'Singida', district: 'Ikungi', readings: 1, highest_severity: null, map_key: 'singida|ikungi' },
+      ],
+    })
+    serve(withKeys, [square('dodoma|bahi', 'Dodoma', 'Bahi', 35, -7), square('dodoma|chamwino', 'Dodoma', 'Chamwino', 36, -7),
+      square('singida|ikungi', 'Singida', 'Ikungi', 35, -6), square('singida|manyoni', 'Singida', 'Manyoni', 36, -6)])
+    render(<HazardSummary />)
+    expect(await screen.findByTestId('district-map')).toBeInTheDocument()
+    expect(document.querySelector('[data-district="dodoma|bahi"]')?.getAttribute('data-graded')).toBe('HIGH')
+    expect(document.querySelector('[data-district="singida|manyoni"]')?.getAttribute('data-graded')).toBe('NONE')
+    expect(screen.queryByText(/have readings but no outline on the map/)).not.toBeInTheDocument()
+  })
+
+  it('asks for the outlines once, however often the choices change', async () => {
+    const get = serve(summary(), [square('dodoma|bahi', 'Dodoma', 'Bahi', 35, -7)])
+    render(<HazardSummary />)
+    await screen.findByTestId('district-map')
+    fireEvent.change(screen.getByLabelText('Hazard type'), { target: { value: 'Flood' } })
+    await waitFor(() => expect(lastUrl(get).searchParams.get('filter_hazard_type')).toBe('Flood'))
+    fireEvent.change(screen.getByLabelText('Time period'), { target: { value: '2026-Q1' } })
+    await waitFor(() => expect(lastUrl(get).searchParams.get('filter_reporting_period')).toBe('2026-Q1'))
+    expect(get.mock.calls.filter((c) => String(c[0]).startsWith('/analytics/district-shapes'))).toHaveLength(1)
+  })
+
+  it('names the districts that have readings but no outline, and keeps them in the table', async () => {
+    serve(summary({
+      districts: [
+        { region: 'Dodoma', district: 'Bahi', readings: 2, highest_severity: 'HIGH', map_key: 'dodoma|bahi' },
+        { region: 'Dodoma', district: 'Atlantis', readings: 1, highest_severity: 'LOW', map_key: null },
+      ],
+    }), [square('dodoma|bahi', 'Dodoma', 'Bahi', 35, -7)])
+    render(<HazardSummary />)
+    expect(await screen.findByText(/1 district has readings but no outline on the map/)).toBeInTheDocument()
+    expect(screen.getByText(/Atlantis \(Dodoma\)/)).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: 'Atlantis' })).toBeInTheDocument()
+  })
+
+  it('leaves the map out, and says so, when the outlines cannot be had; the table still shows', async () => {
+    serve(summary(), new Error('network'))
+    render(<HazardSummary />)
+    expect(await screen.findByText(/The district map is not available/)).toBeInTheDocument()
+    expect(screen.queryByTestId('district-map')).not.toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: 'Bahi' })).toBeInTheDocument()
+  })
+
+  it('does not break when the outlines come back as something else', async () => {
+    serve(summary(), { not: 'a list' })
+    render(<HazardSummary />)
+    expect(await screen.findByText(/The district map is not available/)).toBeInTheDocument()
   })
 })

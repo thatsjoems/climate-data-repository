@@ -1,3 +1,4 @@
+import { signInPath } from '../portal'
 import { useState, FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -48,7 +49,7 @@ export default function ForgotPassword() {
         )}
 
         <div className="demo-hint">
-          <Link to="/login">← Back to Log In</Link>
+          <Link to={signInPath()}>← Back to Log In</Link>
         </div>
       </form>
     </div>

@@ -105,3 +105,7 @@ def login(client, username, password=DEFAULT_PASSWORD):
 
 def auth_header(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+# The header the application's own page adds to the refresh and logout requests (app/core/session_cookie.py).
+WEB = {"X-CDR-Client": "web"}

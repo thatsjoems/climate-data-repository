@@ -53,10 +53,11 @@ BOT should confirm with NBS (sg@nbs.go.tz) that the boundaries may be embedded i
 * It does not check climate readings from TMA/PMO (their coordinates are optional and the check is not wired to them).
 * It does not change data already stored: it applies to new uploads. Nothing is corrected automatically.
 * A point close to a boundary can be on the wrong side by up to the simplification, so the 500 m tolerance is deliberate.
-* The NBS file has **150 districts**, the same as the repository's list; the Concept Note's figure of 151 should be
-  confirmed with NBS.
+* The NBS file has **150 districts**, and so does the repository's list. The repository's list used to show 151: the extra one was a data-entry duplicate (a lower-case "korogwe" with the one ward Manundu, which Korogwe already holds, with the same village). It was removed on 11 October 2026 and a test keeps it from coming back. The Concept Note's figure of 151 can be taken as 150 unless NBS says a district was created after the 2022 census.
 
 ## Names that differ between the repository's list and NBS
+
+See also `WARD_NAME_DIFFERENCES.md` and `WARD_NAME_DIFFERENCES.csv` (every difference with a suggested NBS spelling). The tables below are the names the coordinate check itself cannot match.
 
 Wards in the repository's list that the boundary file does not hold under the same name (checked at district level):
 

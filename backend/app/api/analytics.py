@@ -6,14 +6,19 @@ It is always derived server-side from the authenticated user's own record.
 An INSTITUTION_USER's scope is hard-coded to their own institution_id; there is
 no code path that lets them widen it, even by manipulating query parameters.
 """
-from fastapi import APIRouter, Depends, Query
+import gzip
+import hashlib
+import json
+from functools import lru_cache
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import require_roles
 from app.models.models import User, RoleEnum
 from app.schemas.schemas import KPISummary, ClimateTrendPoint, HazardExposurePoint, CombinedExposurePoint, RegionMapPoint, ExposurePointsOut, KPISourceOut, PortfolioBreakdownItem, HazardSummaryOut
-from app.services import analytics_service
+from app.services import analytics_service, boundary_service
 
 router = APIRouter(prefix="/analytics", tags=["Analytics & Dashboard"])
 
@@ -86,10 +91,49 @@ def hazard_summary(
     current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
 ):
     """Climate Data - Hazard Summary of the dashboard: the districts where one hazard was recorded, and how severe."""
-    return analytics_service.get_hazard_summary(
+    summary = analytics_service.get_hazard_summary(
         db, hazard_type=filter_hazard_type, reporting_period=filter_reporting_period,
         region=filter_region, validated_only=validated_only,
     )
+    for d in summary["districts"]:
+        # The reading's own spelling of the place may differ in capitals or spacing from the map's; the key is how they meet.
+        d["map_key"] = boundary_service.map_key(d["region"], d["district"])
+    return summary
+
+
+@lru_cache(maxsize=1)
+def _district_shapes_body() -> tuple[bytes, bytes, str] | None:
+    """(plain body, gzip body, ETag) of the outlines, built once. They are the same for everyone and carry no secret,
+    so compressing this one answer is safe; it is not compressed in general (see docs/COORDINATE_VALIDATION.md)."""
+    shapes = boundary_service.district_shapes()
+    if shapes is None:
+        return None
+    body = json.dumps(shapes, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return body, gzip.compress(body, compresslevel=9, mtime=0), '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+
+
+@router.get("/district-shapes")
+def district_shapes(
+    request: Request,
+    current_user: User = Depends(require_roles(RoleEnum.BOT_USER)),
+):
+    """
+    The outline of every district (National Bureau of Statistics, 2022 census), coarse enough to draw on a screen,
+    for the dashboard's Hazard Summary map. It carries no institution or loan data. The same answer every time, so the
+    browser may keep it for a day and asks again only when the file changes (ETag).
+    """
+    cached = _district_shapes_body()
+    if cached is None:
+        raise HTTPException(status_code=404, detail="District outlines are not available")
+    plain, packed, etag = cached
+    gzip_ok = "gzip" in request.headers.get("accept-encoding", "").lower()
+    etag = etag[:-1] + '-gz"' if gzip_ok else etag
+    headers = {"ETag": etag, "Cache-Control": "private, max-age=86400", "Vary": "Accept-Encoding"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    if gzip_ok:
+        headers["Content-Encoding"] = "gzip"
+    return Response(content=packed if gzip_ok else plain, media_type="application/json", headers=headers)
 
 
 @router.get("/climate-trends", response_model=list[ClimateTrendPoint])

@@ -1,6 +1,7 @@
 import { useRef, useState, ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { signInPath } from '../portal'
 import NotificationBell from './NotificationBell'
 import botLogo from '../assets/bot_logo.png'
 import botLogoSquarePale from '../assets/bot_logo_square_pale.png'
@@ -46,8 +47,9 @@ export default function PortalShell({
   const edgeTabRef = useRef<HTMLDivElement>(null)
 
   function handleLogout() {
+    const door = signInPath()          // read before logout, which does not forget the door
     logout()
-    navigate('/login')
+    navigate(door)
   }
 
   function handleNavItemClick(onClick: () => void) {

@@ -8,6 +8,7 @@ import PagerBar from '../components/PagerBar'
 import IntegrationAccess from '../components/IntegrationAccess'
 import PortfolioCharts from '../components/PortfolioCharts'
 import HazardSummary from '../components/HazardSummary'
+import { useBusy } from '../hooks/useBusy'
 
 // Rows and findings of a submission are shown this many at a time (see PagerBar).
 const DETAIL_PAGE = 50
@@ -256,6 +257,7 @@ export default function InternalPortal() {
   const [selectedSubmission, setSelectedSubmission] = useState<{ submission: Submission; errors: ValidationErrorItem[]; records: SubmissionRecordItem[]; recordsTotal: number; errorsTotal: number; recordOffset: number; errorOffset: number } | null>(null)
   const [reportGenerating, setReportGenerating] = useState(false)
   const [reportMessage, setReportMessage] = useState<string | null>(null)
+  const { run, isBusy } = useBusy()
   const [riskAdvisories, setRiskAdvisories] = useState<RiskAdvisory[]>([])
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)
   const [advisoryForm, setAdvisoryForm] = useState({
@@ -743,8 +745,11 @@ export default function InternalPortal() {
     { key: 'summary-figures', icon: '🔢', label: 'Summary Figures', onClick: () => scrollTo('kpi-section') },
     { key: 'portfolio', icon: '📈', label: 'Loan & Collateral Charts', onClick: () => scrollTo('portfolio-section') },
     { key: 'map', icon: '🗺️', label: 'Geospatial Map', onClick: () => scrollTo('map-section') },
+    { key: 'hazard-summary', icon: '🌡️', label: 'Climate Data — Hazard Summary', onClick: () => scrollTo('hazard-summary-section') },
     { key: 'climate', icon: '🌦️', label: 'Climate & Hazard Data', onClick: () => scrollTo('hazard-section') },
     { key: 'quality', icon: '📋', label: 'Climate Data Quality', onClick: () => scrollTo('quality-section') },
+    { key: 'ingest', icon: '📥', label: 'Ingest Climate Observations', onClick: () => scrollTo('ingest-section') },
+    { key: 'qc-review', icon: '✅', label: 'Climate Readings Review', onClick: () => scrollTo('qc-review-section') },
     { key: 'status-dist', icon: '📊', label: 'Submission Status Distribution', onClick: () => scrollTo('status-distribution-section') },
     { key: 'combined', icon: '🔗', label: 'Combined Climate-Financial', onClick: () => scrollTo('combined-section') },
     { key: 'risk', icon: '🧭', label: 'Risk Advisory Reports', onClick: () => scrollTo('risk-advisory-section') },
@@ -786,7 +791,7 @@ export default function InternalPortal() {
           </button>
           <button onClick={handleGenerateReportExcel} disabled={reportGenerating}>Generate Summary Report (Excel)</button>
           <button onClick={handleGenerateReportImage} disabled={reportGenerating}>Generate Summary Snapshot (Image)</button>
-          <button onClick={handleDownloadCombinedCsv}>Download Combined Exposure (CSV)</button>
+          <button disabled={isBusy('combined-csv')} aria-busy={isBusy('combined-csv')} onClick={() => run('combined-csv', () => handleDownloadCombinedCsv().catch(() => setReportMessage('The download failed. Please try again.')))}>{isBusy('combined-csv') ? 'Preparing...' : 'Download Combined Exposure (CSV)'}</button>
           <button
             onClick={() => { setSummaryText(buildSupervisorySummary()); setSummaryCopied(false); setSummaryOpen(true) }}
             style={{ gridColumn: '1 / -1', width: '100%' }}
@@ -1087,7 +1092,7 @@ export default function InternalPortal() {
           </p>
         )}
 
-        <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.4rem' }}>Ingest Climate Observations (Interim Bridge)</h3>
+        <h3 id="ingest-section" style={{ fontSize: '0.88rem', margin: '1rem 0 0.4rem' }}>Ingest Climate Observations (Interim Bridge)</h3>
         <p className="note">
           Upload a .csv or .xlsx of climate observations (region, year, month, rainfall_mm,
           avg_temperature_c, etc.). <strong>This is a temporary manual bridge, not the official
@@ -1124,7 +1129,7 @@ export default function InternalPortal() {
         </form>
         {climateUploadMessage && <div className="alert-info" style={{ marginTop: '0.5rem' }}>{climateUploadMessage}</div>}
 
-        <h3 style={{ fontSize: '0.88rem', margin: '1rem 0 0.4rem' }}>Climate Quality Control — Readings Awaiting Review</h3>
+        <h3 id="qc-review-section" style={{ fontSize: '0.88rem', margin: '1rem 0 0.4rem' }}>Climate Quality Control — Readings Awaiting Review</h3>
         <p className="note">
           A human review action: mark all UNVALIDATED readings for a region/period as VALIDATED
           (fit to inform official analytics and Risk Advisory Notes) or FLAGGED (rejected -
@@ -1151,10 +1156,10 @@ export default function InternalPortal() {
                 </td>
                 <td>
                   <div className="button-row">
-                    <button className="btn-sm btn-success" onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'VALIDATED')}>
+                    <button className="btn-sm btn-success" disabled={isBusy(`qc-${g.region}-${g.reporting_period}`)} onClick={() => run(`qc-${g.region}-${g.reporting_period}`, () => handlePromoteClimateGroup(g.region, g.reporting_period, 'VALIDATED'))}>
                       ✓ Validate
                     </button>
-                    <button className="btn-sm btn-danger" onClick={() => handlePromoteClimateGroup(g.region, g.reporting_period, 'FLAGGED')}>
+                    <button className="btn-sm btn-danger" disabled={isBusy(`qc-${g.region}-${g.reporting_period}`)} onClick={() => run(`qc-${g.region}-${g.reporting_period}`, () => handlePromoteClimateGroup(g.region, g.reporting_period, 'FLAGGED'))}>
                       ✕ Flag as Bad Data
                     </button>
                   </div>
@@ -1414,22 +1419,22 @@ export default function InternalPortal() {
                   <td>
                     {['APPROVED', 'REJECTED', 'SUPERSEDED'].includes(s.status) ? (
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
-                        <button className="btn-sm" onClick={() => viewSubmissionDetails(s.id)}>View Details</button>
+                        <button className="btn-sm" disabled={isBusy(`view-${s.id}`)} onClick={() => run(`view-${s.id}`, () => viewSubmissionDetails(s.id))}>{isBusy(`view-${s.id}`) ? 'Opening...' : 'View Details'}</button>
                         <span className="note" style={{ fontStyle: 'italic', gridColumn: '2 / 3' }}>
                           Already {s.status === 'APPROVED' ? 'Approved✅' : s.status === 'REJECTED' ? 'Rejected❌' : s.status.toLowerCase()} - final.
                         </span>
                       </div>
                     ) : (
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
-                        <button className="btn-sm" onClick={() => viewSubmissionDetails(s.id)}>View Details</button>
-                        <button className="btn-sm" onClick={() => handleReview(s.id, 'APPROVE')}>Approve</button>
+                        <button className="btn-sm" disabled={isBusy(`view-${s.id}`)} onClick={() => run(`view-${s.id}`, () => viewSubmissionDetails(s.id))}>{isBusy(`view-${s.id}`) ? 'Opening...' : 'View Details'}</button>
+                        <button className="btn-sm" disabled={isBusy(`review-${s.id}`)} onClick={() => run(`review-${s.id}`, () => handleReview(s.id, 'APPROVE'))}>Approve</button>
                         <input
                           type="text"
                           placeholder="Notes (optional)"
                           value={notesById[s.id] || ''}
                           onChange={(e) => setNotesById({ ...notesById, [s.id]: e.target.value })}
                         />
-                        <button className="btn-sm" onClick={() => handleReview(s.id, 'REJECT')}>Reject</button>
+                        <button className="btn-sm" disabled={isBusy(`review-${s.id}`)} onClick={() => run(`review-${s.id}`, () => handleReview(s.id, 'REJECT'))}>Reject</button>
                       </div>
                     )}
                   </td>
@@ -1530,8 +1535,8 @@ export default function InternalPortal() {
                   onChange={(e) => setNotesById({ ...notesById, [selectedSubmission.submission.id]: e.target.value })}
                   style={{ minWidth: 180 }}
                 />
-                <button className="btn-success" onClick={() => handleReview(selectedSubmission.submission.id, 'APPROVE')}>Approve</button>
-                <button className="btn-danger" onClick={() => handleReview(selectedSubmission.submission.id, 'REJECT')}>Reject</button>
+                <button className="btn-success" disabled={isBusy('review-open')} onClick={() => run('review-open', () => handleReview(selectedSubmission.submission.id, 'APPROVE'))}>{isBusy('review-open') ? 'Working...' : 'Approve'}</button>
+                <button className="btn-danger" disabled={isBusy('review-open')} onClick={() => run('review-open', () => handleReview(selectedSubmission.submission.id, 'REJECT'))}>Reject</button>
               </>
             )}
             <button className="btn-secondary" onClick={() => setSelectedSubmission(null)}>Close</button>

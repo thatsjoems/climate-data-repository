@@ -4110,3 +4110,63 @@ Tests: `RecoveryCodesCard.test.tsx` (nothing is shown without two-step sign-in; 
 
 **Verified here.** The service was run against the real data: the Katavi-under-Morogoro case, district and ward mismatches, the sea, the tolerance and the hints; 6,000 checks took 0.46 s (0.08 ms each) with 27 MB of memory; the upload validation was run on real Excel files for the same cases; 27 of the 28 tests were run with a small stand-in for the test fixtures. **Not verified here (no database, no `sqlalchemy`, no `pytest`):** the one test that uploads through the API, and the whole suite. It should now collect **777** tests (749 before, 28 new).
 
+## Ninety-seventh item - District colour map in the Hazard Summary
+
+**Requirement.** Concept Note, Figure 3: districts of Tanzania coloured by hazard severity, for BOT analysts.
+
+**Implemented.** A plain-SVG map (no map tiles, nothing requested from outside) in the Hazard Summary, with `GET /api/analytics/district-shapes` (BOT_USER only, ETag, one-day private cache, gzip for this static answer only), 150 district outlines with borders from the NBS ward file, `map_key` on each district of the summary, legend that says uncoloured means "no reading" and not "safe", hover and touch readout, text description, the table kept as the alternative, a note for districts the map cannot place, and a "map not available" message while the table keeps working. See `docs/DISTRICT_MAP.md`.
+
+**Tests.** `test_district_shapes.py` (12), `DistrictMap.test.tsx` (7), `HazardSummary.test.tsx` (13).
+
+**Not verified here (no database, no node packages in this workspace).** The data, the border finder and the key matching were run on the real file; the page look was checked by rendering the real outlines to an image. The backend and frontend test suites must be run by the owner (expected frontend: 60 tests in 9 files).
+
+## Ninety-eighth item - Known-vulnerability scan and dependency upgrades
+
+**Verification of the previous package (owner's runs, 10 October 2026).** Backend **787 passed, 2 skipped**; frontend **60 passed** (9 files); production updated with `prod_up`, `system_check.py` OK with an off-machine copy; the district map shown with all colours.
+
+**Finding.** `pip-audit` reported 72 findings in 7 packages (starlette, pillow, python-multipart, python-jose, python-dotenv, pytest, ecdsa); `npm audit` reported 2 moderate findings (react-router).
+
+**Done.** `requirements.txt` moved to FastAPI 0.143.0 with Starlette 1.7.0 (now pinned), python-jose 3.5.0, python-multipart 0.0.32, Pillow 12.3.0, python-dotenv 1.2.4, pytest 9.1.1; the set was resolved by `pip` in a throwaway container. A "Dependency audit" job was added to CI. `docs/DEPENDENCY_SECURITY.md` records the two unfixable Python findings and the react-router findings as accepted, with reasons.
+
+**Not verified here.** No package index could be reached from this workspace, so the upgraded set was not run here. It is verified by the owner's runs: a full image rebuild, then the backend and frontend test suites.
+
+
+
+**Result of the owner's run after the upgrade.** 798 passed, 2 failed, 2 skipped. (1) A test of the district outlines expected the `Vary` header to be exactly `Accept-Encoding`; Starlette now also adds `Origin` for CORS, so the test checks that `Accept-Encoding` is present. (2) The general rate limit was not applied any more (see `DEPENDENCY_SECURITY.md`, "What the upgrade exposed"): fixed by applying it as an application-wide dependency.
+
+**Verification after the fix (owner's runs, 11 October 2026).** Backend **800 passed, 2 skipped, 0 failed**. The second `pip-audit` found one new item, python-jose CVE-2026-85394 (algorithm confusion); it does not apply because tokens are checked with one shared secret and an explicit `algorithms=["HS256"]`; it is listed as accepted in `DEPENDENCY_SECURITY.md` and in the CI ignore list.
+
+
+## Ninety-ninth item - Sign-in tokens out of browser storage (observation O2)
+
+**Requirement.** A cross-site-scripting flaw must not be able to steal a long-lived sign-in.
+
+**Done.** The refresh token is set by the server as an `HttpOnly`, `SameSite=Strict` cookie (`Secure` in production) limited to `/api/auth`; sign-in and two-step responses no longer return it. The access token (15 minutes) is held in page memory only. `/auth/refresh` and `/auth/logout` read the cookie and require the header `X-CDR-Client: web`. On reload the page asks for a new access token if the non-secret hint `cdr_session` is present; refresh is serialised across tabs (Web Locks). Legacy keys `cdr_token`, `cdr_refresh_token`, `cdr_user` are deleted at start-up: **everyone signs in once after this update.**
+
+**Verification.** Backend tests (`test_refresh_tokens.py` and four updated files) and frontend tests (`client.test.ts`, `AuthContext.test.tsx`, `ProtectedRoute.test.tsx`) are written; **not run here** (no package index). To be verified by the owner's runs and the browser checklist.
+
+## One-hundredth item - Every user-facing feature is in the navigation menu
+
+**Requirement.** Every feature a user works with must be reachable from the navigation menu.
+
+**Done.** The analyst menu gained "Climate Data — Hazard Summary", "Ingest Climate Observations" and "Climate Readings Review"; the administrator menu gained "User List" and "Institution List" (the two existing entries were renamed "Add Institution" and "Add User", which is what they open). The institution menu was already complete. A test (`pages/navigation.test.ts`) fails if a menu entry points at a section that does not exist, or if the entries above are removed.
+
+**Not verified here.** The frontend tests cannot run in this workspace; they are verified by the owner's run.
+
+## One-hundred-and-first item - Buttons answer at once
+
+**Requirement.** Every button must respond immediately when it is pressed.
+
+**Done.** (1) A thin progress bar at the top of the page appears whenever the browser is waiting for the server (`RequestProgress`, fed by a count in `api/client.ts`; drawn only after 150 ms so quick answers do not flicker; reduced-motion respected). (2) Every button that calls the server now switches to a disabled "Working..." state the moment it is pressed and ignores a second click (`hooks/useBusy.ts`): downloads and exports, adding a user or an institution, approving or rejecting a password reset or a submission, validating or flagging climate readings, opening a submission, activating or deactivating a user, resetting two-step sign-in. A failed download now shows a message instead of failing silently. Buttons that already had this (sign-in, upload, reports, key creation, status check) were left as they were.
+
+**Limit.** This makes the page respond at once; it does not make the server faster. How long an answer takes is measured by the load test (`docs/LOAD_TESTING.md`).
+
+**Not verified here.** Frontend tests cannot run in this workspace (`useBusy.test.tsx`, additions to `client.test.ts`); the owner's run verifies them.
+
+## One-hundred-and-second item - Place names: a duplicate district removed, differences listed
+
+**Finding.** The repository's geography list held 151 districts because of a lower-case duplicate, `korogwe` (ward Manundu, village Mbeza), beside `Korogwe`, which already holds both. The district list therefore showed Korogwe twice. The NBS file and the corrected list both have 150.
+
+**Done.** The duplicate was removed (150 districts, 4,341 wards, 19,945 villages); `test_geo_lookup.py` and `test_boundaries.py` were updated and a test added that no two districts of a region differ only by capitals or spacing; `backend/scripts/name_differences.py` lists the 27 ward names that differ from the NBS file, each with a suggested spelling (`docs/WARD_NAME_DIFFERENCES.csv`, explained in `docs/WARD_NAME_DIFFERENCES.md`). Nothing else in the data was changed; the choice of official spelling is the Bank's.
+
+**Not verified here.** The backend tests cannot run in this workspace; the owner's run verifies them.

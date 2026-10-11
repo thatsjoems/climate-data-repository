@@ -101,6 +101,7 @@ p { line-height: 1.5; }
 label, .label, small { font-size: 0.8rem; color: var(--color-muted); font-weight: 500; }
 
 .app-shell { min-height: 100vh; }
+.loading-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 0.95rem; }
 
 /* ---------------- DASHBOARD LAYOUT (sidebar + topbar + content) ---------------- */
 .dashboard-shell {
@@ -509,6 +510,11 @@ button {
 button:hover { background: var(--gold-gradient-hover); }
 button:active { transform: translateY(1px); }
 button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+button[aria-busy='true'] { cursor: progress; }
+.request-progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 9999; overflow: hidden; background: rgba(0,0,0,0.06); pointer-events: none; }
+.request-progress::after { content: ''; position: absolute; top: 0; bottom: 0; width: 35%; background: var(--color-accent, #b8860b); animation: request-progress-slide 1s ease-in-out infinite; }
+@keyframes request-progress-slide { 0% { left: -35%; } 100% { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .request-progress::after { animation: none; width: 100%; opacity: 0.6; } }
 button.btn-gold { background: var(--gold-gradient); color: var(--color-primary); }
 button.btn-gold:hover { background: var(--gold-gradient-hover); }
 
@@ -606,6 +612,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .login-notice strong { display: block; font-size: 0.8rem; color: var(--color-primary); margin-bottom: 0.25rem; }
 .login-notice p { margin: 0; font-size: 0.72rem; color: var(--color-muted); line-height: 1.4; }
+
+.login-badge {
+  display: inline-block; margin: -0.8rem auto 1.1rem; padding: 0.2rem 0.7rem; border-radius: 999px;
+  background: var(--color-primary); color: #FFFFFF; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase;
+}
+/* The staff door looks different on purpose: darker, cooler, so nobody mistakes it for the institutions' page. */
+.login-page--internal {
+  background: radial-gradient(circle at 15% 15%, #1F3A4D 0%, transparent 45%),
+              radial-gradient(circle at 80% 90%, #0B1F2E 0%, transparent 55%),
+              linear-gradient(150deg, #06121B 0%, #0B1F2E 55%, #14303F 100%);
+}
+.login-page--internal .login-card { border-top: 3px solid #5B8FB0; }
+.login-page--internal .login-subtitle { color: #2F6A8F; }
 
 .login-footer { text-align: center; font-size: 0.68rem; color: var(--color-muted); margin: 1.2rem 0 0; }
 

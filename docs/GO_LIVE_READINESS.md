@@ -13,6 +13,10 @@ Measured against the Concept Note timeline: Phase I (development, security confi
 | Export: PDF, Excel (now with a Portfolio Breakdown sheet), CSV, PNG | Built |
 | QGIS / ArcGIS access (read-only keys, GeoJSON) and live Connected/Not Connected status in the sidebar | Built; not yet run against a live Bank server |
 | RTIS / BSIS connection status and health check | Built; data exchange not built |
+| Dependency scan (11 Oct 2026): vulnerable packages upgraded and pinned, the scan repeated in CI, two accepted findings explained | Built (`DEPENDENCY_SECURITY.md`) |
+| Hazard Summary with the district colour map (no map tiles, so it also works on a closed network) | Built (`DISTRICT_MAP.md`) |
+| Sign-in tokens out of browser storage (observation O2): refresh token in an HttpOnly cookie, access token in page memory only | Built and checked on production (`PENTEST_CHECKLIST.md`) |
+| Navigation menu reaches every feature of each role; every button that calls the server answers at once and cannot be pressed twice; thin progress bar while waiting | Built (`ICN_REQUIREMENTS_TRACEABILITY_MATRIX.md`, items 100 and 101) |
 | Production stack (HTTPS, restricted database role, backups, monitoring, container hardening) and the pre-start configuration checker | Built |
 
 ## Needs the Bank (cannot be done in code)
@@ -27,10 +31,10 @@ Measured against the Concept Note timeline: Phase I (development, security confi
 | 6 | **Decision on map tiles** (observation O11): OpenStreetMap is contacted by the browser | BOT ICT | Closed networks show a blank map. Needs an approved tile source. |
 | 7 | **User acceptance testing** with FSD business users, and fixes from it | FSD + development | Phase I, activity 3. |
 | 8 | **Independent penetration test** using `docs/PENTEST_CHECKLIST.md`, and fixing its findings | BOT ICT security | The system has not been tested by anyone independent. |
-| 9 | Decisions on observations O2 (tokens in browser storage), O9 (one large upload slows others), O10 (read-only file system) | BOT ICT | Each is a documented, accepted-or-not risk. |
+| 9 | Decisions on observations O9 (one large upload slows others), O10 (read-only file system) | BOT ICT | Each is a documented, accepted-or-not risk. (O2, tokens in browser storage, was fixed: HttpOnly cookie.) |
 | 10 | Phase II: focal persons from each bank, accounts, training, pilot submissions | FSD | Not a software task. |
-| 11 | **Sources for the rest of the Hazard Summary panel** (`HAZARD_SUMMARY.md`): district boundaries for a colour map, population per district for "affected population" and a rule for what "affected" means, and whether five severity grades are wanted instead of three | BOT ICT + TMA/PMO | Until decided, the panel shows districts, severity and readings from recorded data only, and shows no population. |
-| 12 | **Boundary data for coordinate checks** (`COORDINATE_VALIDATION.md`): confirm with NBS that the ward boundaries may be embedded (the page states no licence); reconcile the ward names (9 in the repository's list not found, 47 in the NBS file not in the list); confirm 150 or 151 districts; decide when a newer boundary file replaces this one | BOT ICT + NBS | Until confirmed, the system uses the NBS public download as published. |
+| 11 | **Sources for the rest of the Hazard Summary panel** (`HAZARD_SUMMARY.md`; the district colour map is built, see `DISTRICT_MAP.md`): population per district for "affected population" and a rule for what "affected" means, and whether five severity grades are wanted instead of three | BOT ICT + TMA/PMO | Until decided, the panel shows the district map, severity and readings from recorded data only, and shows no population. |
+| 12 | **Boundary data for coordinate checks** (`COORDINATE_VALIDATION.md`): confirm with NBS that the ward boundaries may be embedded (the page states no licence); choose the official spelling of 27 ward names (`WARD_NAME_DIFFERENCES.csv` lists each with a suggestion); confirm that 150 districts is right (the former 151st in our list was a duplicate and is removed); decide when a newer boundary file replaces this one | BOT ICT + NBS | Until confirmed, the system uses the NBS public download as published. |
 
 ## Run these before declaring Phase I complete
 
@@ -44,3 +48,11 @@ python scripts/prod_ops.py backup && python scripts/prod_ops.py drill   # a back
 ```
 
 Then follow section 3a of `PENTEST_CHECKLIST.md` (Content-Security-Policy check in a browser), and click through every dashboard chart and the drill-down with a BOT analyst account on staging.
+
+## Verified on 11 October 2026 (owner's runs)
+
+Backend **804 passed, 2 skipped**; frontend **94 passed** (13 files); production updated with `prod_up`, `system_check` OK with an off-machine copy; sign-in cookie checked on production (HttpOnly and Secure, no token in local storage, the session survives a reload).
+
+## Still open on our side (no Bank input needed)
+
+Load test on staging; restore drill and agreed RPO/RTO; a one-page request document for the Bank; a report of the district and ward name differences; the react-router 7 upgrade; the Shapefile ZIP upload and the Concept Note's 50 MB limit (today: Excel and CSV only, 20 MB; see `ICN_REQUIREMENTS_TRACEABILITY_MATRIX.md`, item 5).

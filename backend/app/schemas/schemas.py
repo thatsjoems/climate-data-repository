@@ -14,6 +14,8 @@ from app.models.models import RoleEnum, SubmissionStatus, InstitutionType, RiskL
 class LoginRequest(BaseModel):
     username: str
     password: str
+    # Which sign-in page this came from: "internal" (Bank staff) or "external" (institutions). Absent = not restricted (see app/core/portal.py).
+    portal: Optional[Literal["internal", "external"]] = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -28,7 +30,7 @@ class TokenResponse(BaseModel):
     `mfa_token` that only the MFA endpoints accept. `recovery_codes` appears once, on enrolment.
     """
     access_token: Optional[str] = None
-    refresh_token: Optional[str] = None
+    refresh_token: Optional[str] = None      # always None now: the refresh token is set as an HttpOnly cookie (app/core/session_cookie.py)
     token_type: str = "bearer"
     user: Optional["UserOut"] = None
     mfa_required: bool = False
@@ -37,14 +39,11 @@ class TokenResponse(BaseModel):
     recovery_codes: Optional[list[str]] = None
 
 
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
 class AccessTokenResponse(BaseModel):
+    """What a refresh answers: a new access token and the person (so a reloaded page knows who is signed in). The new refresh token is in the cookie."""
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
+    user: Optional["UserOut"] = None
 
 
 # ---------- INSTITUTION ----------
@@ -107,6 +106,7 @@ class UserOut(BaseModel):
 
 
 TokenResponse.model_rebuild()
+AccessTokenResponse.model_rebuild()
 
 
 # ---------- SUBMISSION ----------
@@ -234,6 +234,7 @@ class HazardSummaryDistrict(BaseModel):
     district: str
     readings: int
     highest_severity: Optional[str] = None   # LOW, MEDIUM or HIGH; None when no reading of the district was graded
+    map_key: Optional[str] = None            # ties the district to its outline in /analytics/district-shapes; None = no outline for this name
 
 
 class HazardSummaryOut(BaseModel):

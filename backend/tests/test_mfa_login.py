@@ -59,7 +59,8 @@ def _wrong_code(secret, clock):
 # ------------------------------------------------------------------ who has to use it
 def test_without_the_requirement_a_bot_analyst_signs_in_as_before(client, db_session):
     body = login(client, _bot(db_session)).json()
-    assert body["access_token"] and body["refresh_token"] and not body["mfa_required"] and not body["mfa_setup_required"]
+    assert body["access_token"] and not body["mfa_required"] and not body["mfa_setup_required"]
+    assert body["refresh_token"] is None and client.cookies.get("cdr_refresh")      # the refresh token is in the HttpOnly cookie, not in the answer
 
 
 @pytest.mark.parametrize("role", [RoleEnum.BOT_USER, RoleEnum.SYSTEM_ADMIN])

@@ -19,7 +19,7 @@ from app.core.rate_limit import GENERAL_LIMIT, caller_key, limiter
 from app.core.security import create_access_token
 from app.main import app
 from app.models.models import RoleEnum
-from tests.conftest import auth_header, login, make_user
+from tests.conftest import WEB, auth_header, login, make_user
 
 
 class _ConnectsFrom:
@@ -80,7 +80,7 @@ def test_password_reset_requests_are_limited_per_address(office):
 
 
 def test_token_refresh_is_limited_per_address(office):
-    codes = [office.post("/api/auth/refresh", json={"refresh_token": "not-a-real-token"}).status_code for _ in range(31)]
+    codes = [office.post("/api/auth/refresh", headers=WEB).status_code for _ in range(31)]
     assert codes[:30] == [401] * 30 and codes[30] == 429
 
 

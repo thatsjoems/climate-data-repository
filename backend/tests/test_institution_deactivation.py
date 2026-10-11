@@ -14,7 +14,7 @@ from app.core.account_status import (
     authentication_block_reason,
 )
 from app.models.models import AuditLog, PasswordResetRequest, RoleEnum
-from tests.conftest import auth_header, login, make_institution, make_user
+from tests.conftest import WEB, auth_header, login, make_institution, make_user
 
 
 def _admin_token(client, db_session):
@@ -77,11 +77,11 @@ def test_an_already_issued_access_token_stops_working(client, db_session):
 def test_a_refresh_token_is_refused(client, db_session):
     inst = make_institution(db_session)
     make_user(db_session, institution=inst, username="teller")
-    refresh = login(client, "teller").json()["refresh_token"]
+    assert login(client, "teller").status_code == 200                  # the refresh token is now in the browser's cookie
 
     inst.is_active = False
     db_session.commit()
-    res = client.post("/api/auth/refresh", json={"refresh_token": refresh})
+    res = client.post("/api/auth/refresh", headers=WEB)
     assert res.status_code == 401
 
 

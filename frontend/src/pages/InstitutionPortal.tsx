@@ -1,4 +1,5 @@
 import { useEffect, useState, FormEvent } from 'react'
+import { useBusy } from '../hooks/useBusy'
 import apiClient from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import PortalShell, { SidebarItem } from '../components/PortalShell'
@@ -75,6 +76,8 @@ export default function InstitutionPortal() {
   const [reportingPeriod, setReportingPeriod] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
+  const { run, isBusy } = useBusy()
+  const downloadFailed = () => setUploadMessage('The download failed. Please try again.')
   const [uploadMessage, setUploadMessage] = useState<string | null>(null)
   const [selected, setSelected] = useState<{ submission: Submission; errors: ValidationErrorItem[]; records: SubmissionRecordItem[]; recordsTotal: number; errorsTotal: number; recordOffset: number; errorOffset: number } | null>(null)
 
@@ -228,7 +231,7 @@ export default function InstitutionPortal() {
           <div className="action-card-icon" style={{ background: '#E6F1FB', color: '#185FA5' }}>📥</div>
           <h3>Download Template</h3>
           <p>Download the official standardized template for reporting loan and collateral data.</p>
-          <button className="btn-accent" onClick={handleDownloadTemplate}>Download Template</button>
+          <button className="btn-accent" disabled={isBusy('template')} aria-busy={isBusy('template')} onClick={() => run('template', () => handleDownloadTemplate().catch(downloadFailed))}>{isBusy('template') ? 'Preparing...' : 'Download Template'}</button>
         </div>
 
         <div className="action-card" id="upload-card">
@@ -283,8 +286,8 @@ export default function InstitutionPortal() {
                 <td>{new Date(s.created_at).toLocaleString()}</td>
                 <td>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                    <button onClick={() => viewDetails(s.id)}>Review</button>
-                    <button onClick={() => handleDownloadSubmission(s.id, s.file_name)}>Download</button>
+                    <button disabled={isBusy(`view-${s.id}`)} onClick={() => run(`view-${s.id}`, () => viewDetails(s.id))}>{isBusy(`view-${s.id}`) ? 'Opening...' : 'Review'}</button>
+                    <button disabled={isBusy(`dl-${s.id}`)} onClick={() => run(`dl-${s.id}`, () => handleDownloadSubmission(s.id, s.file_name).catch(downloadFailed))}>{isBusy(`dl-${s.id}`) ? '...' : 'Download'}</button>
                   </div>
                 </td>
               </tr>
@@ -294,7 +297,7 @@ export default function InstitutionPortal() {
             )}
           </tbody>
         </table>
-        <button onClick={handleExportHistory} style={{ marginTop: '0.9rem' }}>Export Submission History (CSV)</button>
+        <button disabled={isBusy('history')} aria-busy={isBusy('history')} onClick={() => run('history', () => handleExportHistory().catch(downloadFailed))} style={{ marginTop: '0.9rem' }}>{isBusy('history') ? 'Preparing...' : 'Export Submission History (CSV)'}</button>
       </section>
 
       {selected && (
@@ -363,7 +366,7 @@ export default function InstitutionPortal() {
             </table>
           )}
           <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
-            <button onClick={() => handleDownloadSubmission(selected.submission.id, selected.submission.file_name)}>
+            <button disabled={isBusy('dl-selected')} onClick={() => run('dl-selected', () => handleDownloadSubmission(selected.submission.id, selected.submission.file_name).catch(downloadFailed))}>
               Download This File
             </button>
             <button className="btn-secondary" onClick={() => setSelected(null)}>Close</button>

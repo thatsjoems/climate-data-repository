@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, ReactNode } from 'react'
-import apiClient from '../api/client'
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import apiClient, { WEB_CLIENT_HEADERS, hasSessionHint, refreshSession, setAccessToken, setSessionHint } from '../api/client'
+import { Portal, portalOfRole, rememberPortal } from '../portal'
 
 export interface CurrentUser {
   id: string
@@ -36,12 +37,13 @@ export interface PendingSession {
 
 interface AuthContextType {
   user: CurrentUser | null
-  login: (username: string, password: string) => Promise<SignInResult>
+  login: (username: string, password: string, portal?: Portal) => Promise<SignInResult>
   verifyCode: (mfaToken: string, entry: { code?: string; recoveryCode?: string }) => Promise<void>
   beginMfaSetup: (mfaToken: string) => Promise<SetupInfo>
   confirmMfaSetup: (mfaToken: string, code: string) => Promise<PendingSession>
   logout: () => void
   refreshUser: () => Promise<void>
+  ready: boolean          // false only while a reloaded page is asking the server whether the person is still signed in
   isLoading: boolean
   error: string | null
 }
@@ -49,25 +51,39 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<CurrentUser | null>(() => {
-    const stored = localStorage.getItem('cdr_user')
-    return stored ? JSON.parse(stored) : null
-  })
+  // Nothing about the session is kept in the browser's storage (observation O2). A page that is opened or reloaded asks the server, which answers from
+  // the HttpOnly refresh cookie: a new access token (kept in memory) and who the person is.
+  const [user, setUser] = useState<CurrentUser | null>(null)
+  const [ready, setReady] = useState<boolean>(() => !hasSessionHint())
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  useEffect(() => {
+    if (ready) return
+    let cancelled = false
+    refreshSession()
+      .then((session) => {
+        if (cancelled) return
+        rememberPortal(portalOfRole(session.user.role))
+        setUser(session.user)
+      })
+      .catch(() => { setSessionHint(false) })        // no valid session any more: the person signs in again
+      .finally(() => { if (!cancelled) setReady(true) })
+    return () => { cancelled = true }
+  }, [])        // eslint-disable-line react-hooks/exhaustive-deps
+
   function commitSession(data: any) {
-    localStorage.setItem('cdr_token', data.access_token)
-    localStorage.setItem('cdr_refresh_token', data.refresh_token)
-    localStorage.setItem('cdr_user', JSON.stringify(data.user))
+    setAccessToken(data.access_token)
+    setSessionHint(true)
+    rememberPortal(portalOfRole(data.user.role))
     setUser(data.user)
   }
 
-  async function login(username: string, password: string): Promise<SignInResult> {
+  async function login(username: string, password: string, portal?: Portal): Promise<SignInResult> {
     setIsLoading(true)
     setError(null)
     try {
-      const res = await apiClient.post('/auth/login', { username, password })
+      const res = await apiClient.post('/auth/login', portal ? { username, password, portal } : { username, password })
       if (res.data.access_token) {
         commitSession(res.data)
         return { status: 'done' }
@@ -104,27 +120,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function logout() {
-    // Best-effort server-side revocation of the refresh token (Module: session
-    // security) - fire-and-forget so logout still feels instant even if the
-    // network is slow; local session state is cleared immediately either way.
-    const refreshToken = localStorage.getItem('cdr_refresh_token')
-    if (refreshToken) {
-      apiClient.post('/auth/logout', { refresh_token: refreshToken }).catch(() => { /* already logging out locally regardless */ })
-    }
-    localStorage.removeItem('cdr_token')
-    localStorage.removeItem('cdr_refresh_token')
-    localStorage.removeItem('cdr_user')
+    // Server-side revocation of the refresh token, and the order to delete the cookie (Module: session security) - fire-and-forget so logout
+    // still feels instant even if the network is slow; local session state is cleared immediately either way.
+    apiClient.post('/auth/logout', null, { headers: WEB_CLIENT_HEADERS }).catch(() => { /* already logging out locally regardless */ })
+    setAccessToken(null)
+    setSessionHint(false)
     setUser(null)
   }
 
   async function refreshUser() {
     const res = await apiClient.get('/auth/me')
-    localStorage.setItem('cdr_user', JSON.stringify(res.data))
     setUser(res.data)
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, verifyCode, beginMfaSetup, confirmMfaSetup, logout, refreshUser, isLoading, error }}>
+    <AuthContext.Provider value={{ user, login, verifyCode, beginMfaSetup, confirmMfaSetup, logout, refreshUser, ready, isLoading, error }}>
       {children}
     </AuthContext.Provider>
   )

@@ -38,4 +38,22 @@ def test_region_district_ward_village_counts_are_stable():
     regions = geo.all_regions()
     assert len(regions) == 31
     total_districts = sum(len(geo.districts_for_region(r)) for r in regions)
-    assert total_districts == 151
+    assert total_districts == 150
+
+
+def test_no_two_districts_of_a_region_differ_only_by_capital_letters_or_spacing():
+    """The 151st district of an older copy of the data was a lower-case duplicate ("korogwe" beside "Korogwe"): the district list showed Korogwe twice."""
+    import re
+    for region in geo.all_regions():
+        seen = {}
+        for district in geo.districts_for_region(region):
+            key = re.sub(r"[^a-z0-9]", "", district.lower())
+            assert key not in seen, f"{region}: {district!r} and {seen[key]!r} are the same district"
+            seen[key] = district
+
+
+def test_korogwe_is_one_district_and_keeps_its_ward_manundu_with_its_villages():
+    assert "korogwe" not in geo.districts_for_region("Tanga")
+    assert geo.districts_for_region("Tanga").count("Korogwe") == 1
+    assert "Manundu" in geo.wards_for_district("Tanga", "Korogwe")
+    assert "Mbeza" in geo.villages_for_ward("Tanga", "Korogwe", "Manundu")

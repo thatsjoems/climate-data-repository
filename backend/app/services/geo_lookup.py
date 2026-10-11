@@ -7,7 +7,9 @@ ward-level units) - both provided directly by the user as the authoritative
 source, NOT derived from Wikipedia or any secondary source. This replaces
 the earlier, less granular region/district-only reference.
 
-31 regions, 151 districts, 4,342 wards/shehia, 19,946 villages/mitaa/shehia.
+31 regions, 150 districts, 4,341 wards/shehia, 19,945 villages/mitaa/shehia.
+(An earlier copy of the file held a 151st "district": a lower-case "korogwe" with the single ward Manundu, which Korogwe already has with the
+same village. It was removed on 11 October 2026; see docs/COORDINATE_VALIDATION.md.)
 """
 import json
 import re

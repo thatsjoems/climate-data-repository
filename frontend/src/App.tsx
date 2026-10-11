@@ -1,7 +1,9 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
+import RequestProgress from './components/RequestProgress'
 import Login from './pages/Login'
+import StaffLogin from './pages/StaffLogin'
 import ForgotPassword from './pages/ForgotPassword'
 import InstitutionPortal from './pages/InstitutionPortal'
 import InternalPortal from './pages/InternalPortal'
@@ -19,10 +21,14 @@ function HomeRouter() {
 }
 
 export default function App() {
+  const { ready } = useAuth()
+  if (ready === false) return <div className="loading-screen" role="status">Loading…</div>      // see AuthContext: the server is being asked whether the person is still signed in
   return (
     <div className="app-shell">
+      <RequestProgress />
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/staff/login" element={<StaffLogin />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route
           path="/"

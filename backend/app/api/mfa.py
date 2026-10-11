@@ -10,10 +10,11 @@ Wrong codes count towards the same lock-out as wrong passwords, so the second st
 from datetime import timedelta
 
 from cryptography.fernet import InvalidToken
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.auth import _issue_token_pair
+from app.core.session_cookie import set_refresh_cookie
 from app.core.account_status import authentication_block_reason
 from app.core.config import settings
 from app.core.database import get_db
@@ -63,13 +64,14 @@ def _count_failure(db: Session, user: User, what: str) -> None:
     db.commit()
 
 
-def _finish(db: Session, user: User, **extra) -> TokenResponse:
+def _finish(db: Session, user: User, response: Response, **extra) -> TokenResponse:
     user.failed_login_attempts = 0
     user.locked_until = None
     user.last_login_at = utcnow()
     db.commit()
     access, refresh = _issue_token_pair(db, user)
-    return TokenResponse(access_token=access, refresh_token=refresh, user=UserOut.model_validate(user), **extra)
+    set_refresh_cookie(response, refresh)             # HttpOnly cookie; the answer carries only the access token
+    return TokenResponse(access_token=access, user=UserOut.model_validate(user), **extra)
 
 
 def _secret_of(user: User) -> str:
@@ -82,7 +84,7 @@ def _secret_of(user: User) -> str:
 
 @router.post("/verify", response_model=TokenResponse)
 @limiter.limit("10/minute")
-def verify(request: Request, payload: MfaVerifyRequest, db: Session = Depends(get_db)):
+def verify(request: Request, http_response: Response, payload: MfaVerifyRequest, db: Session = Depends(get_db)):
     user = _user_for(db, payload.mfa_token, "mfa")
     if not user.mfa_enabled:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=EXPIRED)
@@ -104,7 +106,7 @@ def verify(request: Request, payload: MfaVerifyRequest, db: Session = Depends(ge
     else:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Enter the 6-digit code or a recovery code")
 
-    response = _finish(db, user)
+    response = _finish(db, user, http_response)
     record_audit(db, user.id, "LOGIN", "User", user.id, f"User {user.username} logged in (two-step)")
     if used_recovery:
         left = recovery_codes_left(user.mfa_recovery_hashes)
@@ -130,7 +132,7 @@ def begin_setup(request: Request, payload: MfaSetupRequest, db: Session = Depend
 
 @router.post("/setup/confirm", response_model=TokenResponse)
 @limiter.limit("10/minute")
-def confirm_setup(request: Request, payload: MfaConfirmRequest, db: Session = Depends(get_db)):
+def confirm_setup(request: Request, http_response: Response, payload: MfaConfirmRequest, db: Session = Depends(get_db)):
     user = _user_for(db, payload.mfa_token, "mfa_setup")
     if user.mfa_enabled or not user.mfa_secret_encrypted:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Start the set-up again")
@@ -143,7 +145,7 @@ def confirm_setup(request: Request, payload: MfaConfirmRequest, db: Session = De
     user.mfa_last_step = step
     user.mfa_enrolled_at = utcnow()
     user.mfa_recovery_hashes = hashes
-    response = _finish(db, user, recovery_codes=codes)
+    response = _finish(db, user, http_response, recovery_codes=codes)
     record_audit(db, user.id, "MFA_ENABLED", "User", user.id, f"Two-step sign-in set up for {user.username}")
     record_audit(db, user.id, "LOGIN", "User", user.id, f"User {user.username} logged in (two-step, first time)")
     return response

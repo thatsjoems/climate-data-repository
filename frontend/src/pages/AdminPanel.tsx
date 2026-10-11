@@ -4,6 +4,7 @@ import SystemStatus from '../components/SystemStatus'
 import { useAuth } from '../context/AuthContext'
 import PortalShell, { SidebarItem, PlatformStatus } from '../components/PortalShell'
 import IntegrationAccess from '../components/IntegrationAccess'
+import { useBusy } from '../hooks/useBusy'
 
 interface UserItem {
   id: string
@@ -55,6 +56,7 @@ export default function AdminPanel() {
   const [institutions, setInstitutions] = useState<InstitutionItem[]>([])
   const { user: me } = useAuth()
   const [message, setMessage] = useState<string | null>(null)
+  const { run, isBusy } = useBusy()
 
   const [newUser, setNewUser] = useState({
     full_name: '', username: '', email: '', password: '', role: 'INSTITUTION_USER', institution_id: '',
@@ -240,8 +242,10 @@ export default function AdminPanel() {
   const sidebarItems: SidebarItem[] = [
     { key: 'status', icon: '📊', label: 'System Status', active: true, onClick: () => scrollTo('status-section') },
     { key: 'resets', icon: '🔑', label: 'Password Resets', onClick: () => scrollTo('password-resets-card') },
-    { key: 'institutions', icon: '🏢', label: 'Institutions', onClick: () => scrollTo('institutions-card') },
-    { key: 'users', icon: '👥', label: 'Users', onClick: () => scrollTo('users-card') },
+    { key: 'institutions', icon: '🏢', label: 'Add Institution', onClick: () => scrollTo('institutions-card') },
+    { key: 'users', icon: '👥', label: 'Add User', onClick: () => scrollTo('users-card') },
+    { key: 'user-list', icon: '👥', label: 'User List', onClick: () => scrollTo('user-list-card') },
+    { key: 'institution-list', icon: '🏛️', label: 'Institution List', onClick: () => scrollTo('institution-list-card') },
     { key: 'audit', icon: '🧾', label: 'Audit Log', onClick: () => scrollTo('audit-card') },
     { key: 'integration', icon: '🔌', label: 'Integration Access', onClick: () => scrollTo('integration-section') },
   ]
@@ -297,8 +301,8 @@ export default function AdminPanel() {
                 <td><span className="badge badge-pending">Pending</span></td>
                 <td>
                   <div className="button-row">
-                    <button className="btn-sm btn-success" onClick={() => handleApprovePasswordReset(r.id)}>Approve</button>
-                    <button className="btn-sm btn-danger" onClick={() => handleRejectPasswordReset(r.id)}>Reject</button>
+                    <button className="btn-sm btn-success" disabled={isBusy(`reset-${r.id}`)} onClick={() => run(`reset-${r.id}`, () => handleApprovePasswordReset(r.id))}>{isBusy(`reset-${r.id}`) ? 'Working...' : 'Approve'}</button>
+                    <button className="btn-sm btn-danger" disabled={isBusy(`reset-${r.id}`)} onClick={() => run(`reset-${r.id}`, () => handleRejectPasswordReset(r.id))}>Reject</button>
                   </div>
                 </td>
               </tr>
@@ -331,7 +335,7 @@ export default function AdminPanel() {
 
       <section className="card">
         <h2 id="institutions-card">🏢 Add New Institution</h2>
-        <form onSubmit={handleCreateInstitution} className="upload-form">
+        <form onSubmit={(e) => run('create-institution', () => handleCreateInstitution(e))} className="upload-form">
           <label>Code (e.g. BANK-C)</label>
           <input value={newInstitution.code} onChange={(e) => setNewInstitution({ ...newInstitution, code: e.target.value })} required />
           <label>Institution Name</label>
@@ -343,13 +347,13 @@ export default function AdminPanel() {
             <option value="GOVERNMENT_AGENCY">Government Agency</option>
             <option value="OTHER">Other</option>
           </select>
-          <button type="submit">Add Institution</button>
+          <button type="submit" disabled={isBusy('create-institution')} aria-busy={isBusy('create-institution')}>{isBusy('create-institution') ? 'Adding...' : 'Add Institution'}</button>
         </form>
       </section>
 
       <section className="card">
         <h2 id="users-card">👤 Add New User</h2>
-        <form onSubmit={handleCreateUser} className="upload-form">
+        <form onSubmit={(e) => run('create-user', () => handleCreateUser(e))} className="upload-form">
           <label>Full Name</label>
           <input value={newUser.full_name} onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })} required />
           <label>Username</label>
@@ -378,12 +382,12 @@ export default function AdminPanel() {
               </select>
             </>
           )}
-          <button type="submit">Add User</button>
+          <button type="submit" disabled={isBusy('create-user')} aria-busy={isBusy('create-user')}>{isBusy('create-user') ? 'Adding...' : 'Add User'}</button>
         </form>
       </section>
 
       <section className="card">
-        <h2>👥 Users</h2>
+        <h2 id="user-list-card">👥 Users</h2>
         {(() => {
           const inactiveInstitutionIds = new Set(institutions.filter((i) => !i.is_active).map((i) => i.id))
           return (
@@ -410,7 +414,7 @@ export default function AdminPanel() {
                           </span>
                         )}
                       </td>
-                      <td><button className={`btn-sm ${u.is_active ? 'btn-danger' : 'btn-success'}`} onClick={() => toggleUserActive(u)}>{u.is_active ? 'Deactivate' : 'Activate'}</button>{u.mfa_enabled && u.id !== me?.id && (<button className="btn-sm" style={{ marginLeft: '0.4rem' }} onClick={() => resetTwoStep(u)}>Reset two-step</button>)}</td>
+                      <td><button className={`btn-sm ${u.is_active ? 'btn-danger' : 'btn-success'}`} disabled={isBusy(`user-${u.id}`)} onClick={() => run(`user-${u.id}`, () => toggleUserActive(u))}>{u.is_active ? 'Deactivate' : 'Activate'}</button>{u.mfa_enabled && u.id !== me?.id && (<button className="btn-sm" style={{ marginLeft: '0.4rem' }} disabled={isBusy(`user-${u.id}`)} onClick={() => run(`user-${u.id}`, () => resetTwoStep(u))}>Reset two-step</button>)}</td>
                     </tr>
                   )
                 })}
@@ -421,7 +425,7 @@ export default function AdminPanel() {
       </section>
 
       <section className="card">
-        <h2>🏢 Institutions</h2>
+        <h2 id="institution-list-card">🏢 Institutions</h2>
         <table>
           <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Status</th><th></th></tr></thead>
           <tbody>
@@ -464,8 +468,8 @@ export default function AdminPanel() {
             </select>
           </label>
           <button className="btn-secondary" disabled={!auditActionFilter && !auditEntityFilter && !auditUserFilter} onClick={() => changeAuditFilter({ action: '', entity: '', user: '' })}>Clear Filters</button>
-          <button onClick={handleExportAuditLog}>
-            {auditActionFilter || auditEntityFilter || auditUserFilter ? 'Export Filtered (CSV)' : 'Export All (CSV)'}
+          <button disabled={isBusy('export-audit')} aria-busy={isBusy('export-audit')} onClick={() => run('export-audit', () => handleExportAuditLog().catch(() => setMessage('Failed to export the audit log.')))}>
+            {isBusy('export-audit') ? 'Preparing...' : auditActionFilter || auditEntityFilter || auditUserFilter ? 'Export Filtered (CSV)' : 'Export All (CSV)'}
           </button>
         </div>
         <p className="note" style={{ marginTop: 0 }}>Showing {auditLogs.length.toLocaleString()} of {auditTotal.toLocaleString()} matching entries.</p>

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import apiClient from '../api/client'
+import DistrictMap, { DistrictShape, validShapes } from './DistrictMap'
+import { SEVERITY_COLOR, SEVERITY_LABEL, SEVERITY_ORDER, severityKey } from './hazardSeverity'
 
 /**
  * "Climate Data - Hazard Summary" of the dashboard (Concept Note, Figure 3): for one hazard, the districts where it was
@@ -13,6 +15,7 @@ export interface HazardSummaryDistrict {
   district: string
   readings: number
   highest_severity: string | null
+  map_key?: string | null
 }
 
 export interface HazardSummaryData {
@@ -33,14 +36,6 @@ export interface HazardSummaryData {
 
 export const SUMMARY_HAZARDS = ['Drought', 'Flood', 'Landslide', 'Cyclone']
 const ROWS_SHOWN = 10
-
-const SEVERITY_LABEL: Record<string, string> = { HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low', NOT_GRADED: 'Not graded' }
-const SEVERITY_COLOR: Record<string, string> = { HIGH: '#B91C1C', MEDIUM: '#E07A5F', LOW: '#E8B84A', NOT_GRADED: '#94A3B8' }
-const SEVERITY_ORDER = ['HIGH', 'MEDIUM', 'LOW', 'NOT_GRADED']
-
-function severityKey(s: string | null): string {
-  return s && SEVERITY_LABEL[s] ? s : 'NOT_GRADED'
-}
 
 function SeverityBadge({ severity }: { severity: string | null }) {
   const key = severityKey(severity)
@@ -67,6 +62,8 @@ export default function HazardSummary() {
   // The pickers keep the last list they were given, so they do not empty while a new answer is loading.
   const [periods, setPeriods] = useState<string[]>([])
   const [regions, setRegions] = useState<string[]>([])
+  // The district outlines never change, so they are asked for once. 'unavailable' = the map is left out, the table remains.
+  const [shapes, setShapes] = useState<DistrictShape[] | 'loading' | 'unavailable'>('loading')
 
   useEffect(() => {
     let cancelled = false
@@ -88,7 +85,17 @@ export default function HazardSummary() {
     return () => { cancelled = true }
   }, [hazard, period, region, includeUnvalidated])
 
+  useEffect(() => {
+    let cancelled = false
+    apiClient
+      .get('/analytics/district-shapes')
+      .then((res) => { if (!cancelled) setShapes(validShapes(res.data?.districts) ? res.data.districts : 'unavailable') })
+      .catch(() => { if (!cancelled) setShapes('unavailable') })
+    return () => { cancelled = true }
+  }, [])
+
   const shown = data ? (showAll ? data.districts : data.districts.slice(0, ROWS_SHOWN)) : []
+  const unplaced = data ? data.districts.filter((d) => !d.map_key) : []
   const maxDistricts = data ? Math.max(...SEVERITY_ORDER.map((k) => data.districts_by_severity[k] || 0), 1) : 1
 
   return (
@@ -157,6 +164,26 @@ export default function HazardSummary() {
               <h3>Readings counted</h3>
               <div style={{ fontSize: '1.7rem', fontWeight: 700 }} data-testid="hs-readings">{data.readings}</div>
             </div>
+          </div>
+
+          <div className="portfolio-panel" style={{ marginBottom: '1rem' }}>
+            <h3>Districts on the map</h3>
+            {shapes === 'loading' && <p style={{ fontSize: '0.82rem', margin: 0 }}>Loading the map…</p>}
+            {shapes === 'unavailable' && (
+              <p style={{ fontSize: '0.82rem', margin: 0 }}>The district map is not available; the table below lists the same districts.</p>
+            )}
+            {Array.isArray(shapes) && (
+              <>
+                <DistrictMap shapes={shapes} districts={data.districts} hazard={data.hazard_type} />
+                {unplaced.length > 0 && (
+                  <p className="note" style={{ marginBottom: 0 }}>
+                    {unplaced.length === 1 ? '1 district has' : `${unplaced.length} districts have`} readings but no outline on the map
+                    (the name is not in the official list): {unplaced.map((d) => `${d.district} (${d.region})`).join(', ')}.
+                    {unplaced.length === 1 ? ' It is' : ' They are'} in the table.
+                  </p>
+                )}
+              </>
+            )}
           </div>
 
           <div className="portfolio-grid">

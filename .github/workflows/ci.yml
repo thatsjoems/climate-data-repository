@@ -44,3 +44,24 @@ jobs:
       - name: TypeScript build
         working-directory: frontend
         run: npm run build
+
+  dependency-audit:
+    name: Dependency audit (known vulnerabilities)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Python packages
+        working-directory: backend
+        # The three ignored entries have no fixed version (or do not apply to how tokens are verified here); they are explained in docs/DEPENDENCY_SECURITY.md.
+        run: pip install pip-audit && pip-audit -r requirements.txt --ignore-vuln PYSEC-2025-185 --ignore-vuln PYSEC-2026-1325 --ignore-vuln CVE-2026-85394
+      - name: Node packages
+        working-directory: frontend
+        # Fails on high or critical. The two moderate react-router findings are accepted (docs/DEPENDENCY_SECURITY.md).
+        run: npm install && npm audit --omit=dev --audit-level=high
+

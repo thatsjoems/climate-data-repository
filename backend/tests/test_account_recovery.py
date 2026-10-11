@@ -10,7 +10,7 @@ import pytest
 from app.core.timeutil import utcnow
 from app.models.models import AuditLog, RoleEnum, User
 from app.services.account_recovery import RecoveryError, reset_password
-from tests.conftest import DEFAULT_PASSWORD, login, make_user
+from tests.conftest import DEFAULT_PASSWORD, WEB, login, make_user
 
 NEW = "N3w!Passw0rd-Chosen"
 
@@ -46,9 +46,9 @@ def test_a_locked_account_is_unlocked_and_its_count_cleared(client, db_session):
 
 def test_sessions_the_person_already_had_are_ended(client, db_session):
     _admin(db_session)
-    old_refresh = login(client, "forgotten_admin").json()["refresh_token"]
+    assert login(client, "forgotten_admin").status_code == 200          # the refresh token is now in the browser's cookie
     reset_password(db_session, "forgotten_admin", NEW)
-    assert client.post("/api/auth/refresh", json={"refresh_token": old_refresh}).status_code == 401
+    assert client.post("/api/auth/refresh", headers=WEB).status_code == 401
 
 
 @pytest.mark.parametrize("must_change", [True, False])

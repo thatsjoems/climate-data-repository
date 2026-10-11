@@ -1,0 +1,28 @@
+region,district,where,repository_name,nbs_name_or_suggestion,similarity
+Arusha,Longido,only in the repository's list,Matale A,Matale,0.86
+Arusha,Karatu,only in the repository's list,Oldeani,Oldean,0.92
+Tanga,Muheza,only in the repository's list,Kwemkabala,Kwemkabara,0.90
+Morogoro,Morogoro,only in the repository's list,Kibungo,Kibungo Juu,0.78
+Morogoro,Ulanga,only in the repository's list,Chilombola,Chilombora,0.90
+Morogoro,Ulanga,only in the repository's list,Mahenge Mjini,Mahenge,0.70
+Mtwara,Newala,only in the repository's list,Kitangari,Kitangali,0.89
+Mtwara,Masasi,only in the repository's list,Chikiropola,Chikoropola,0.91
+Mbeya,Mbeya,only in the repository's list,Izyra,Izyira,0.91
+Tabora,Igunga,only in the repository's list,Mtunguru,Mtungulu,0.88
+Tabora,Igunga,only in the repository's list,Iborogelo,Ibologelo,0.89
+Tabora,Urambo,only in the repository's list,Ugalla,Ugala,0.91
+Kigoma,Kasulu,only in the repository's list,Kager Nkanda,Kagera Nkanda,0.96
+Kagera,Bukoba,only in the repository's list,Behendangabo,Buhendangabo,0.92
+Kagera,Bukoba,only in the repository's list,Kanyangereko,Kanyengereko,0.92
+Kagera,Bukoba,only in the repository's list,Kikomelo,Kikomero,0.88
+Mwanza,Sengerema,only in the repository's list,Nyatukara,Nyatukala,0.89
+Mara,Tarime,only in the repository's list,Nyansincha,Nyansicha,0.95
+Mara,Serengeti,only in the repository's list,Issenye,Isenye,0.92
+Mara,Rorya,only in the repository's list,Nyathorogo,Nyathorongo,0.95
+Kusini Unguja,Kati,only in the repository's list,Kiboje Mwembeshauri,Kiboje Muembe Shauri,0.92
+Kusini Unguja,Kati,only in the repository's list,Ndijani Mwembepunda,Ndijani Muembe Punda,0.92
+Kusini Unguja,Kati,only in the repository's list,Zawiani,Zuwiyani,0.80
+Mjini Magharibi,Mjini,only in the repository's list,Mwembeladu,Muembeladu,0.90
+Mjini Magharibi,Mjini,only in the repository's list,Mwembeshauri,Muembe Shauri,0.88
+Mjini Magharibi,Magharibi A,only in the repository's list,Chemchem,Chemuchem,0.94
+Mjini Magharibi,Magharibi A,only in the repository's list,Muembe Mchomeke,Muwembemchomeke,0.93

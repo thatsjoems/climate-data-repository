@@ -29,9 +29,7 @@ districts was it recorded, and how severe?** It sits below the Geospatial Overvi
   place without data.
 * **No affected population.** The concept note's mock-up shows "Affected Population 2.45 M". The repository holds no population figures, and none is
   estimated. It needs an agreed source (for example the census figures per district) and a rule for what "affected" means.
-* **No district-by-district colour map.** The mock-up colours a map of Tanzania by district. That needs the boundary of every district, which the repository
-  does not hold, and the boundaries must match the district names used in the data. It needs a Bank-approved boundary source (see
-  `docs/GO_LIVE_READINESS.md`). Until then the table and the bars carry the same information.
+* **District colour map: built.** The map colours every district by the highest severity recorded for the chosen hazard, from the district outlines held in the repository (see `DISTRICT_MAP.md`). A district without a reading is shown as "no reading", never as safe.
 * **Three grades, not five.** The mock-up's legend has Normal, Low, Moderate, High and Very High. The data model (and its database rule) allows LOW,
   MEDIUM and HIGH, so the panel shows those three and "Not graded".
 
@@ -41,4 +39,4 @@ readings, readings without a district, no readings, the pickers' lists, refused 
 `frontend/src/components/HazardSummary.test.tsx` (figures and order, hazard change, pickers, the validated box, ten districts and "Show all", region-only
 note, the empty and failed states).
 
-*Update:* district boundaries now exist in the repository (`COORDINATE_VALIDATION.md`), so a colour map by district is possible later; it is not built, and population figures are still missing.
+*Still missing:* population figures per district (no "affected population") and a fifth and sixth severity grade. See `GO_LIVE_READINESS.md`, item 11.

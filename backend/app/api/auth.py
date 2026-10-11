@@ -8,7 +8,7 @@ the user signed in without requiring a long-lived JWT that could never be
 revoked before its own expiry if stolen.
 """
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Response, status, Request
 from sqlalchemy.orm import Session
 
 from app.core.account_status import authentication_block_reason, ACCOUNT_DEACTIVATED, INSTITUTION_DEACTIVATED
@@ -24,12 +24,14 @@ from app.core.password_policy import validate_password_strength
 from app.models.models import User, RefreshToken
 from app.schemas.schemas import (
     LoginRequest, TokenResponse, UserOut, ChangePasswordRequest,
-    RefreshRequest, AccessTokenResponse,
+    AccessTokenResponse,
 )
 from app.services.audit_service import record_audit
 from app.services.notification_service import notify_user
 from app.core.timeutil import utcnow
 from app.core.mfa import make_step_token, mfa_required_for
+from app.core.portal import portal_of, wrong_portal_message
+from app.core.session_cookie import set_refresh_cookie, clear_refresh_cookie, read_refresh_cookie, require_web_client
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -50,7 +52,7 @@ def _issue_token_pair(db: Session, user: User) -> tuple[str, str]:
 
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("10/minute")
-def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)):
+def login(request: Request, response: Response, payload: LoginRequest, db: Session = Depends(get_db)):
     # Generic message for "no such user" vs "wrong password" - never reveal which one it was
     # (prevents username enumeration).
     generic_error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
@@ -94,6 +96,14 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
                    f"Try again in about {minutes_left} minute(s), or use Forgot Password.",
         )
 
+    # The right door for this person? Asked only now, after the password is proved, so the answer cannot be used to find out
+    # which usernames exist. It is not a failed password, so it does not count towards the lock-out.
+    if payload.portal and payload.portal != portal_of(user.role):
+        record_audit(db, user.id, "LOGIN_WRONG_PORTAL", "User", user.id,
+                     f"User {user.username} ({user.role.value}) tried the {payload.portal} sign-in page")
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=wrong_portal_message(user.role))
+
     # Reached only after the password has been verified, so telling the user WHY they
     # are blocked cannot be used to discover which usernames exist.
     block = authentication_block_reason(user)
@@ -122,22 +132,27 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
     access_token, refresh_token = _issue_token_pair(db, user)
     record_audit(db, user.id, "LOGIN", "User", user.id, f"User {user.username} logged in")
 
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token, user=UserOut.model_validate(user))
+    set_refresh_cookie(response, refresh_token)       # the refresh token goes to the browser as an HttpOnly cookie, never in the answer
+    return TokenResponse(access_token=access_token, user=UserOut.model_validate(user))
 
 
 @router.post("/refresh", response_model=AccessTokenResponse)
 @limiter.limit("30/minute")
-def refresh_access_token(request: Request, payload: RefreshRequest, db: Session = Depends(get_db)):
+def refresh_access_token(request: Request, response: Response, db: Session = Depends(get_db)):
     """
-    Exchanges a still-valid refresh token for a new short-lived access token.
+    Exchanges the refresh token (sent by the browser as the HttpOnly cookie) for a new short-lived access token.
     Rotation: the presented refresh token is revoked and a brand new one is
     issued alongside the new access token - a refresh token can only ever be
     used once. Reuse of an already-rotated token (e.g. a stolen copy used
     after the legitimate client already rotated it) is rejected outright.
     """
+    require_web_client(request)
     invalid_error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
 
-    token_hash = hash_refresh_token(payload.refresh_token)
+    raw = read_refresh_cookie(request)
+    if not raw:
+        raise invalid_error
+    token_hash = hash_refresh_token(raw)
     stored = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
 
     if not stored or stored.revoked_at is not None or stored.expires_at < utcnow():
@@ -152,11 +167,12 @@ def refresh_access_token(request: Request, payload: RefreshRequest, db: Session 
     db.commit()
 
     access_token, new_refresh_token = _issue_token_pair(db, user)
-    return AccessTokenResponse(access_token=access_token, refresh_token=new_refresh_token)
+    set_refresh_cookie(response, new_refresh_token)
+    return AccessTokenResponse(access_token=access_token, user=UserOut.model_validate(user))
 
 
 @router.post("/logout")
-def logout(payload: RefreshRequest, db: Session = Depends(get_db)):
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     """
     Revokes the refresh token server-side - this is what makes "Log Out"
     actually mean something beyond deleting the local copy. The short-lived
@@ -164,7 +180,12 @@ def logout(payload: RefreshRequest, db: Session = Depends(get_db)):
     expires (at most a few minutes), but no new access token can be minted
     from this session afterward.
     """
-    token_hash = hash_refresh_token(payload.refresh_token)
+    require_web_client(request)
+    raw = read_refresh_cookie(request)
+    clear_refresh_cookie(response)
+    if not raw:
+        return {"status": "ok"}
+    token_hash = hash_refresh_token(raw)
     stored = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
     if stored and stored.revoked_at is None:
         stored.revoked_at = utcnow()

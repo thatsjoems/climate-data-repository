@@ -6,16 +6,15 @@ Run: uvicorn app.main:app --reload
 """
 import logging
 import time
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.core.rate_limit import limiter
+from app.core.rate_limit import limiter, enforce_general_limit
 from app.core.startup_checks import enforce_production_secret, is_production, api_docs_urls
 from app.core.logging_config import configure_logging
 from app.services.monitor_loop import monitoring_lifespan
@@ -38,6 +37,7 @@ app = FastAPI(
     description="CDR prototype system - built as part of the EASTC 8-Week Practical Training Programme",
     version="0.1.0",
     lifespan=monitoring_lifespan,            # the background monitor (off when MONITOR_INTERVAL_MINUTES is 0)
+    dependencies=[Depends(enforce_general_limit)],      # the general rate limit on every route
     **api_docs_urls(settings.ENVIRONMENT),   # no /docs in production
 )
 
@@ -50,7 +50,7 @@ app = FastAPI(
 # replicas, which this project does not run.
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
+# The general limit is applied by the dependency below (see app/core/rate_limit.py); slowapi handles the limits written on single routes.
 
 app.add_middleware(
     CORSMiddleware,

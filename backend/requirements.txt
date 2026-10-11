@@ -1,24 +1,26 @@
-fastapi==0.115.0
+fastapi==0.143.0
+starlette==1.7.0                      # pinned on purpose: fastapi only sets a range; versions below 1.3.1 have known vulnerabilities (docs/DEPENDENCY_SECURITY.md)
 uvicorn[standard]==0.30.6
 sqlalchemy==2.0.34
 alembic==1.18.4
 pydantic==2.9.2
 pydantic-settings==2.5.2
 email-validator==2.2.0
-python-jose[cryptography]==3.3.0
+python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
-python-multipart==0.0.9
+python-multipart==0.0.32
 openpyxl==3.1.5
 pandas==2.2.2
-python-dotenv==1.0.1
+python-dotenv==1.2.4
 psycopg2-binary==2.9.9
 
 # Report generation (Module: automated reporting)
 reportlab==4.2.5
-Pillow==10.4.0
+Pillow==12.3.0
 
 # Testing (Module: automated testing - see tests/)
-pytest==8.3.3
+pytest==9.1.1
 httpx==0.27.2
 slowapi==0.1.9
+limits==5.8.0                         # used by slowapi and directly by app/core/rate_limit.py

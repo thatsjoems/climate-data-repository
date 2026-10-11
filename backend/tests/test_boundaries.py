@@ -48,7 +48,7 @@ def test_almost_every_ward_in_the_repository_geography_is_found_in_the_boundarie
             for ward in wards:
                 total += 1
                 found += bs._claimed_wards_cached(region.strip(), district.strip(), ward.strip())[0] == "ward"
-    assert total == 4342
+    assert total == 4341
     assert found / total > 0.995, f"only {found} of {total} wards matched"
 
 

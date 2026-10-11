@@ -11,6 +11,8 @@ The one question this module answers is: "the row says region/district/ward X; i
 a place for a point that is nowhere (a lake, the sea, another country): that is reported as "outside", not as a
 mismatch, because it cannot tell which place was meant.
 
+  district_shapes() / map_key(region, district)                           the coarse district outlines for the dashboard
+                                                                            map, and the key that ties a district name to one
   check_location(region, district, ward, lat, lon) -> None                 nothing to check against (no boundary data,
                                                                             or the named place is not in it)
                                                     -> BoundaryFinding     kind "inside", "ward", "district",
@@ -32,6 +34,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "tanzania_ward_boundaries.json.gz"
+_SHAPES_PATH = Path(__file__).resolve().parent.parent / "data" / "tanzania_district_shapes.json.gz"
 
 BOUNDARY_TOLERANCE_M = 500
 _METRES_PER_DEGREE = 111_320.0
@@ -270,3 +273,37 @@ def hint_for_typing_mistake(region: str, district: str, ward: str, lat: float, l
         if finding is not None and finding.kind == "inside":
             return f"{text}: ({la}, {lo}) is inside {ward or district or region}"
     return None
+
+
+# ------------------------------------------------------------------------------------------- the dashboard map
+def _district_key(region: str, district: str) -> str:
+    return f"{_norm(region)}|{_norm(district)}"
+
+
+@lru_cache(maxsize=1)
+def district_shapes() -> dict | None:
+    """The outline of every district, coarse (about 330 m) because it is only drawn on a screen:
+    {"districts": [{"key", "region", "district", "rings": [[[lon, lat], ...], ...], "borders": [[[lon, lat], ...], ...]}, ...]}
+    (rings are the filled shape, borders the lines of the district's outer limit). None without the data file.
+    The key is what map_key() returns for the same place, so a name typed with other capitals or spacing still lands on it."""
+    if not _SHAPES_PATH.exists():
+        logger.warning("District shapes %s are missing: the dashboard map is not drawn.", _SHAPES_PATH)
+        return None
+    with gzip.open(_SHAPES_PATH, "rt", encoding="utf-8") as f:
+        raw = json.load(f)
+    return {"districts": [
+        {"key": _district_key(d["r"], d["d"]), "region": d["r"], "district": d["d"], "rings": d["rings"], "borders": d.get("borders", [])}
+        for d in raw["districts"]
+    ]}
+
+
+@lru_cache(maxsize=1)
+def _shape_keys() -> frozenset:
+    shapes = district_shapes()
+    return frozenset(d["key"] for d in shapes["districts"]) if shapes else frozenset()
+
+
+def map_key(region: str, district: str) -> str | None:
+    """The key of the district's outline on the map, or None when the map has no outline for that name."""
+    key = _district_key(region or "", district or "")
+    return key if key in _shape_keys() else None

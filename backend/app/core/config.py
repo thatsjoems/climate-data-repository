@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     # something a stateless JWT alone can never support.
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # The refresh-token cookie is Secure (HTTPS only) in production; leave unset. Set true/false only to override (app/core/session_cookie.py).
+    REFRESH_COOKIE_SECURE: bool | None = None
 
     UPLOAD_DIR: str = "uploads"
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ProtectedRoute from '../components/ProtectedRoute'
@@ -28,13 +28,15 @@ function mockUser(overrides: Partial<CurrentUser> = {}): CurrentUser {
 function renderProtected(
   user: CurrentUser | null,
   allowedRoles?: string[],
-  initialPath = '/dashboard'
+  initialPath = '/dashboard',
+  ready = true
 ) {
   vi.spyOn(AuthContext, 'useAuth').mockReturnValue({
     user,
     login: vi.fn(),
     logout: vi.fn(),
     refreshUser: vi.fn(),
+    ready,
     isLoading: false,
     error: null,
   })
@@ -43,6 +45,7 @@ function renderProtected(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
         <Route path="/login" element={<div>Login Screen</div>} />
+        <Route path="/staff/login" element={<div>Staff Login Screen</div>} />
         <Route path="/change-password" element={<div>Change Password Screen</div>} />
         <Route path="/" element={<div>Home Screen</div>} />
         <Route
@@ -59,6 +62,29 @@ function renderProtected(
 }
 
 describe('ProtectedRoute', () => {
+  afterEach(() => localStorage.removeItem('cdr_portal'))
+
+  it('waits, and does not send anyone to the sign-in page, while a reloaded page is still asking the server whether the person is signed in', () => {
+    renderProtected(null, undefined, '/dashboard', false)
+    expect(screen.getByRole('status')).toHaveTextContent('Loading')
+    expect(screen.queryByText('Login Screen')).not.toBeInTheDocument()
+    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument()
+  })
+
+  it('sends a visitor to a staff-only screen to the staff sign-in page, and to any other screen to the institutions\' page', () => {
+    const { unmount } = renderProtected(null, ['BOT_USER', 'SYSTEM_ADMIN'])
+    expect(screen.getByText('Staff Login Screen')).toBeInTheDocument()
+    unmount()
+    renderProtected(null, ['INSTITUTION_USER'])
+    expect(screen.getByText('Login Screen')).toBeInTheDocument()
+  })
+
+  it('returns a visitor to the door this browser last signed in through', () => {
+    localStorage.setItem('cdr_portal', 'internal')
+    renderProtected(null)
+    expect(screen.getByText('Staff Login Screen')).toBeInTheDocument()
+  })
+
   it('redirects an unauthenticated visitor to /login', () => {
     renderProtected(null)
     expect(screen.getByText('Login Screen')).toBeInTheDocument()
