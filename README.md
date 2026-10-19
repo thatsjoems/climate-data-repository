@@ -60,6 +60,9 @@ See `docs/DOCKER.md` for more detail (stopping, resetting data, inspecting the d
 
 ### 2. Log In
 
+> **DEVELOPMENT AND TRAINING ONLY.** The accounts below exist only in the development stack (`docker-compose.yml`), with passwords that are written in this
+> file and therefore known to anyone who reads it. They are never created in staging or production, and must never be created, copied or recreated there.
+
 Use one of the demo accounts printed in the `backend` container's log output:
 
 | Role | Username | Password |
@@ -68,7 +71,7 @@ Use one of the demo accounts printed in the `backend` container's log output:
 | BOT Analyst (Internal) | `bot_analyst` | `Analyst@123` |
 | Institution (Bank A) | `bankA_user` | `BankA@123` |
 
-**Change these passwords before any production use.**
+**Do not use these accounts or passwords anywhere other than your own development machine.**
 
 In production (`ENVIRONMENT=production`) these accounts are **not created at all**; create the first
 administrator with `scripts/create_admin.py` - see

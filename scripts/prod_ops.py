@@ -2,8 +2,9 @@
 """
 Backup, status, restore drill, restore and scheduling for the PRODUCTION stack (docker-compose.prod.yml).
 
-    python scripts/prod_ops.py backup  [--out backups/prod] [--keep 14] [--copy-to <folder>]
+    python scripts/prod_ops.py backup  [--out backups/prod] [--keep 14] [--copy-to <folder>] [--purge] [--wait-docker 10] [--retries 2]
     python scripts/prod_ops.py status  [--out backups/prod] [--max-age-hours 26]
+    python scripts/prod_ops.py purge   [--apply]                 (housekeeping: expired refresh tokens, old notifications; dry run unless --apply)
     python scripts/prod_ops.py check     (the System Status checks; exit code 0 fine, 1 attention, 2 urgent)
     python scripts/prod_ops.py drill   [--backup <folder>] [--keep-drill]
     python scripts/prod_ops.py restore <backup folder>            (DESTRUCTIVE - replaces production data)
@@ -40,6 +41,49 @@ class Fail(Exception):
     pass
 
 
+SCHEDULED_LOG = "scheduled_run.log"      # what the scheduler's command line writes to. NEVER backup.log: prod_ops itself appends to that file,
+                                          # and Windows refuses a second writer ("PermissionError ... backup.log").
+DOCKER_EXE = r"C:\Program Files\Docker\Docker\Docker Desktop.exe"
+
+
+def docker_ready():
+    try:
+        return subprocess.run(["docker", "info"], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def ensure_docker(minutes):
+    """
+    A scheduled backup can start before Docker Desktop is ready (after a wake-up, a restart, or when it was closed):
+    the log then says 'failed to connect to the docker API ... dockerDesktopLinuxEngine'. Wait up to `minutes`, and on Windows
+    start Docker Desktop once if it is not running. Returns True when Docker answers.
+    """
+    if minutes <= 0 or docker_ready():
+        return True
+    print(f"Docker is not answering. Waiting up to {minutes} minute(s) for it ...")
+    if os.name == "nt" and os.path.isfile(DOCKER_EXE):
+        print("  starting Docker Desktop ...")
+        subprocess.Popen([DOCKER_EXE], close_fds=True, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+    deadline = time.time() + minutes * 60
+    while time.time() < deadline:
+        time.sleep(min(10, SLEEP * 2))
+        if docker_ready():
+            print("  Docker is ready.")
+            return True
+    print("  Docker did not become ready in time.")
+    return False
+
+
+def append_log(out_dir, line):
+    """The one-line history in backup.log. A locked or unwritable log must never turn a good backup into a failure."""
+    try:
+        with open(pathlib.Path(out_dir) / "backup.log", "a", encoding="utf-8") as log:
+            log.write(line)
+    except OSError as exc:
+        print(f"  WARNING: could not write backup.log ({exc.strerror or exc}); the backup itself is fine.")
+
+
 def compose(args, project=PROD, capture=False, check=True):
     cmd = ["docker", "compose", "-p", project, "-f", "docker-compose.prod.yml", "--env-file", ".env.production", *args]
     r = subprocess.run(cmd, cwd=ROOT, capture_output=capture, text=True)
@@ -61,7 +105,8 @@ def wait_healthy(service, project, tries=60):
             if st == "healthy":
                 return
         time.sleep(SLEEP)
-    raise Fail(f"{service} ({project}) did not become healthy")
+    tail = compose(["logs", "--tail", "12", service], project, capture=True, check=False).stdout.strip()
+    raise Fail(f"{service} ({project}) did not become healthy. Last lines of its log:\n{tail}")
 
 
 def sha256(path):
@@ -112,8 +157,14 @@ def restore_dump(project, folder):
 
 
 def restore_uploads(project, folder):
+    # The backend container is hardened (docs/DOCKER.md): its root has no right to override file permissions, and /app/uploads belongs to the
+    # application's own user (cdr). So the emptying and the unpacking run AS cdr, which owns the folder; root only fixes the copied archive's mode and
+    # removes it afterwards (it owns that file in /tmp). Run as root, tar failed with "Cannot open: File exists" and "Cannot utime", and `rm -rf /app/uploads/*`
+    # could not have removed real files either. `find ... -delete` also removes hidden files, which `*` does not match.
     compose(["cp", str(pathlib.Path(folder) / "uploads.tar"), "backend:/tmp/uploads.tar"], project)
-    sh_in("backend", "rm -rf /app/uploads/* && tar -C /app -xf /tmp/uploads.tar && chown -R cdr:cdr /app/uploads && rm -f /tmp/uploads.tar", project)
+    compose(["exec", "-T", "backend", "chmod", "644", "/tmp/uploads.tar"], project)
+    compose(["exec", "-T", "-u", "cdr", "backend", "sh", "-c", "find /app/uploads -mindepth 1 -delete && tar -C /app -xf /tmp/uploads.tar"], project)
+    compose(["exec", "-T", "backend", "rm", "-f", "/tmp/uploads.tar"], project)
 
 
 # ------------------------------------------------------------------------------------------------ backup
@@ -124,6 +175,16 @@ def make_backup(out_dir, keep, copy_to=None):
     folder = out_dir / stamp
     folder.mkdir(parents=True, exist_ok=True)
     print(f"Backing up production to {folder} ...")
+    try:
+        return _take_backup(out_dir, keep, copy_to, stamp, folder)
+    except BaseException:
+        # A failed attempt must leave nothing behind: an empty or half-filled dated folder would count as a backup in the retention
+        # count and could push a good one out.
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+
+
+def _take_backup(out_dir, keep, copy_to, stamp, folder):
     sh_in("db", "pg_dump -U $POSTGRES_USER -d $POSTGRES_DB -Fc -f /tmp/cdr.dump")
     sh_in("db", "pg_restore --list /tmp/cdr.dump > /dev/null")                  # proves the dump is readable
     compose(["cp", "db:/tmp/cdr.dump", str(folder / "db.dump")])
@@ -164,8 +225,7 @@ def make_backup(out_dir, keep, copy_to=None):
     removed = prune(out_dir, keep, folder)
     if removed:
         print(f"  retention: kept the newest {keep}, removed {len(removed)} older: {', '.join(removed)}")
-    with open(out_dir / "backup.log", "a", encoding="utf-8") as log:
-        log.write(f"{stamp} {'COPY-FAILED' if copy_error else 'OK'} {folder.name} revision={revision}\n")
+    append_log(out_dir, f"{stamp} {'COPY-FAILED' if copy_error else 'OK'} {folder.name} revision={revision}\n")
     write_status(out_dir, stamp, folder, revision, copy_to, copy_error)
     print("Done (local backup OK)." if copy_error else "Done.")
     return folder, copy_error
@@ -203,8 +263,38 @@ def newest_backup(out_dir):
     return dirs[-1] if dirs else None
 
 
+def backup_with_retries(a):
+    """Wait for Docker, then try up to 1 + a.retries times, pausing a.retry_wait minutes between tries."""
+    tries = 1 + max(0, getattr(a, "retries", 0))
+    for n in range(1, tries + 1):
+        if ensure_docker(getattr(a, "wait_docker", 0)):
+            try:
+                return make_backup(a.out, a.keep, a.copy_to)
+            except Fail as exc:
+                if n == tries:
+                    raise
+                reason = str(exc)
+        else:
+            reason = "Docker is not running"
+            if n == tries:
+                raise Fail("Docker is not running (waited as asked). Start Docker Desktop; the next scheduled run will try again.")
+        wait = getattr(a, "retry_wait", 5)
+        print(f"Attempt {n} of {tries} failed: {reason}\nTrying again in {wait:g} minute(s) ...")
+        time.sleep(wait * 60 if wait > 0 else 0)
+
+
 def cmd_backup(a):
-    _, copy_error = make_backup(a.out, a.keep, a.copy_to)
+    _, copy_error = backup_with_retries(a)
+    if getattr(a, "purge", False):
+        # Housekeeping runs only AFTER a backup exists (so nothing is ever removed without a fresh copy), and a failure here
+        # never changes the backup's own exit code: the backup is what monitoring watches.
+        print("Housekeeping (expired refresh tokens, old notifications) ...")
+        try:
+            if cmd_purge(argparse.Namespace(apply=True)):
+                print("WARNING: housekeeping did not run (see the message above). The backup itself is fine. If the message says the script is missing, "
+                      "the backend image is older than this package: run scripts\\prod_up.ps1 to rebuild it.")
+        except Exception as e:     # noqa: BLE001 - report and carry on
+            print(f"Housekeeping skipped: {e}")
     return 1 if copy_error else 0   # exit code 1 lets the scheduler and monitoring see a missing off-machine copy
 
 
@@ -238,6 +328,14 @@ def cmd_check(a):
         print("The check could not run inside the backend. Is production up?  " + (r.stderr or "").strip()[-200:])
         return 2
     return r.returncode        # 0 all fine, 1 attention, 2 urgent
+
+
+def cmd_purge(a):
+    """Housekeeping inside the backend container (it deletes with the owner role; the application's role cannot delete). Dry run unless --apply."""
+    cmd = ["exec", "-T", "backend", "python", "scripts/purge_old_data.py"] + (["--apply"] if a.apply else [])
+    r = compose(cmd, capture=True, check=False)
+    print((r.stdout or "").strip() or (r.stderr or "").strip()[-300:])
+    return r.returncode
 
 
 # ------------------------------------------------------------------------------------------------ drill and restore
@@ -276,7 +374,9 @@ def cmd_drill(a):
         compose(["up", "-d", "db"], DRILL)
         wait_healthy("db", DRILL)
         restore_dump(DRILL, folder)
-        compose(["up", "-d", "backend"], DRILL)
+        # --build: the drill has its own image (cdr-drill-backend). Without it an image left by an earlier drill is reused, with older code
+        # that does not know the newest migrations ("Can't locate revision ..."), and the drill fails for a reason that has nothing to do with the backup.
+        compose(["up", "-d", "--build", "backend"], DRILL)
         wait_healthy("backend", DRILL)
         restore_uploads(DRILL, folder)
         verify = compose(["exec", "-T", "backend", "python", "scripts/verify_db_constraints.py"], DRILL, capture=True, check=False)
@@ -333,10 +433,26 @@ def cmd_restore(a):
 
 
 # ------------------------------------------------------------------------------------------------ schedule
+def run_backup_cmd_text(root, python, copy_to=None, purge=True):
+    """The batch file the scheduled task runs. It waits up to 10 minutes for Docker and retries twice, and writes to scheduled_run.log."""
+    extra = f' --copy-to "{copy_to}"' if copy_to else ""
+    purge_arg = " --purge" if purge else ""
+    return (f'@echo off\r\ncd /d "{root}"\r\n'
+            f'"{python}" scripts\\prod_ops.py backup{extra}{purge_arg} --wait-docker 10 --retries 2 --retry-wait 5 '
+            f'>> backups\\prod\\{SCHEDULED_LOG} 2>&1\r\n')
+
+
+def task_settings_ps(name="CDR-Backup"):
+    """PowerShell that gives the task the settings a laptop or desktop needs for a 02:00 job."""
+    return (f"$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -WakeToRun "
+            f"-RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 10) -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew; "
+            f"Set-ScheduledTask -TaskName '{name}' -Settings $s | Out-Null")
+
+
 def cmd_schedule(a):
     if os.name != "nt":
         print("Add this line with `crontab -e` (daily at 02:00):")
-        print(f"  0 2 * * * cd {ROOT} && {sys.executable} scripts/prod_ops.py backup --copy-to <off-machine folder> >> backups/prod/backup.log 2>&1")
+        print(f"  0 2 * * * cd {ROOT} && {sys.executable} scripts/prod_ops.py backup --copy-to <off-machine folder> --purge --wait-docker 10 --retries 2 >> backups/prod/{SCHEDULED_LOG} 2>&1")
         print("And watch it from your monitoring with:  python scripts/prod_ops.py status   (exit code 1 = no recent backup)")
         return 0
     if a.remove:
@@ -344,30 +460,38 @@ def cmd_schedule(a):
     out = ROOT / "backups" / "prod"
     out.mkdir(parents=True, exist_ok=True)
     cmd_file = out / "run_backup.cmd"
-    extra = f' --copy-to "{a.copy_to}"' if a.copy_to else ""
-    cmd_file.write_text(f'@echo off\r\ncd /d "{ROOT}"\r\n"{sys.executable}" scripts\\prod_ops.py backup{extra} >> backups\\prod\\backup.log 2>&1\r\n', encoding="utf-8")
+    cmd_file.write_text(run_backup_cmd_text(ROOT, sys.executable, a.copy_to, not a.no_purge), encoding="utf-8")
     r = subprocess.run(["schtasks", "/Create", "/SC", "DAILY", "/ST", a.time, "/TN", "CDR-Backup", "/TR", f'"{cmd_file}"', "/F"])
     if r.returncode == 0:
-        print(f"Scheduled: every day at {a.time}. It runs only while you are signed in to Windows and Docker Desktop is running.")
-        print("Check later with:  python scripts/prod_ops.py status")
+        r2 = subprocess.run(["powershell", "-NoProfile", "-Command", task_settings_ps()])
+        if r2.returncode != 0:
+            print("WARNING: the task was created, but its power settings could not be applied. In Task Scheduler open CDR-Backup, tab Conditions and "
+                  "Settings: allow start on battery, do not stop on battery, run as soon as possible after a missed start, wake the computer.")
+        print(f"Scheduled: every day at {a.time}. The task starts on battery, wakes the computer, runs after a missed start, waits up to 10 minutes "
+              "for Docker Desktop (and starts it if needed) and tries again twice. It runs while you are signed in to Windows.")
+        print(f"Its messages go to backups\\prod\\{SCHEDULED_LOG}. Check later with:  python scripts/prod_ops.py status")
     return r.returncode
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    b = sub.add_parser("backup"); b.add_argument("--out", default="backups/prod"); b.add_argument("--keep", type=int, default=14); b.add_argument("--copy-to")
+    b = sub.add_parser("backup"); b.add_argument("--out", default="backups/prod"); b.add_argument("--keep", type=int, default=14); b.add_argument("--copy-to"); b.add_argument("--purge", action="store_true", help="after the backup, remove expired refresh tokens and old notifications")
+    b.add_argument("--wait-docker", type=float, default=0, metavar="MINUTES", help="wait (and start Docker Desktop on Windows) up to this long for Docker")
+    b.add_argument("--retries", type=int, default=0, help="extra attempts when the backup fails")
+    b.add_argument("--retry-wait", type=float, default=5, metavar="MINUTES", help="pause between attempts")
     s = sub.add_parser("status"); s.add_argument("--out", default="backups/prod"); s.add_argument("--max-age-hours", type=float, default=26)
     sub.add_parser("check")
+    pg = sub.add_parser("purge"); pg.add_argument("--apply", action="store_true")
     d = sub.add_parser("drill"); d.add_argument("--backup"); d.add_argument("--keep-drill", action="store_true")
     r = sub.add_parser("restore"); r.add_argument("backup"); r.add_argument("--no-safety-backup", action="store_true")
-    c = sub.add_parser("schedule"); c.add_argument("--time", default="02:00"); c.add_argument("--remove", action="store_true"); c.add_argument("--copy-to")
+    c = sub.add_parser("schedule"); c.add_argument("--time", default="02:00"); c.add_argument("--remove", action="store_true"); c.add_argument("--copy-to"); c.add_argument("--no-purge", action="store_true", help="schedule the backup only, without housekeeping")
     a = ap.parse_args()
-    if not (ROOT / ".env.production").is_file() and a.cmd in ("backup", "check", "drill", "restore"):
+    if not (ROOT / ".env.production").is_file() and a.cmd in ("backup", "check", "drill", "restore", "purge"):
         print(".env.production not found. This tool is for the production stack (scripts/prod_setup.py).")
         return 2
     try:
-        return {"backup": cmd_backup, "status": cmd_status, "check": cmd_check, "drill": cmd_drill, "restore": cmd_restore, "schedule": cmd_schedule}[a.cmd](a)
+        return {"backup": cmd_backup, "status": cmd_status, "check": cmd_check, "purge": cmd_purge, "drill": cmd_drill, "restore": cmd_restore, "schedule": cmd_schedule}[a.cmd](a)
     except Fail as exc:
         print("FAILED:", exc)
         return 1

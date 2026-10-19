@@ -24,7 +24,18 @@ function Wait-Healthy($service) {
 
 New-Item -ItemType Directory -Force -Path backups\status | Out-Null   # where the backup task leaves its result for the monitor
 Write-Host "1/4 Starting the database and the backend ..."
-docker compose @c up -d --build db backend
+docker compose @c up -d db
+Wait-Healthy 'db'
+# A brand-new database (a first start, or after `down -v`, or a restore onto a new machine) has no cdr_app role yet, while this file may already point the
+# backend at it from an earlier run: the backend would then fail to sign in and never become healthy. So, only when the role is missing, start the backend
+# as the database owner again (stage 3 switches it, as always).
+$roleThere = "select 1 from pg_roles where rolname='cdr_app'" | docker compose @c exec -T db sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB -tA'   # SQL via stdin: no quotes inside the native argument (Windows PowerShell mangles them)
+if (-not ("$roleThere" -match '1')) {
+  Write-Host "    (a new database: the backend starts as the database owner until cdr_app exists)"
+  $owner = Get-EnvValue 'POSTGRES_USER'; $ownerPw = Get-EnvValue 'POSTGRES_PASSWORD'
+  (Get-Content .env.production) -replace '^BACKEND_DATABASE_URL=.*$', "BACKEND_DATABASE_URL=postgresql://${owner}:${ownerPw}@db:5432/climate_data_repository" | Set-Content .env.production
+}
+docker compose @c up -d --build backend
 Wait-Healthy 'backend'
 
 Write-Host "2/4 Creating the restricted database role cdr_app ..."

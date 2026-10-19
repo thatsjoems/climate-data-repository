@@ -65,7 +65,7 @@ class Institution(Base):
     type = Column(SAEnum(InstitutionType), default=InstitutionType.BANK, nullable=False)
     contact_email = Column(String(255), nullable=True)
     contact_phone = Column(String(50), nullable=True)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, nullable=False, server_default=text("true"))
     created_at = Column(DateTime, default=utcnow)
 
     users = relationship("User", back_populates="institution")
@@ -82,7 +82,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     role = Column(SAEnum(RoleEnum), nullable=False, default=RoleEnum.INSTITUTION_USER)
     institution_id = Column(String, ForeignKey("institutions.id"), nullable=True, index=True)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, nullable=False, server_default=text("true"))
     created_at = Column(DateTime, default=utcnow)
     last_login_at = Column(DateTime, nullable=True)
 
@@ -274,7 +274,7 @@ class SubmissionRecord(Base):
     id = Column(String, primary_key=True, default=gen_uuid)
     submission_id = Column(String, ForeignKey("submissions.id"), nullable=False)
     row_number = Column(Integer, nullable=False)
-    is_valid = Column(Boolean, default=True)
+    is_valid = Column(Boolean, default=True, nullable=False, server_default=text("true"))
 
     # ---- A. Borrower / Branch info ----
     customer_id = Column(String(100), nullable=True, index=True)  # BOT's own real identifier - not a name
@@ -582,7 +582,7 @@ class Notification(Base):
     message = Column(String(500), nullable=False)
     related_entity_type = Column(String(100), nullable=True)   # e.g. "Submission"
     related_entity_id = Column(String, nullable=True)
-    is_read = Column(Boolean, default=False)
+    is_read = Column(Boolean, default=False, nullable=False, server_default=text("false"))
     created_at = Column(DateTime, default=utcnow)
 
 
@@ -627,6 +627,7 @@ class ClimateIngestionBatch(Base):
 
     __table_args__ = (
         Index("ix_climate_ingestion_batches_source_created", "source", "created_at"),
+        Index("ix_climate_ingestion_batches_uploaded_by_user", "uploaded_by_user_id"),
         # A batch is uploaded by a person or delivered by a key, never both.
         CheckConstraint("uploaded_by_user_id IS NULL OR uploaded_by_api_client_id IS NULL", name="ck_climate_ingestion_batches_one_uploader"),
     )

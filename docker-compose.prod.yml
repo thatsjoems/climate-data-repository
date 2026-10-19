@@ -65,6 +65,7 @@ services:
       BACKUP_MAX_AGE_HOURS: "${BACKUP_MAX_AGE_HOURS:-26}"
       BACKUP_MONITORING: "${BACKUP_MONITORING:-true}"      # staging switches it off: it has no backup task of its own
       RATE_LIMIT_ENABLED: "${RATE_LIMIT_ENABLED:-true}"      # only staging switches it off, for load tests (the checker refuses it in .env.production)
+      ANALYTICS_CACHE_ENABLED: "${ANALYTICS_CACHE_ENABLED:-true}"   # remember the dashboard totals while the data is unchanged; false = switch it off (docs/LOAD_TESTING.md)
       CDR_ALLOW_LOAD_TEST: "${CDR_ALLOW_LOAD_TEST:-}"        # the load-test tool runs only where this is yes (staging)
       ACCESS_TOKEN_EXPIRE_MINUTES: "${ACCESS_TOKEN_EXPIRE_MINUTES:-15}"
       REFRESH_TOKEN_EXPIRE_DAYS: "${REFRESH_TOKEN_EXPIRE_DAYS:-7}"

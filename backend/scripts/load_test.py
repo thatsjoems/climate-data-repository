@@ -143,6 +143,35 @@ def build_workbook(rows):
     return buffer.getvalue()
 
 
+def build_shapefile_zip(rows):
+    """The same loans as a Shapefile ZIP (the attribute table with the short column names, and records without a shape), to measure that upload path.
+    Written with the standard library only, like the reader (app/services/shapefile_service.py)."""
+    import io
+    import struct
+    import zipfile
+    from app.services.shapefile_service import SHORT_NAMES
+    fields = [f for f in SHORT_NAMES if any(f in row for row in rows[:50])]
+    width = 40
+    header_len, record_len = 32 + 32 * len(fields) + 1, 1 + width * len(fields)
+    dbf = bytearray(struct.pack("<BBBBIHH", 3, 26, 10, 11, len(rows), header_len, record_len) + b"\x00" * 20)
+    for field in fields:
+        dbf += SHORT_NAMES[field].encode().ljust(11, b"\x00") + b"C" + b"\x00" * 4 + bytes([width, 0]) + b"\x00" * 14
+    dbf += b"\x0d"
+    for row in rows:
+        dbf += b" " + b"".join(str("" if row.get(f) is None else row[f]).encode().ljust(width)[:width] for f in fields)
+    dbf += b"\x1a"
+    shp = bytearray()
+    for i in range(1, len(rows) + 1):
+        shp += struct.pack(">ii", i, 2) + struct.pack("<i", 0)          # a record without a shape
+    shp = struct.pack(">i", 9994) + b"\x00" * 20 + struct.pack(">i", (100 + len(shp)) // 2) + struct.pack("<ii", 1000, 1) + b"\x00" * 64 + bytes(shp)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("loans.shp", bytes(shp))
+        zf.writestr("loans.dbf", bytes(dbf))
+        zf.writestr("loans.prj", 'GEOGCS["GCS_WGS_1984"]')
+    return buffer.getvalue()
+
+
 # ------------------------------------------------------------------ a small HTTP client (standard library, keeps its connection)
 def encode_multipart(fields, files):
     boundary = "----cdrloadtest" + secrets.token_hex(8)
@@ -344,11 +373,11 @@ def timed(recorder, scenario, client, *args, **kwargs):
     return status, payload
 
 
-def upload(recorder, scenario, base, insecure, token, period, workbook, name):
+def upload(recorder, scenario, base, insecure, token, period, workbook, name, content_type=None):
     client = Http(base, insecure)
     try:
         status, payload = timed(recorder, scenario, client, "POST", "/api/submissions/upload", token=token, form={"reporting_period": period},
-                                files={"file": (name, workbook, XLSX)})
+                                files={"file": (name, workbook, content_type or XLSX)})
     finally:
         client.close()
     if isinstance(payload, dict) and payload.get("status") not in (None, "VALID"):
@@ -417,7 +446,11 @@ def cmd_run(args):
     # 5. optionally one very large file; with --mixed people keep reading while it is being checked; then it is approved and read at its size
     if args.big_rows:
         print(f"  one large file of {args.big_rows} loans" + (", while people keep reading" if args.mixed else "") + " ...")
-        big = build_workbook(make_rows(args.big_rows, f"{creds['suffix']}-BIG", seed=99))
+        as_zip = args.big_format == "zip"
+        big_rows = make_rows(args.big_rows, f"{creds['suffix']}-BIG", seed=99)
+        big = build_shapefile_zip(big_rows) if as_zip else build_workbook(big_rows)
+        big_name, big_type = ("load_big.zip", "application/zip") if as_zip else ("load_big.xlsx", None)
+        print(f"    (the file is {len(big) / (1024 * 1024):.1f} MB as {'a Shapefile ZIP' if as_zip else 'Excel'})")
         big_token, holder = tokens[insts[0]["username"]], {}
         started = time.monotonic()
         if args.mixed:
@@ -425,7 +458,7 @@ def cmd_run(args):
 
             def big_upload():
                 try:
-                    holder["reply"] = upload(recorder, "upload_big", base, insecure, big_token, args.big_period, big, "load_big.xlsx")
+                    holder["reply"] = upload(recorder, "upload_big", base, insecure, big_token, args.big_period, big, big_name, big_type)
                 finally:
                     stop.set()
             worker = threading.Thread(target=big_upload)
@@ -434,7 +467,7 @@ def cmd_run(args):
             worker.join()
             results["read_during_upload"] = recorder.summary("read_during_upload", read_elapsed)
         else:
-            holder["reply"] = upload(recorder, "upload_big", base, insecure, big_token, args.big_period, big, "load_big.xlsx")
+            holder["reply"] = upload(recorder, "upload_big", base, insecure, big_token, args.big_period, big, big_name, big_type)
         results["upload_big"] = recorder.summary("upload_big", time.monotonic() - started)
         reply = holder.get("reply") or {}
         print(f"    the large file: status {reply.get('status')}, {reply.get('valid_records')} valid record(s), {results['upload_big']['p50_ms'] / 1000:.0f} s")
@@ -514,6 +547,7 @@ def main():
     r.add_argument("--period", default="2026-Q1")
     r.add_argument("--big-rows", type=int, default=0, help="also upload ONE file of this many loans (the largest allowed is 100000)")
     r.add_argument("--big-period", default="2026-Q2")
+    r.add_argument("--big-format", choices=("xlsx", "zip"), default="xlsx", help="the large file as Excel (default) or as a Shapefile ZIP")
     r.add_argument("--mixed", action="store_true", help="with --big-rows: people keep reading dashboards while the large file is being checked")
     r.add_argument("--slo-upload-big-ms", type=float, default=120000)
     r.add_argument("--slo-review-big-ms", type=float, default=30000)

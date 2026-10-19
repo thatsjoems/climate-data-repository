@@ -219,7 +219,7 @@ def test_the_templates_own_example_row_passes_the_check():
     from app.services.template_generator import COLUMNS  # noqa: F401  (the example is written into the template)
     import io
     from openpyxl import load_workbook
-    from app.services.template_generator import generate_loan_collateral_template as build_template
+    from app.services.template_generator import load_loan_collateral_template as build_template
     ws = load_workbook(io.BytesIO(build_template()))["Loan_Collateral_Data"]
     labels = {c.value: c.column for c in ws[9] if c.value}
     row = 10

@@ -19,7 +19,11 @@ correction attempts.
 """
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text, literal_column
+import hashlib
 import re
+import threading
+from collections import OrderedDict, namedtuple
+from app.core.config import settings
 from app.models.models import (
     Institution, Submission, SubmissionRecord, ClimateRecord, SubmissionStatus
 )
@@ -138,17 +142,23 @@ def get_kpi_summary(
     )
 
     # Both totals in ONE pass over the loans (they were two passes), then the distinct borrowers as the count of a DISTINCT list, which the database
-    # can hash instead of sorting (the same number as count(distinct ...), measured against it in scripts/db_diagnose.py).
-    total_loan, total_collateral = records_query.with_entities(
-        func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0),
-        func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0),
-    ).one()
-    if db.get_bind().dialect.name == "postgresql":
-        db.execute(text(f"SET LOCAL work_mem = '{KPI_WORK_MEM}'"))
-    borrowers = records_query.filter(
-        SubmissionRecord.customer_id.isnot(None), SubmissionRecord.customer_id != ""
-    ).with_entities(SubmissionRecord.customer_id).distinct().subquery()
-    total_borrowers = db.query(func.count()).select_from(borrowers).scalar()
+    # can hash instead of sorting (the same number as count(distinct ...), measured against it in scripts/db_diagnose.py). Remembered while the set of
+    # current approved submissions is unchanged (see _remembered).
+    def loan_figures():
+        total_loan, total_collateral = records_query.with_entities(
+            func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0),
+            func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0),
+        ).one()
+        if db.get_bind().dialect.name == "postgresql":
+            db.execute(text(f"SET LOCAL work_mem = '{KPI_WORK_MEM}'"))
+        borrowers = records_query.filter(
+            SubmissionRecord.customer_id.isnot(None), SubmissionRecord.customer_id != ""
+        ).with_entities(SubmissionRecord.customer_id).distinct().subquery()
+        total_borrowers = db.query(func.count()).select_from(borrowers).scalar()
+        return float(total_loan or 0.0), float(total_collateral or 0.0), int(total_borrowers or 0)
+
+    total_loan, total_collateral, total_borrowers = _remembered(
+        db, "kpi_loan_figures", (institution_id, effective_filter_institution_id, filter_region, filter_reporting_period), loan_figures)
 
     return {
         "total_institutions": total_institutions,
@@ -188,6 +198,133 @@ def get_climate_trends(db: Session, region: str | None = None) -> list[dict]:
     ]
 
 
+# ---------------------------------------------------------------------------------------------------------------------------------------------------
+# Remembering the totals the dashboards add up (docs/LOAD_TESTING.md, "Dashboard speed").
+#
+# Several dashboard pages ask for the same sums over the same current approved loans (by region and period for the exposure pages and the map; the
+# totals and borrowers for the summary), each costing a pass over every such loan. The loans of a submission are written once, at upload, and never
+# changed, so those sums change ONLY when the set of current approved submissions changes (an approval, a correction replacing a version, a rejection
+# restoring an older one). The memory therefore asks the database for a small FINGERPRINT of that set on every request (a few rows, from an index) and
+# reuses a stored answer only for the very same fingerprint, the very same security scope and the very same filters: an answer can never be older than
+# the data, and one institution's answer is never given to another scope. It holds plain tuples (no database objects), is bounded, and is private to the
+# process (each process checks the same fingerprint, so several processes stay exact). Set ANALYTICS_CACHE_ENABLED=false to switch it off.
+# ---------------------------------------------------------------------------------------------------------------------------------------------------
+_CACHE_MAX_ENTRIES = 128
+_cache: "OrderedDict[tuple, object]" = OrderedDict()
+_cache_lock = threading.Lock()
+
+RegionPeriodTotals = namedtuple("RegionPeriodTotals", "region reporting_period total_loan total_collateral record_count")
+
+
+def _approved_fingerprint(db: Session) -> str:
+    """Identifies the set of loans the dashboards read: every current APPROVED submission, with the number of loans it holds."""
+    rows = (
+        db.query(Submission.id, Submission.total_records, Submission.valid_records)
+        .filter(Submission.is_current == True, Submission.status == SubmissionStatus.APPROVED)  # noqa: E712
+        .order_by(Submission.id)
+        .all()
+    )
+    return hashlib.sha256(";".join(f"{r[0]}:{r[1]}:{r[2]}" for r in rows).encode("utf-8")).hexdigest()
+
+
+def _remembered(db: Session, name: str, scope: tuple, compute):
+    """compute() unless the same answer is already held for this fingerprint and scope. Never stores anything when the memory is switched off."""
+    if not settings.ANALYTICS_CACHE_ENABLED:
+        return compute()
+    key = (name, scope, _approved_fingerprint(db))
+    with _cache_lock:
+        if key in _cache:
+            _cache.move_to_end(key)
+            return _cache[key]
+    value = compute()
+    with _cache_lock:
+        _cache[key] = value
+        _cache.move_to_end(key)
+        while len(_cache) > _CACHE_MAX_ENTRIES:
+            _cache.popitem(last=False)
+    return value
+
+
+def clear_analytics_cache() -> None:
+    with _cache_lock:
+        _cache.clear()
+
+
+def _region_period_totals(
+    db: Session, institution_id: str | None, filter_institution_id: str | None,
+    filter_region: str | None, filter_reporting_period: str | None,
+) -> tuple:
+    """Loans, collateral and number of loans of the current approved submissions, by region and reporting period (what the exposure pages and the map build on)."""
+    def compute():
+        rows = (
+            _active_records_query(
+                db, institution_id, filter_institution_id=filter_institution_id,
+                filter_region=filter_region, filter_reporting_period=filter_reporting_period,
+            )
+            .with_entities(
+                SubmissionRecord.region,
+                Submission.reporting_period,
+                func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0).label("total_loan"),
+                func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0).label("total_collateral"),
+                func.count(SubmissionRecord.id).label("record_count"),
+            )
+            .group_by(SubmissionRecord.region, Submission.reporting_period)
+            .all()
+        )
+        return tuple(RegionPeriodTotals(r[0], r[1], r[2], r[3], r[4]) for r in rows)
+    return _remembered(db, "region_period_totals", (institution_id, filter_institution_id, filter_region, filter_reporting_period), compute)
+
+
+def _climate_quality_filter(validated_only: bool):
+    """The one rule for which climate readings may inform a dashboard figure: VALIDATED only, or everything except FLAGGED (an analyst has already judged
+    a FLAGGED reading unreliable, so it is never blended into a figure presented as informing financial-stability decisions)."""
+    return ClimateRecord.quality_flag == "VALIDATED" if validated_only else ClimateRecord.quality_flag != "FLAGGED"
+
+
+def _climate_row_in_period(row_period, row_year, row_month, period, parsed) -> bool:
+    """Does a climate reading belong to a financial reporting period? Two ways, unioned: (a) it carries exactly this reporting_period (the reliable path,
+    once TMA data is tagged that way), or (b) it is an older reading with NO reporting_period, matched by the year and months the quarter covers (a fallback,
+    so properly tagged data is never missed). `parsed` is _quarter_to_months(period): None when the period is not 'YYYY-Qn' (then only (a) applies)."""
+    if row_period is not None and row_period == period:
+        return True
+    if parsed and row_period is None:
+        year, months = parsed
+        return row_year == year and row_month in months
+    return False
+
+
+def _climate_rows_for_combos(db: Session, combos, quality_filter) -> dict:
+    """The climate readings of every (region, reporting_period) pair in `combos`, fetched with ONE query instead of one per pair (the dashboards used to ask
+    the database once for each of the ~60 pairs, on top of adding up the loans). The query only narrows (regions, periods, years, quality); the exact
+    matching of a reading to a pair is done by _climate_row_in_period, so the result is the same set of readings the per-pair queries returned."""
+    result: dict = {(c.region, c.reporting_period): [] for c in combos}
+    regions = {c.region for c in combos if c.region is not None}
+    if not regions:
+        return result
+    parsed_by_period = {c.reporting_period: _quarter_to_months(c.reporting_period) for c in combos}
+    years = {p[0] for p in parsed_by_period.values() if p}
+    wanted_period = ClimateRecord.reporting_period.in_(list(parsed_by_period))
+    if years:
+        wanted_period = wanted_period | (ClimateRecord.reporting_period.is_(None) & ClimateRecord.year.in_(list(years)))
+    rows = (
+        db.query(
+            ClimateRecord.region, ClimateRecord.reporting_period, ClimateRecord.year, ClimateRecord.month,
+            ClimateRecord.rainfall_mm, ClimateRecord.avg_temperature_c, ClimateRecord.hazard_type, ClimateRecord.quality_flag,
+        )
+        .filter(ClimateRecord.region.in_(list(regions)), quality_filter, wanted_period)
+        .all()
+    )
+    by_region: dict = {}
+    for row in rows:
+        by_region.setdefault(row.region, []).append(row)
+    for region, period in result:
+        parsed = parsed_by_period[period]
+        result[(region, period)] = [
+            r for r in by_region.get(region, ()) if _climate_row_in_period(r.reporting_period, r.year, r.month, period, parsed)
+        ]
+    return result
+
+
 def get_hazard_exposure(
     db: Session, institution_id: str | None = None, validated_only: bool = False,
     filter_institution_id: str | None = None, filter_region: str | None = None,
@@ -216,44 +353,14 @@ def get_hazard_exposure(
     direct/internal callers; the public API/report default is True, so the
     supervisory dashboard opens in VALIDATED-only mode.
     """
-    combos = (
-        _active_records_query(
-            db, institution_id, filter_institution_id=filter_institution_id,
-            filter_region=filter_region, filter_reporting_period=filter_reporting_period,
-        )
-        .with_entities(
-            SubmissionRecord.region,
-            Submission.reporting_period,
-            func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0).label("total_loan"),
-            func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0).label("total_collateral"),
-            func.count(SubmissionRecord.id).label("record_count"),
-        )
-        .group_by(SubmissionRecord.region, Submission.reporting_period)
-        .all()
-    )
+    combos = _region_period_totals(db, institution_id, filter_institution_id, filter_region, filter_reporting_period)
 
     # Aggregate loan exposure by (region, dominant hazard for that region+period)
     aggregated: dict[tuple[str, str], dict] = {}
+    climate_by_combo = _climate_rows_for_combos(db, combos, _climate_quality_filter(validated_only))
     for combo in combos:
         dominant_hazard = "None"
-        parsed = _quarter_to_months(combo.reporting_period)
-        if validated_only:
-            filters = [ClimateRecord.region == combo.region, ClimateRecord.quality_flag == "VALIDATED"]
-        else:
-            filters = [ClimateRecord.region == combo.region, ClimateRecord.quality_flag != "FLAGGED"]
-        period_filter = ClimateRecord.reporting_period == combo.reporting_period
-        if parsed:
-            year, months = parsed
-            legacy_filter = (
-                (ClimateRecord.reporting_period.is_(None))
-                & (ClimateRecord.year == year)
-                & (ClimateRecord.month.in_(months))
-            )
-            filters.append(period_filter | legacy_filter)
-        else:
-            filters.append(period_filter)
-
-        climate_rows = db.query(ClimateRecord).filter(*filters).all()
+        climate_rows = climate_by_combo[(combo.region, combo.reporting_period)]
         hazard_counts: dict[str, int] = {}
         for c in climate_rows:
             if c.hazard_type and c.hazard_type != "None":
@@ -263,7 +370,8 @@ def get_hazard_exposure(
             # description of the region's recorded climate pattern, NOT a claim
             # that every individual loan below was itself directly affected by
             # this specific hazard (Module: hazard terminology precision).
-            dominant_hazard = max(hazard_counts, key=hazard_counts.get)
+            # On a tie the hazard first in alphabetical order wins, so the answer no longer depends on the order the database happened to return rows in.
+            dominant_hazard = max(sorted(hazard_counts), key=hazard_counts.get)
 
         key = (combo.region, dominant_hazard)
         if key not in aggregated:
@@ -647,59 +755,19 @@ def get_combined_climate_financial_exposure(
     direct/internal callers. The public API/report default is True, so the
     supervisory dashboard opens in VALIDATED-only mode.
     """
-    combos = (
-        _active_records_query(
-            db, institution_id, filter_institution_id=filter_institution_id,
-            filter_region=filter_region, filter_reporting_period=filter_reporting_period,
-        )
-        .with_entities(
-            SubmissionRecord.region,
-            Submission.reporting_period,
-            func.coalesce(func.sum(SubmissionRecord.loan_amount_tzs), 0.0).label("total_loan"),
-            func.coalesce(func.sum(SubmissionRecord.collateral_value_tzs), 0.0).label("total_collateral"),
-            func.count(SubmissionRecord.id).label("record_count"),
-        )
-        .group_by(SubmissionRecord.region, Submission.reporting_period)
-        .all()
-    )
+    combos = _region_period_totals(db, institution_id, filter_institution_id, filter_region, filter_reporting_period)
 
     results = []
+    climate_by_combo = _climate_rows_for_combos(db, combos, _climate_quality_filter(validated_only))
     for combo in combos:
-        parsed = _quarter_to_months(combo.reporting_period)
         avg_rainfall = None
         avg_temp = None
         hazard_types_present: list[str] = []
         climate_data_quality = None
 
-        # Match climate observations two ways, unioned: (a) records that explicitly
-        # carry this exact reporting_period (the reliable path, once TMA data is
-        # tagged that way), and (b) older/legacy records with no reporting_period
-        # set, matched by reconstructing the year/months the quarter covers - a
-        # fallback, not the primary path, so this never silently misses data that
-        # IS properly tagged.
-        filters = [ClimateRecord.region == combo.region]
-        period_filter = ClimateRecord.reporting_period == combo.reporting_period
-        if parsed:
-            year, months = parsed
-            legacy_filter = (
-                (ClimateRecord.reporting_period.is_(None))
-                & (ClimateRecord.year == year)
-                & (ClimateRecord.month.in_(months))
-            )
-            filters.append(period_filter | legacy_filter)
-        else:
-            filters.append(period_filter)
-
-        climate_rows = (
-            db.query(ClimateRecord)
-            .filter(*filters)
-            .filter(ClimateRecord.quality_flag == "VALIDATED" if validated_only else
-                    # FLAGGED means an analyst has already judged this specific reading
-                    # unreliable - it must never be blended into a figure presented as
-                    # informing financial-stability decisions, regardless of source.
-                    ClimateRecord.quality_flag != "FLAGGED")
-            .all()
-        )
+        # The readings for this region and period (matched exactly, or by the year and months of the quarter for older readings without a
+        # reporting_period: see _climate_row_in_period), fetched for all pairs at once above.
+        climate_rows = climate_by_combo[(combo.region, combo.reporting_period)]
         if climate_rows:
             rainfall_values = [c.rainfall_mm for c in climate_rows if c.rainfall_mm is not None]
             temp_values = [c.avg_temperature_c for c in climate_rows if c.avg_temperature_c is not None]

@@ -125,7 +125,7 @@ def check_files() -> list:
         if v in ("cdr_postgres_data", "cdr_uploads"):
             problems.append(f"volume {v} is the development volume: production must use its own (cdr_prod_*).")
     nginx = (ROOT / "frontend" / "nginx.prod.conf").read_text(encoding="utf-8")
-    for needle in ("ssl_certificate ", "TLSv1.3", "Strict-Transport-Security", "return 301 https://", "client_max_body_size 25M", "proxy_pass http://backend:8000/api/", "proxy_read_timeout 300s", "add_header Content-Security-Policy", "proxy_hide_header Strict-Transport-Security"):
+    for needle in ("ssl_certificate ", "TLSv1.3", "Strict-Transport-Security", "return 301 https://", "client_max_body_size 55M", "proxy_pass http://backend:8000/api/", "proxy_read_timeout 600s", "add_header Content-Security-Policy", "proxy_hide_header Strict-Transport-Security"):
         if needle not in nginx:
             problems.append(f"frontend/nginx.prod.conf lacks: {needle.strip()}")
     ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")

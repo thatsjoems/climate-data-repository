@@ -27,3 +27,7 @@ certs-staging/
 
 # Backups hold real data (database dumps and uploaded files): never in git
 backups/
+
+# TypeScript incremental build cache
+frontend/tsconfig.tsbuildinfo
+*.tsbuildinfo

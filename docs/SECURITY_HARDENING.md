@@ -66,10 +66,10 @@ of version history, and it would be materially over-engineering.
 
 ## 4. Secure file upload
 
-`MAX_UPLOAD_SIZE_MB` (default 20) and `MAX_UPLOAD_ROWS` (default 100,000),
+`MAX_UPLOAD_SIZE_MB` (default 50, the loan and collateral upload; climate files: `MAX_CLIMATE_UPLOAD_SIZE_MB`, 20) and `MAX_UPLOAD_ROWS` (default 100,000),
 both configurable via `.env`. Oversized files are rejected before parsing;
 oversized row counts are rejected after a cheap read. Filenames are never
-trusted for the storage path (always a generated UUID). Corrupt/malformed
+trusted for the storage path (always a generated UUID). A Shapefile ZIP is read in memory only, with limits on members, sizes and compression ratio (`SHAPEFILE_UPLOAD.md`). Corrupt/malformed
 files are caught and returned as a normal 400 error instead of a 500 crash.
 
 ## 5–7. Strong data validation

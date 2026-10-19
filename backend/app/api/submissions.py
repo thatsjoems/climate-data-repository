@@ -115,14 +115,15 @@ def upload_submission(
             detail=f"File is too large ({len(file_bytes) / (1024*1024):.1f} MB). "
                    f"Maximum allowed is {settings.MAX_UPLOAD_SIZE_MB} MB.",
         )
-    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls", ".csv")):
-        raise HTTPException(status_code=400, detail="Only .xlsx, .xls or .csv files are accepted")
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls", ".csv", ".zip")):
+        raise HTTPException(status_code=400, detail="Only .xlsx, .xls, .csv or a Shapefile .zip are accepted")
     # Content-type check in addition to extension - a mismatched declared type
     # (e.g. a renamed .exe claiming .xlsx) is rejected before it ever touches disk.
     allowed_content_types = {
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
         "application/vnd.ms-excel",  # .xls (Windows browsers also send this for a .csv)
         "text/csv", "application/csv",  # .csv
+        "application/zip", "application/x-zip-compressed", "multipart/x-zip",  # Shapefile .zip (browsers differ)
         "application/octet-stream",  # some browsers/clients send this generically - extension check above still applies
     }
     if file.content_type and file.content_type not in allowed_content_types:
@@ -131,7 +132,8 @@ def upload_submission(
     # Persist the raw file via the storage abstraction (never trust the
     # client's filename for the path) - see app/services/storage_service.py
     # for why this is a single narrow call rather than direct os.* here.
-    saved_path = storage.save(file_bytes, "csv" if file.filename.lower().endswith(".csv") else "xlsx")
+    lowered_name = file.filename.lower()
+    saved_path = storage.save(file_bytes, "csv" if lowered_name.endswith(".csv") else "zip" if lowered_name.endswith(".zip") else "xlsx")
 
     try:
         records, issues = validate_excel_file(
@@ -463,10 +465,12 @@ def download_submission_file(
         raise HTTPException(status_code=404, detail="The original file is no longer available on the server")
 
     from fastapi.responses import FileResponse
-    is_csv = (submission.file_name or "").lower().endswith(".csv")
+    stored_name = (submission.file_name or "").lower()
+    media_type = ("text/csv" if stored_name.endswith(".csv") else "application/zip" if stored_name.endswith(".zip")
+                  else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     return FileResponse(
         submission.file_path,
-        media_type="text/csv" if is_csv else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type=media_type,
         filename=submission.file_name,
     )
 

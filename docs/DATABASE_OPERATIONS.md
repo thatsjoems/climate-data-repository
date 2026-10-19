@@ -198,7 +198,7 @@ Being clear about the limits matters more than a long list of features:
   hosting environment to decide.
 - **Row-level security.** Each institution's data is separated by the application's code (and tested), not
   by the database itself.
-- **Retention.** Nothing purges expired refresh tokens, old notifications or old audit entries.
+- **Retention.** `python scripts/prod_ops.py purge --apply` removes refresh tokens expired or revoked over 30 days ago and notifications (read over 90 days, any over a year); the daily backup task runs it after each backup. **Audit entries are never purged**: their retention period is the Bank's decision.
 - **Time zones.** Timestamps are stored as UTC without a time-zone marker (`datetime.utcnow`).
 - **User names** are case-sensitive: `Admin` and `admin` can both exist.
 - **Backups** are only as good as the copy kept elsewhere and the last restore drill.

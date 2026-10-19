@@ -160,3 +160,15 @@ def test_the_real_upload_accepts_a_generated_file_as_valid(client, db_session):
     assert res.status_code == 201, res.text
     body = res.json()
     assert body["status"] == "VALID" and body["valid_records"] == 150 and body.get("invalid_records", 0) == 0
+
+
+def test_the_real_upload_accepts_a_generated_shapefile_zip_as_valid(client, db_session):
+    """The tool's --big-format zip builds a Shapefile ZIP of the same loans: the real endpoint must judge it valid, or its figures mean nothing."""
+    _setup_institution_user(db_session)
+    token = login(client, "inst_user").json()["access_token"]
+    archive = lt.build_shapefile_zip(lt.make_rows(150, "ZIP", seed=12))
+    res = client.post("/api/submissions/upload", data={"reporting_period": "2026-Q1"},
+                      files={"file": ("load_1.zip", archive, "application/zip")}, headers=auth_header(token))
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["status"] == "VALID" and body["valid_records"] == 150 and body.get("invalid_records", 0) == 0

@@ -21,6 +21,7 @@ from app.services.template_generator import (
 from app.services import geo_lookup as geo
 from app.services.geo_reference import get_region_coordinates
 from app.services import boundary_service
+from app.services.shapefile_service import ShapefileError, shapefile_zip_as_frame
 
 # A row's GPS coordinates are flagged (not rejected outright - see the
 # reasoning in docs/ASSUMPTIONS_AND_LIMITATIONS.md) when they fall further
@@ -139,11 +140,17 @@ def validate_excel_file(
 
     # ---- 1. File-level validation ----
     lowered = filename.lower()
-    if not lowered.endswith((".xlsx", ".xls", ".csv")):
-        issues.append(ValidationIssue(None, None, "Invalid file type - must be .xlsx, .xls or .csv"))
+    if not lowered.endswith((".xlsx", ".xls", ".csv", ".zip")):
+        issues.append(ValidationIssue(None, None, "Invalid file type - must be .xlsx, .xls, .csv or a Shapefile .zip"))
         return records, issues
 
-    if lowered.endswith(".csv"):
+    if lowered.endswith(".zip"):
+        try:
+            raw = shapefile_zip_as_frame(file_bytes, max_rows=max_rows)
+        except ShapefileError as exc:
+            issues.append(ValidationIssue(None, None, f"Could not read the Shapefile: {exc}"))
+            return records, issues
+    elif lowered.endswith(".csv"):
         try:
             raw = read_csv_as_frame(file_bytes)
         except Exception as exc:

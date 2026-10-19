@@ -200,8 +200,8 @@ async def send_climate_data(
         raise HTTPException(status_code=400, detail="Only .csv or .xlsx files are accepted")
     contents = await file.read()
     size_mb = len(contents) / (1024 * 1024)
-    if size_mb > settings.MAX_UPLOAD_SIZE_MB:
-        raise HTTPException(status_code=400, detail=f"File exceeds the {settings.MAX_UPLOAD_SIZE_MB}MB limit ({size_mb:.1f}MB)")
+    if size_mb > settings.MAX_CLIMATE_UPLOAD_SIZE_MB:
+        raise HTTPException(status_code=400, detail=f"File exceeds the {settings.MAX_CLIMATE_UPLOAD_SIZE_MB}MB limit ({size_mb:.1f}MB)")
 
     source = INGEST_SOURCES[client.scope]
     try:

@@ -47,3 +47,6 @@ will not go past the certificate warning (it remembers production's HSTS for the
 * Same machine: a load test competes with production for the processor and memory, so run heavy tests when production is quiet, or on a separate machine.
 * The certificate is self-signed (not trusted by browsers): expected for a rehearsal.
 * Staging cannot prove how production behaves with its real volume of data; it proves the procedure and the code.
+
+## Starting again on a new database (found 12 October 2026)
+After `down -v` (always with `-p cdr-staging`) the database is new and has no `cdr_app` role, but `.env.staging` still pointed the backend at it from the earlier run, so `staging_up` stopped with "backend did not become healthy" (the log said `password authentication failed for user "cdr_app"`). `staging_up.ps1` and `staging_up.sh` (and `prod_up` the same way, for a restore onto a new machine) now check whether the role exists and, if not, start the backend as the database owner until stage 2 creates it. Not run in the authoring workspace (no PowerShell or Docker): the owner runs `staging_up.ps1` once after `down -v` to confirm. If it ever happens with an older copy of the script, put the owner connection back by hand: `BACKEND_DATABASE_URL=postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@db:5432/climate_data_repository` in `.env.staging`, then run the script again.

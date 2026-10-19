@@ -32,6 +32,11 @@ from app.models.models import User, Institution, RoleEnum, InstitutionType
 # test has to remember to reset.
 limiter.enabled = False
 
+# The dashboard totals are remembered between requests in production (app/services/analytics_service.py). The tests change loans directly after approving a
+# submission, which production never does, so the memory is off for the whole session; tests/test_analytics_cache.py switches it on for its own tests.
+from app.core.config import settings as _settings  # noqa: E402
+_settings.ANALYTICS_CACHE_ENABLED = False
+
 TEST_ENGINE = create_engine(
     "sqlite://",
     connect_args={"check_same_thread": False},

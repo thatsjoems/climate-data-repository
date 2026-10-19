@@ -21,7 +21,16 @@ wait_healthy() {
 
 mkdir -p backups/status   # where the backup task leaves its result for the monitor
 echo "1/4 Starting the database and the backend ..."
-docker compose "${C[@]}" up -d --build db backend
+docker compose "${C[@]}" up -d db
+wait_healthy db
+# A brand-new database (a first start, after `down -v`, or a restore onto a new machine) has no cdr_app role yet, while this file may already point the backend
+# at it from an earlier run, and the backend would never become healthy. Only when the role is missing, start the backend as the database owner again.
+role_there=$(echo "select 1 from pg_roles where rolname='cdr_app'" | docker compose "${C[@]}" exec -T db sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB -tA' || true)
+if ! echo "$role_there" | grep -q 1; then
+  echo "    (a new database: the backend starts as the database owner until cdr_app exists)"
+  sed -i.bak "s|^BACKEND_DATABASE_URL=.*|BACKEND_DATABASE_URL=postgresql://$(env_value POSTGRES_USER):$(env_value POSTGRES_PASSWORD)@db:5432/climate_data_repository|" .env.production && rm -f .env.production.bak
+fi
+docker compose "${C[@]}" up -d --build backend
 wait_healthy backend
 
 echo "2/4 Creating the restricted database role cdr_app ..."

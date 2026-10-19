@@ -33,6 +33,7 @@ and `--mixed` (with `--big-rows`: people keep reading the dashboards **while** t
 With `--big-rows` the tool then **approves** the large file and has people read the dashboards **again at that size** (`read_large`), and it prints how much memory the backend container used.
 While it runs you can also watch the machine in another window: `docker stats`.
 A full test of the worst case: `... load_test.py run --big-rows 100000 --mixed` (about five minutes).
+To measure the Shapefile ZIP path (`SHAPEFILE_UPLOAD.md`) add `--big-format zip`: the same loans are sent as a ZIP (a table plus records without a shape) instead of Excel, e.g. `... load_test.py run --big-rows 100000 --big-format zip --mixed`. The tool prints the size of the file it sends. Measured without the database (11 October 2026, a plain machine): 100,000 loans as a ZIP are read in 0.9 s and checked in 2.3 s with about 470 MB of memory at the peak; the whole upload time on staging also includes storing the rows, which is what the Excel figure above (95.7 s) is mostly made of.
 
 ## Reading the result
 For each scenario: how many requests, how many failed, requests per second, and the time in milliseconds (median `p50`, `p95` = 19 in 20 were faster, `p99`, `max`).
@@ -48,7 +49,7 @@ recreating the backend; `down -v` erases them with everything else.
 | Uploading a 2,000-loan file, p95 | 30 s | the file is checked row by row |
 | Approving a submission, p95 | 5 s | |
 | Errors | at most 1% | |
-| The largest file (100,000 loans), time to be checked | 120 s | the longest a person should wait; the web server allows these uploads 300 s |
+| The largest file (100,000 loans), time to be checked | 120 s | the longest a person should wait; the web server allows these uploads 600 s |
 | Reading while that file is being checked, p95 | 3 s | one bank's big file should not stall everyone |
 | Approving that file, p95 | 30 s | |
 **They are starting points, not requirements.** The Bank has not stated performance requirements; agreeing them is an open decision (TBD) for BOT.
@@ -159,3 +160,97 @@ Same figures by definition (NULL and empty customer numbers excluded, as before)
 `db_diagnose.py` now **times the old and the new way side by side on the real data and checks that the figures are equal**: that, not the load test, is the evidence for this change.
 **If that is not enough**, the next step is to remember the summary between requests while the approved data has not changed (the key would be the state of the submissions table, exact because loans are never edited after the upload). It was not done first because a cache that is wrong is worse than a slow page.
 The load test reads far faster than people do (a request every 50 to 300 ms per person; a person reading a dashboard waits seconds), so its p95 at 20 readers over-states what 20 real analysts would see. It is still the right test for a deadline day and for growth.
+
+## Shapefile ZIP measurement (staging, 12 October 2026)
+`load_test.py run --big-rows 100000 --big-format zip --mixed`, on the developer's machine (staging, production and the development stack all ran on it), synthetic data. Not a promise about the Bank's server.
+
+| Measure | Result | Target |
+|---|---|---|
+| ONE Shapefile ZIP of **100,000 loans** (3.6 MB), checked and stored | **76 s**, valid, no error | 120 s: pass |
+| Approving it | p95 **165 ms** | 30 s: pass |
+| Reading while it was being checked (20 people) | p95 **2.45 s**, no error | 3 s: pass |
+| Eight files of 2,000 loans at once | p95 13.8 s | 30 s: pass |
+| Sign-in / approval | p95 0.8 s / 0.15 s | pass |
+| Reading dashboards, 20 people | p95 **1.70 s** | 1.5 s: **missed** |
+| Reading again with the large file approved | p95 **1.91 s** | 1.5 s: **missed** |
+| Memory of the backend container | peak 678 MB (the tool itself alone 224 MB) | no limit set |
+
+The ZIP path works at the largest size and is faster than the Excel one (76 s against 95.7 s on 7-8 October), with no errors.
+
+**The two misses are reading speed, not the ZIP.** On 7-8 October the same reading test gave p95 391 ms at 56 requests a second; now 1.70 s at 22 a second. Two things differ and this run cannot separate them: (1) the staging database now holds the large submissions of earlier runs, so the dashboards add up far more rows (`kpi_summary` and `combined_exposure` are the slowest pages); (2) the development stack was running on the same machine. To tell them apart: stop the development stack (`docker compose down`), erase staging with `docker compose -p cdr-staging -f docker-compose.prod.yml --env-file .env.staging down -v` (always with `-p cdr-staging`), start it again with `staging_up.ps1`, run `setup`, and run the same test. If reading is fast again, the slowdown comes from the data volume, and the dashboard queries over 100,000+ approved loans are the next thing to improve (a decision for the Bank on the volumes it expects; the targets are still proposals).
+
+## Second ZIP measurement, on a clean staging (12 October 2026)
+Same command, after `down -v` (new database), with nothing else running. Synthetic data; the developer's machine (2 processors in the container runtime), not the Bank's server.
+
+| Measure | Result | Target |
+|---|---|---|
+| Reading dashboards, 20 people (before the large file) | p95 **0.90 s** | 1.5 s: **pass** |
+| Reading while the large file was being checked | p95 **1.16 s**, 6,328 requests, no error | 3 s: pass |
+| ONE ZIP of 100,000 loans, checked and stored **while 20 people keep reading** | **247 s**, valid, no error | 120 s: **missed** |
+| Approving it | p95 316 ms | pass |
+| Reading again with the 100,000 loans approved | p95 **1.80 s** | 1.5 s: **missed** |
+| Eight files of 2,000 at once / sign-in | p95 12.2 s / 0.7 s | pass |
+| Memory of the backend container | peak 674 MB (the tool alone 224 MB) | no limit set |
+
+**What this tells us.**
+1. The first run's slow reading (1.7 s) was the accumulated data and the second stack running: on a clean staging reading is **0.9 s**. The earlier explanation is confirmed.
+2. The large upload took **76 s** in the first run (readers slowed by a full database, 16 requests a second) and **247 s** now (readers fast, 25 requests a second). The application runs as ONE process (`uvicorn` without `--workers`), so a large upload and 20 busy readers share one processor's worth of Python: the faster the readers are served, the longer the upload waits. The upload is not slower in itself; the **mixed** scenario trades one for the other. Run it **without `--mixed`** to get the upload's own time (expected well under 100 s, like the 76 s of the first run or less).
+3. With 100,000 approved loans in the data the dashboards take p95 1.8 s: the aggregation queries over that many rows are what to improve (or the 1.5 s target to agree with the Bank for that volume).
+
+**Options, not done (a decision for after the Bank states volumes and hardware):** (a) more worker processes (`uvicorn --workers N`): this needs care first, because each worker would run its own background monitor (duplicate alerts) and its own in-memory rate limit counters (limits multiplied by N); (b) faster dashboard queries for large volumes (pre-computed totals, an index review); (c) accept the numbers: 100,000 loans in one file is the worst case, and the Bank has not set performance requirements.
+
+## Third ZIP measurement: the upload alone (staging, 12 October 2026)
+`load_test.py run --big-rows 100000 --big-format zip` (no `--mixed`), straight after the second run on the same staging (so the database already held the 100,000 loans of that run).
+
+| Measure | Result | Target |
+|---|---|---|
+| ONE ZIP of 100,000 loans, checked and stored, nobody else reading | **17 s**, valid, no error | 120 s: pass |
+| Approving it | p95 131 ms | pass |
+| Reading dashboards, 20 people (200,000 loans already approved in the data) | p95 **1.59 s** | 1.5 s: missed by 0.09 s |
+| Reading again after approving (300,000 loans) | p95 **0.77 s** | pass |
+| Eight files of 2,000 / sign-in | p95 12.9 s / 1.1 s | pass |
+| Memory of the backend container | peak 807 MB (the tool alone 224 MB, so at most 583 MB for the application) | no limit set |
+
+**Conclusion for the Shapefile ZIP.** The upload itself is fast: 17 s for the largest allowed file (the Excel file of the same size took 95.7 s on 7-8 October). The 76 s and 247 s of the mixed runs measure the single application process being shared with 20 busy readers, not the upload. Reading figures move between 0.77 s and 1.9 s from run to run on this one machine (data volume, other work, caching), so a single figure around the 1.5 s proposal means "close to the limit", not a defect. Memory stays below 1 GB for the whole test including the tool.
+
+**Still open (Bank's inputs):** the volumes it expects, the hardware, and agreed targets; then the options above (workers, faster dashboard queries). The test should be repeated on the Bank's staging server.
+
+## Dashboard speed: remembering the totals (13 October 2026)
+
+**Measured first** (`db_diagnose.py` and `load_test.py run` on staging, 116,000 current approved loans, 20 readers, development stack stopped): reading p95 **1.75 s** (limit 1.5 s, missed). By page, p95: `combined_exposure` 2.03 s, `map_points` 2.01 s, `hazard_exposure` 2.00 s, `kpi_summary` 1.13 s (the most requested), the rest under 0.8 s. The summary figures the way the application computes them took 345 ms (936 ms the old way, same figures); the by-region sum over the loans took **500 ms**, and **three pages repeat that same sum** (the combined exposure, the hazard exposure and the map, which is built on the hazard exposure), so one dashboard load paid for it three times.
+
+**Changed** (`analytics_service.py`, `_remembered`): the by-region and by-period sums, and the summary's loan totals and borrowers, are kept in memory and reused **only while the set of current approved submissions is unchanged**. On every request the application reads a small fingerprint of that set (the id and loan counts of each current approved submission: a few rows, from an index) and uses a stored answer only for the same fingerprint, the same security scope (an institution's own figures are never given to another scope) and the same filters. The loans of a submission are written once at upload and never changed, so the sums change only through an approval, a replacement by a corrected version or a rejection, and each of those changes the fingerprint at once. The counts of submissions by status are not remembered. The memory holds plain tuples, is bounded (128 answers), is private to each process (several processes stay exact, because each checks the same fingerprint), and `ANALYTICS_CACHE_ENABLED=false` switches it off.
+
+**Expected, to be measured:** the first request after an approval pays the full cost once; the others are answered without reading the loans. The load test approves files during its run, so repeat `load_test.py run` on the same staging and compare the `read:` rows above. **Not verified here** (no database or test packages in this workspace): the 12 tests in `test_analytics_cache.py` (the logic of the memory was checked with stand-ins) and the new timings. **Rollback:** `ANALYTICS_CACHE_ENABLED=false` in `.env.production` and restart the backend, or put back the previous package.
+
+**Result (owner, 13 October 2026; staging, development stack and a crash-looping old container stopped; `load_test.py run`, 20 readers for 60 s).** The 12 tests of `test_analytics_cache.py` passed (850 passed, 2 skipped in the whole suite). Three runs on the same staging, one after another:
+
+| Measure | Memory ON (run 1) | Memory ON (run 2) | Memory OFF (`ANALYTICS_CACHE_ENABLED=false`) |
+|---|---|---|---|
+| Reading, p95 | **188 ms** | **182 ms** | 685 ms |
+| Reading, p50 | 63 ms | 60 ms | 218 ms |
+| Requests a second | 78.5 | 79.5 | 45.8 |
+| `combined_exposure` p95 | 154 ms | 149 ms | 474 ms |
+| `hazard_exposure` p95 | 192 ms | 136 ms | 471 ms |
+| `map_points` p95 | 174 ms | 154 ms | 502 ms |
+| `kpi_summary` p95 | 183 ms | 172 ms | 809 ms |
+| Backend memory, peak | 331 MB | 364 MB | 309 MB |
+
+Reading is about 3.6 times faster at p95 and the throughput 1.7 times higher with the memory on; the proposed limit (1.5 s) is met by a wide margin. **Limits of this evidence:** (1) the OFF figure (685 ms) is far below the earlier baseline of the same code (1.74 to 1.88 s, 12 October), so the machine and probably the data volume were lighter than before (the number of stored loans was not recorded; run `db_diagnose.py` to record it); only the comparison inside this table is valid; (2) the OFF run came last and each run adds data (8 files of 2,000 loans), which favours the memory very slightly; (3) the memory was exercised with one process; several processes (`--workers`) were not measured. The first request after an approval pays the full cost once.
+
+### A file of 100,000 loans through the browser, development stack (14 October 2026, the owner's machine)
+
+One `.xlsx` file of 100,000 loans (19 MB) with a loan and a collateral coordinate in **every** row, uploaded by an institution user at `http://localhost:5173`, nothing else running. The backend's own log line:
+
+`upload stored: rows=100000 findings=0 status=VALID validate_s=126.2 store_s=77.6 commit_s=0.0 total_s=203.8 process_peak_mb=627`
+
+| Measure | Result |
+|---|---|
+| Total time | **204 s** (checking 126 s, storing 78 s) |
+| Memory of the application process (peak) | 627 MB; the container was not killed (`OOMKilled` false, 0 restarts) |
+| Answer | `201`, 124 KB (one page of rows, as designed) |
+
+* The first attempt, the same day, ended in an error after about a minute: the development web server (`frontend/nginx.conf`) had no time limit set for uploads, so nginx's default of 60 s applied, while production already allowed 300 s. Fixed; the second attempt succeeded.
+* **204 s is two thirds of the 300 s that was allowed**, and earlier measurements showed 210 s with 20 people reading at the same time. The limit for the three file endpoints is now **600 s** (development and production), which leaves room for a slower machine or a busy day; it does not make the wait shorter.
+* This is slower than the 96 s measured on 8 October. That file and machine were different (no coordinates in every row is the likely main difference: each coordinate is looked up in the ward boundaries); the two figures are not comparable, and this one, with coordinates in every row, is the realistic case for the Bank.
+* Where the time goes: reading the Excel sheet is most of the checking time (profile of 5,000 rows: about 85% of it), storing is the second largest part. Options, not done: read the sheet with a faster library (needs testing against Excel-made files), store with PostgreSQL `COPY` instead of INSERT, or check the file in the background and show progress (the remedy that does not depend on the speed of the machine).

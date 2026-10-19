@@ -26,7 +26,10 @@ class Settings(BaseSettings):
 
     # File upload hardening (Module F: Data Quality & Validation) - prevents a
     # single oversized/malformed file from exhausting server memory or CPU.
-    MAX_UPLOAD_SIZE_MB: int = 20
+    # 50 MB is the Concept Note's limit for the loan and collateral upload (Excel, CSV or a Shapefile .zip). The climate files (a staff upload and the
+    # TMA/PMO sending) keep their own, smaller ceiling.
+    MAX_UPLOAD_SIZE_MB: int = 50
+    MAX_CLIMATE_UPLOAD_SIZE_MB: int = 20
     MAX_UPLOAD_ROWS: int = 100000
 
     # Login brute-force protection (Module A: secure authentication).
@@ -37,6 +40,9 @@ class Settings(BaseSettings):
     TRUSTED_PROXIES: str = ""
     # The rate limits (sign-in and the general ceiling). Only staging switches them off, for load tests: the production checker refuses it there.
     RATE_LIMIT_ENABLED: bool = True
+    # Remember the dashboard totals while the set of current approved submissions is unchanged (exact, see app/services/analytics_service.py).
+    # False switches it off (the tests do, except the ones about the memory itself).
+    ANALYTICS_CACHE_ENABLED: bool = True
     # Monitoring (see docs/MONITORING.md). 0 = the background monitor is off (development and the tests); production runs it every 10 minutes.
     MONITOR_INTERVAL_MINUTES: int = 0
     BACKUP_STATUS_DIR: str = "/backup-status"        # where the backup task leaves its result (mounted read-only into the backend)

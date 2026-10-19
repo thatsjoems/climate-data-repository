@@ -35,7 +35,7 @@ from app.services.climate_upload_service import ConcurrentUploadError, batch_wit
 
 router = APIRouter(prefix="/climate-data", tags=["Climate Data Ingestion"])
 
-MAX_CLIMATE_FILE_SIZE_MB = settings.MAX_UPLOAD_SIZE_MB  # reuse the same configured ceiling as submissions
+MAX_CLIMATE_FILE_SIZE_MB = settings.MAX_CLIMATE_UPLOAD_SIZE_MB
 
 # Provenance control (Module: source integrity) - found via external review:
 # an unrestricted free-text "source" field let an analyst label ANY file

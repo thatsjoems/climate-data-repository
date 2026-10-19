@@ -71,6 +71,18 @@ EXPECTED_COLUMNS = {
     "audit_logs": {"details_json"},
 }
 
+# True/false columns that must never be empty (migration a1c4e8f2b603), and the index that migration added. Reported on their own line, so the count
+# of CHECK constraints and unique indexes above stays what it was.
+EXPECTED_NOT_NULL = {
+    "institutions": {"is_active"},
+    "users": {"is_active"},
+    "submission_records": {"is_valid"},
+    "notifications": {"is_read"},
+}
+EXPECTED_PLAIN_INDEXES = {
+    "climate_ingestion_batches": {"ix_climate_ingestion_batches_uploaded_by_user"},
+}
+
 
 def main() -> int:
     engine = create_engine(settings.DATABASE_URL)
@@ -101,6 +113,16 @@ def main() -> int:
         for name in sorted(gap):
             missing.append(f"Column '{name}' missing on table '{table}'")
 
+    for table, expected_names in EXPECTED_NOT_NULL.items():
+        nullable = {c["name"] for c in inspector.get_columns(table) if c.get("nullable")}
+        for name in sorted(expected_names & nullable):
+            missing.append(f"Column '{table}.{name}' allows NULL (it must not)")
+
+    for table, expected_names in EXPECTED_PLAIN_INDEXES.items():
+        actual = {idx["name"] for idx in inspector.get_indexes(table)}
+        for name in sorted(expected_names - actual):
+            missing.append(f"Index '{name}' missing on table '{table}'")
+
     unvalidated = []
     if engine.dialect.name == "postgresql":
         with engine.connect() as conn:
@@ -115,6 +137,7 @@ def main() -> int:
         + sum(len(v) for v in EXPECTED_UNIQUE_INDEXES.values())
         + sum(len(v) for v in EXPECTED_COLUMNS.values())
     )
+    extra = sum(len(v) for v in EXPECTED_NOT_NULL.values()) + sum(len(v) for v in EXPECTED_PLAIN_INDEXES.values())
 
     if missing:
         print(f"FAILED: {len(missing)} of {total_expected} expected database-level protections are missing:")
@@ -125,6 +148,7 @@ def main() -> int:
         return 1
 
     print(f"OK: all {total_expected} expected CHECK constraints and unique indexes are present on the real database.")
+    print(f"OK: {extra} further checks passed (true/false columns that may not be NULL, and one foreign-key index).")
     if unvalidated:
         print("\nWARNING: these CHECK constraints exist and are enforced for new rows, but were added NOT VALID")
         print("because older rows break them. Find and fix those rows, then run for each:")

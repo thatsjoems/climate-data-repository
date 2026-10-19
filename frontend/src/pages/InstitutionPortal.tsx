@@ -95,7 +95,7 @@ export default function InstitutionPortal() {
     const url = window.URL.createObjectURL(new Blob([res.data]))
     const link = document.createElement('a')
     link.href = url
-    link.setAttribute('download', 'CDR_Loan_Collateral_Template.xlsx')
+    link.setAttribute('download', 'BOT-CDR-Loan_Collateral-Template.xlsx')
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -249,15 +249,21 @@ export default function InstitutionPortal() {
                 <option key={p} value={p}>{p}</option>
               ))}
             </select>
-            <label>Completed file (Excel .xlsx / .xls, or CSV .csv)</label>
+            <label>Completed file (Excel .xlsx / .xls, CSV .csv, or Shapefile .zip; up to 50 MB)</label>
             <input
               type="file"
-              accept=".xlsx,.xls,.csv"
+              accept=".xlsx,.xls,.csv,.zip"
               onChange={(e) => setFile(e.target.files ? e.target.files[0] : null)}
             />
             <button className="btn-accent" type="submit" disabled={uploading} style={{ alignSelf: 'stretch', textAlign: 'center' }}>
-              {uploading ? 'Uploading...' : 'Submit Data'}
+              {uploading ? 'Uploading and checking...' : 'Submit Data'}
             </button>
+            {uploading && (
+              <div className="alert-info" role="status">
+                Your file is being checked. This can take a few minutes for a large file (up to 100,000 loans). Please keep this page open and do not press
+                Submit Data again: that would create a second version of the submission.
+              </div>
+            )}
           </form>
           {uploadMessage && <div className="alert-info">{uploadMessage}</div>}
         </div>

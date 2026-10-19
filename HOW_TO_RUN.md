@@ -42,7 +42,11 @@ your system tray, not spinning/loading) before continuing.
 
 That's the whole system running - no further setup is needed.
 
-## Demo Accounts to Try
+## Demo Accounts to Try (DEVELOPMENT AND TRAINING ONLY)
+
+These accounts exist only in this development setup, and their passwords are written here, so anyone who reads this file knows them.
+They are never created in staging or production, and must never be created or reused there (production starts with no accounts; the first
+administrator is made with `scripts/create_admin.py`, see `docs/DATABASE_OPERATIONS.md`).
 
 | Role | Username | Password |
 |---|---|---|
