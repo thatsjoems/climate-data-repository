@@ -27,6 +27,8 @@ The system consists of three components, all run together with Docker:
 3. **Frontend** (React / TypeScript) — the web application end users interact with.
    Reachable at: `http://localhost:5173`.
 
+Sign-in links for every environment (development, staging, production) are on one page: [`docs/LOGIN_LINKS.md`](docs/LOGIN_LINKS.md).
+
 Docker is the **only** supported way to run this project — there is no separate manual/local
 Python+Node setup to maintain, which keeps the environment identical for every developer.
 
@@ -51,30 +53,38 @@ This builds and starts three containers — `db` (PostgreSQL), `backend` (FastAP
 `frontend` (the React app, served via nginx). The backend automatically waits for the
 database, creates tables, and loads demo accounts on first run.
 
-Once all three show as running, open:
+Once all three show as running, open the sign-in page that matches your account
+(details in step 2):
 
-- Frontend: **http://localhost:5173**
-- Backend API docs: **http://localhost:8000/docs**
+- Institution users: **http://localhost:5173/login**
+- BOT staff and administrators: **http://localhost:5173/staff/login**
+- Backend API documentation (development only): http://localhost:8000/docs
 
 See `docs/DOCKER.md` for more detail (stopping, resetting data, inspecting the database).
 
-### 2. Log In
+### 2. Log In - Two Separate Sign-in Pages
 
-> **DEVELOPMENT AND TRAINING ONLY.** The accounts below exist only in the development stack (`docker-compose.yml`), with passwords that are written in this
-> file and therefore known to anyone who reads it. They are never created in staging or production, and must never be created, copied or recreated there.
+The system has two sign-in pages, one for each kind of user. An account cannot sign in on
+the other page; a wrong choice gives the same message, "Incorrect username or password".
 
-Use one of the demo accounts printed in the `backend` container's log output:
-
-| Role | Username | Password |
+| User type | Sign-in link (development) | Demo account |
 |---|---|---|
-| System Admin | `admin` | `Admin@123` |
-| BOT Analyst (Internal) | `bot_analyst` | `Analyst@123` |
-| Institution (Bank A) | `bankA_user` | `BankA@123` |
+| **Institution user** (bank or other reporting institution) | http://localhost:5173/login | `bankA_user` / `BankA@123`<br>`bankB_user` / `BankB@123` |
+| **BOT analyst** | http://localhost:5173/staff/login | `bot_analyst` / `Analyst@123` |
+| **System administrator** | http://localhost:5173/staff/login | `admin` / `Admin@123` |
 
-**Do not use these accounts or passwords anywhere other than your own development machine.**
+Forgot password (both user types): http://localhost:5173/forgot-password
 
-In production (`ENVIRONMENT=production`) these accounts are **not created at all**; create the first
-administrator with `scripts/create_admin.py` - see
+> **DEVELOPMENT AND TRAINING ONLY.** The accounts above exist only in the development stack
+> (`docker-compose.yml`), with passwords that are written in this file and therefore known to
+> anyone who reads it. They are never created in staging or production, and must never be
+> created, copied or recreated there. Do not use them anywhere other than your own
+> development machine.
+
+Links for staging and production are on one page: [`docs/LOGIN_LINKS.md`](docs/LOGIN_LINKS.md).
+
+In production (`ENVIRONMENT=production`) the demo accounts are **not created at all**; create
+the first administrator with `scripts/create_admin.py` - see
 [`docs/DATABASE_OPERATIONS.md`](docs/DATABASE_OPERATIONS.md), section 3, which also covers backups.
 
 ### 3. After pulling updates
