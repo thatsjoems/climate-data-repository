@@ -5,6 +5,7 @@ Times the two ways of reading an .xlsx upload on a real file, and checks that th
     docker compose cp loans_100000.xlsx backend:/tmp/loans_100000.xlsx
     docker compose exec backend python scripts/bench_excel_read.py /tmp/loans_100000.xlsx            (the two readers, and a comparison of every cell)
     docker compose exec backend python scripts/bench_excel_read.py /tmp/loans_100000.xlsx --full     (also the whole check of the file with each reader, as an upload does)
+    docker compose exec backend python scripts/bench_excel_read.py /tmp/loans_100000.xlsx --profile  (only: where the time of a whole check goes)
 
 Production: the same with `docker compose -f docker-compose.prod.yml --env-file .env.production exec backend ...` (it only reads the copy under /tmp).
 Exit code 0 = same cells (and, with --full, the same records and findings); 1 = a difference or a failure: do not switch production to the fast reader.
@@ -62,9 +63,28 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("file")
     ap.add_argument("--full", action="store_true", help="also check the whole file with each reader (takes minutes for 100,000 loans)")
+    ap.add_argument("--profile", action="store_true", help="only show where the time of a whole check goes (the slowest functions); takes several minutes for 100,000 loans")
     args = ap.parse_args()
     data = Path(args.file).read_bytes()
     print(f"{args.file}: {len(data) / 1_048_576:.1f} MB")
+
+    if args.profile:
+        import cProfile
+        import io
+        import pstats
+        settings.EXCEL_READER = "auto"
+        profiler = cProfile.Profile()
+        started = time.perf_counter()
+        profiler.enable()
+        validate_excel_file(data, "bench.xlsx")
+        profiler.disable()
+        print(f"The whole check, with the profiler running (it slows everything down, so read the shares, not the seconds): {time.perf_counter() - started:.0f} s")
+        for order, title in (("cumulative", "including what each calls"), ("tottime", "in the function itself")):
+            stream = io.StringIO()
+            pstats.Stats(profiler, stream=stream).strip_dirs().sort_stats(order).print_stats(25)
+            print(f"\nThe 25 functions with the most time, {title}:")
+            print(stream.getvalue())
+        return 0
 
     print("Reading the sheet only:")
     try:
