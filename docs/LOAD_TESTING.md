@@ -255,6 +255,48 @@ One `.xlsx` file of 100,000 loans (19 MB) with a loan and a collateral coordinat
 * This is slower than the 96 s measured on 8 October. That file and machine were different (no coordinates in every row is the likely main difference: each coordinate is looked up in the ward boundaries); the two figures are not comparable, and this one, with coordinates in every row, is the realistic case for the Bank.
 * Where the time goes: reading the Excel sheet is most of the checking time (profile of 5,000 rows: about 85% of it), storing is the second largest part. Options, not done: read the sheet with a faster library (needs testing against Excel-made files), store with PostgreSQL `COPY` instead of INSERT, or check the file in the background and show progress (the remedy that does not depend on the speed of the machine).
 
-## A faster Excel reader (November 2026)
+## The same size of file with the faster Excel reader (14 November 2026, the owner's machine)
 
-The slowest step of an Excel upload, reading the sheet, now uses a faster reader with the old one as the fallback and as a way back (`docs/EXCEL_READER.md`). Measure it on your own file with `backend/scripts/bench_excel_read.py`; the figures above were taken with the old reader.
+Reading the sheet now uses calamine, with openpyxl as the fallback and as a way back (`docs/EXCEL_READER.md`). Two measurements, both on the owner's machine.
+
+### 1. The reader alone, on the same file, both readers (`backend/scripts/bench_excel_read.py --full`)
+
+The file: 100,000 loans, 13.5 MB, a loan coordinate and a collateral coordinate inside a real ward in every row (made by `backend/scripts/make_big_file.py`; the older `loans_100000.xlsx` has no coordinates and costs much less to check).
+
+| Step | openpyxl (before) | calamine (now) | Faster |
+|---|---|---|---|
+| Reading the sheet only | 27.4 s and 36.1 s (two runs) | 5.2 s and 5.3 s | 5.3 and 6.8 times |
+| The whole check, as an upload does it | 37.3 s | 14.2 s | 2.6 times |
+
+All 3,800,038 cells were the same with both readers, and the whole check gave the same 100,000 records and the same 3,223 findings (warnings about ward names the geography list does not know, such as "Chemuchem").
+
+### 2. The whole upload through the browser, development stack
+
+The same file, uploaded by an institution user at `http://localhost:5173`, nothing else running. The backend's own log line:
+
+`upload stored: rows=100000 findings=3223 status=VALID validate_s=18.2 store_s=27.4 commit_s=0.0 total_s=45.6 process_peak_mb=612`
+
+| Measure | 14 October (old reader) | 14 November (new reader) |
+|---|---|---|
+| Checking (`validate_s`) | 126.2 s | **18.2 s** |
+| Storing (`store_s`) | 77.6 s | **27.4 s** |
+| **Total** | **203.8 s** | **45.6 s** |
+| Memory of the application process (peak) | 627 MB | 612 MB |
+
+About 4.5 times faster. **Limits of this comparison:** the two files are alike in kind (coordinates in every row) but not the same file (19 MB then, 13.5 MB now, and today's was made from about 1,500 different wards, so many places repeat); the date rules and other small changes were also made between the two dates, so the 4.5 times is not all the reader. The benchmark in table 1 is the clean comparison of the reader. One run, not an average; the Bank's server was not measured.
+
+### What this does to the crowd question (an estimate, not a measurement)
+
+Uploads share one process and are worked one after another, so a crowd's total time is roughly the number of loans times the cost of one. Today: 45.6 s for 100,000, about **0.46 s for every 1,000 loans** (about 2 s before). On that basis:
+
+| Crowd | Loans in all | Time until everyone is done |
+|---|---|---|
+| 8 institutions, 2,000 loans each (measured on 8 October: 13 to 16 s) | 16,000 | about 7 s |
+| 20 institutions, 5,000 loans each | 100,000 | about 46 s |
+| 30 institutions, 20,000 loans each | 600,000 | about 4.6 minutes, under the 600 s limit |
+
+A far bigger crowd (for example 50 institutions with files of 20,000 loans or more at once) could still pass the 600 s limit; checking in the background with progress is the remedy then, and it needs the Bank's real file sizes and number of institutions to be worth building. To confirm the estimate on the Bank's server: `backend/scripts/load_test.py` (see above), then read the `upload stored` lines.
+
+### What is left
+
+Storing (27 s of the 46) is now the larger part. Storing with PostgreSQL `COPY` instead of INSERT could cut it to roughly a third (an estimate); it is not worth its risk until the Bank's files are known to be this large.
