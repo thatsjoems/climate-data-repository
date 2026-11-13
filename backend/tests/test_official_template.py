@@ -138,6 +138,16 @@ def test_the_money_columns_show_thousands_separators(wb):
     assert ws["M10"].number_format == "General"       # the interest rate is not money
 
 
+# ------------------------------------------------------------------------------------------------ date columns
+def test_the_date_columns_show_dates_as_year_month_day(wb):
+    """A date typed into a General cell is shown in the computer's own order (11/11/2026), which is confusing next to the header and the example
+    (2026-03-15). The three date columns carry the format yyyy-mm-dd, so a typed date is a real date cell that is shown the way the upload reads it."""
+    ws = wb["Loan_Collateral_Data"]
+    for col in ("H", "I", "Y"):                       # disbursement, maturity, collateral pledged
+        assert ws.column_dimensions[col].number_format.replace("\\", "") == "yyyy-mm-dd", col
+    assert ws["H10"].value == "2026-03-15"            # the example row is unchanged
+
+
 # ------------------------------------------------------------------------------------------------ the download
 def test_the_download_needs_a_login(client):
     assert client.get("/api/templates/loan-collateral/download").status_code in (401, 403)

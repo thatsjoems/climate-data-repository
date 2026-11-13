@@ -23,4 +23,6 @@ Before this rule, text dates were read month-first without saying so. A date wri
 The Bank has not chosen a convention, and the system does not choose one for it. Dates that can mean only one thing are accepted; the rest are refused with both readings named. If the Bank decides that every text date is day first, the change is one rule in `app/services/date_rules.py` (the branch for both numbers 12 or less) and its test.
 
 ## For institutions: the easy way
-Format the three columns as **Date** in Excel and type or paste the dates. The file then carries real dates and no reading is needed. The official template shows an example in the `YYYY-MM-DD` form.
+In the official template the three date columns (Disbursement Date, Maturity Date, Collateral Pledged Date) are formatted `yyyy-mm-dd`, so a date typed into them is a real date cell shown as typed (2026-11-11, not 11/11/2026). The file then carries real dates and no reading is needed. The example row shows the `YYYY-MM-DD` form.
+
+**If a file is refused with "a number (46337) is not accepted as a date".** The cell holds a plain number, not a date. This happens when a date is pasted as a value into a General or Number cell, or the file was built outside the template (a copy of an older template, another program). Select the column, choose Format Cells, then Date (or Text and type `2026-11-11`), and enter the dates again. An older copy of the template (before this format was added) shows a typed date as 11/11/2026 in the computer's own order; download the template again.
