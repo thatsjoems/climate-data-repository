@@ -25,6 +25,13 @@ docker compose exec backend python scripts/bench_excel_read.py /tmp/loans_100000
 ```
 `RESULT: the same cells; the fast reader is safe for this file.` means it can be used. Any other result: set `EXCEL_READER=openpyxl` and send the output to the developer.
 
+A file like a bank's (coordinates for the loan and for the collateral in every row, inside real wards) is made with `backend/scripts/make_big_file.py`; the older `loans_100000.xlsx` has no coordinates and is much cheaper to check:
+
+```powershell
+docker compose run --rm --no-deps -v "${PWD}\backend:/app" -v "$HOME\Downloads:/out" backend python scripts/make_big_file.py /out/loans_100000_coords.xlsx --rows 100000
+docker compose run --rm --no-deps -v "${PWD}\backend:/app" -v "$HOME\Downloads:/bench:ro" backend python scripts/bench_excel_read.py /bench/loans_100000_coords.xlsx --full
+```
+
 ## Dependency
 
 `python-calamine==0.3.2` (MIT licence, a Rust library with ready-made wheels; no compiler needed), pinned in `backend/requirements.txt`; see `docs/DEPENDENCY_SECURITY.md`.
