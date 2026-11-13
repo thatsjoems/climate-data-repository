@@ -11,6 +11,7 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.32
 openpyxl==3.1.5
+python-calamine==0.3.2                 # the fast reader of uploaded .xlsx files (app/services/excel_reader.py); openpyxl stays as the fallback
 pandas==2.2.2
 python-dotenv==1.2.4
 psycopg2-binary==2.9.9

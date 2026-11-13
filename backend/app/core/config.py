@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # Remember the dashboard totals while the set of current approved submissions is unchanged (exact, see app/services/analytics_service.py).
     # False switches it off (the tests do, except the ones about the memory itself).
     ANALYTICS_CACHE_ENABLED: bool = True
+    # How an uploaded .xlsx is read (app/services/excel_reader.py): "auto" = the fast reader (calamine), and openpyxl if it fails; "openpyxl" = the old reader only
+    # (the way back, no rebuild needed); "calamine" = the fast reader only (tests and measurements).
+    EXCEL_READER: str = "auto"
     # Monitoring (see docs/MONITORING.md). 0 = the background monitor is off (development and the tests); production runs it every 10 minutes.
     MONITOR_INTERVAL_MINUTES: int = 0
     BACKUP_STATUS_DIR: str = "/backup-status"        # where the backup task leaves its result (mounted read-only into the backend)

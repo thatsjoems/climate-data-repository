@@ -254,3 +254,7 @@ One `.xlsx` file of 100,000 loans (19 MB) with a loan and a collateral coordinat
 * **204 s is two thirds of the 300 s that was allowed**, and earlier measurements showed 210 s with 20 people reading at the same time. The limit for the three file endpoints is now **600 s** (development and production), which leaves room for a slower machine or a busy day; it does not make the wait shorter.
 * This is slower than the 96 s measured on 8 October. That file and machine were different (no coordinates in every row is the likely main difference: each coordinate is looked up in the ward boundaries); the two figures are not comparable, and this one, with coordinates in every row, is the realistic case for the Bank.
 * Where the time goes: reading the Excel sheet is most of the checking time (profile of 5,000 rows: about 85% of it), storing is the second largest part. Options, not done: read the sheet with a faster library (needs testing against Excel-made files), store with PostgreSQL `COPY` instead of INSERT, or check the file in the background and show progress (the remedy that does not depend on the speed of the machine).
+
+## A faster Excel reader (November 2026)
+
+The slowest step of an Excel upload, reading the sheet, now uses a faster reader with the old one as the fallback and as a way back (`docs/EXCEL_READER.md`). Measure it on your own file with `backend/scripts/bench_excel_read.py`; the figures above were taken with the old reader.

@@ -10,7 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-co
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# A slow or unstable network must not fail the build: wait longer for each download and try again (a failed pip read timeout stopped a build on 12 November 2026).
+RUN pip install --no-cache-dir --default-timeout=120 --retries 8 -r requirements.txt
 
 COPY . .
 

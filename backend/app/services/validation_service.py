@@ -13,6 +13,7 @@ import re
 import pandas as pd
 
 from app.services.date_rules import EMPTY, OK, date_problem_hint, read_date
+from app.services.excel_reader import read_excel_grid
 from app.services.template_generator import (
     REQUIRED_COLUMNS, TANZANIA_REGIONS, HAZARD_OPTIONS, COLUMNS, FIELD_NAMES,
     CLIENT_TYPES, BUSINESS_SIZES, LOAN_TYPES, CURRENCIES, LOAN_ECONOMIC_ACTIVITIES,
@@ -158,10 +159,10 @@ def validate_excel_file(
             return records, issues
     else:
         try:
-            raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name="Loan_Collateral_Data", header=None)
+            raw = read_excel_grid(file_bytes, sheet_name="Loan_Collateral_Data")
         except Exception:
             try:
-                raw = pd.read_excel(io.BytesIO(file_bytes), header=None)
+                raw = read_excel_grid(file_bytes)
             except Exception as exc:
                 issues.append(ValidationIssue(None, None, f"Could not read the Excel file: {exc}"))
                 return records, issues

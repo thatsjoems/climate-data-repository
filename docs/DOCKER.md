@@ -108,3 +108,11 @@ The production checker (`scripts/check_production_config.py`) refuses a compose 
 All services must be `healthy`, and then the load test (`LOAD_TESTING.md`, a short run) and a report download show the application still works as the unprivileged user.
 
 **What this changes for the person at the keyboard.** `docker compose exec` gives a shell as root, and root no longer has the capability that lets it write anywhere regardless of ownership. The application's own folder (`/app/uploads`) belongs to the user `cdr`. So a command that reads or writes FILES there must run as that user: add `-u cdr` after `exec`. Today that means only the load-test tool (`exec -u cdr backend python scripts/load_test.py ...`, `LOAD_TESTING.md`). Commands that only talk to the database (`create_admin.py`, `reset_password.py`, `reset_mfa.py`, `db_diagnose.py`, `verify_db_constraints.py`, `system_check.py`) are not affected. If the load-test tool says "Not set up yet" although `setup` was run, this is the reason, and its message says so.
+
+## Rebuilding everything in one pass
+
+After a change to the code or the requirements, `scripts/rebuild_all.ps1` moves dev, staging and production onto the new images in one run: it builds (and tries again when the network fails), runs the tests, asks you to type YES, takes a backup, then restarts staging and production and checks them. It never deletes a volume. See the comments at the top of the script for its options.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\rebuild_all.ps1
+```

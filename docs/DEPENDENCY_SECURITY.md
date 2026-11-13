@@ -14,6 +14,7 @@ Checked on 11 October 2026 (second scan after the upgrade: one new finding, belo
 | Pillow | 10.4.0 | 12.3.0 | Report images |
 | python-dotenv | 1.0.1 | 1.2.4 | |
 | pytest | 8.3.3 | 9.1.1 | Tests only |
+| python-calamine | (new) | 0.3.2 | Fast reader of uploaded `.xlsx` files; openpyxl stays as the fallback (`docs/EXCEL_READER.md`) |
 
 The versions were chosen by letting `pip` resolve the newest set that fit together (run in a throwaway container), then pinned. After the change the full backend and frontend test suites must pass (they cover uploads, sign-in, two-step sign-in, reports and exports).
 
