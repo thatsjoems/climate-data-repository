@@ -31,3 +31,7 @@ backups/
 # TypeScript incremental build cache
 frontend/tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# compiled Python files, anywhere
+__pycache__/
+*.pyc
