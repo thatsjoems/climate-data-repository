@@ -127,5 +127,126 @@ class FailedAttemptLeavesNothing(unittest.TestCase):
         ops.append_log(pathlib.Path(tempfile.gettempdir()) / "no-such-folder-cdr", "x\n")
 
 
+class StackChoice(unittest.TestCase):
+    """--stack staging points every command at the rehearsal copy; without it nothing changes (production), and production's files are never touched."""
+
+    def setUp(self):
+        ops.use_stack("production")
+
+    def tearDown(self):
+        ops.use_stack("production")
+
+    @staticmethod
+    def _command(project=None):
+        with mock.patch.object(ops.subprocess, "run", return_value=argparse.Namespace(returncode=0, stdout="", stderr="")) as run:
+            ops.compose(["ps"], project)
+        return run.call_args[0][0]
+
+    def test_production_is_the_default_and_is_unchanged(self):
+        cmd = self._command()
+        self.assertEqual(cmd[cmd.index("-p") + 1], "cdr-prod")
+        self.assertEqual(cmd[cmd.index("--env-file") + 1], ".env.production")
+
+    def test_staging_uses_its_own_project_and_secrets(self):
+        ops.use_stack("staging")
+        cmd = self._command()
+        self.assertEqual(cmd[cmd.index("-p") + 1], "cdr-staging")
+        self.assertEqual(cmd[cmd.index("--env-file") + 1], ".env.staging")
+
+    def test_the_drill_project_keeps_the_env_file_of_the_stack_it_rehearses(self):
+        ops.use_stack("staging")
+        cmd = self._command(ops.DRILL)
+        self.assertEqual(cmd[cmd.index("-p") + 1], "cdr-drill")
+        self.assertEqual(cmd[cmd.index("--env-file") + 1], ".env.staging")
+
+    def test_staging_status_file_never_overwrites_the_one_production_reads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, folder_name in (("production", "status"), ("staging", "staging-status")):
+                ops.use_stack(name)
+                out = pathlib.Path(tmp) / ("prod" if name == "production" else "staging")
+                folder = out / "20261115T000000Z"
+                folder.mkdir(parents=True)
+                (folder / "db.dump").write_bytes(b"x")
+                (folder / "uploads.tar").write_bytes(b"x")
+                ops.write_status(out, "20261115T000000Z", folder, "rev", None, None)
+                self.assertTrue((pathlib.Path(tmp) / folder_name / "last_backup.json").is_file(), name)
+            self.assertEqual(sorted(p.name for p in pathlib.Path(tmp).iterdir() if p.name.endswith("status")), ["staging-status", "status"])
+
+    def test_the_drill_teardown_refuses_staging_and_production(self):
+        for stack in ("production", "staging"):
+            ops.use_stack(stack)
+            with mock.patch.object(ops, "compose") as c:
+                ops.teardown_drill()
+            self.assertEqual(c.call_args[0][1], "cdr-drill")
+
+    def test_staging_is_never_scheduled(self):
+        ops.use_stack("staging")
+        with mock.patch.object(ops.subprocess, "run") as run:
+            self.assertEqual(ops.cmd_schedule(argparse.Namespace(time="02:00", remove=False, copy_to=None, no_purge=False)), 2)
+        run.assert_not_called()
+
+    def test_restore_needs_the_word_of_its_own_stack(self):
+        ops.use_stack("staging")
+        with mock.patch.object(ops, "verify_sums", return_value=[]), mock.patch.object(ops, "compose") as c, \
+                mock.patch("builtins.input", return_value="RESTORE-PRODUCTION"):
+            self.assertEqual(ops.cmd_restore(argparse.Namespace(backup="x", no_safety_backup=True)), 1)
+        c.assert_not_called()
+
+    def _run_main(self, *argv):
+        seen = {}
+        def fake(a):
+            seen["stack"], seen["out"] = ops.ACTIVE["name"], getattr(a, "out", None)
+            return 0
+        with mock.patch.object(ops, "cmd_status", fake), mock.patch("sys.argv", ["prod_ops.py", *argv]):
+            self.assertEqual(ops.main(), 0)
+        return seen
+
+    def test_the_option_works_before_and_after_the_command(self):
+        self.assertEqual(self._run_main("status"), {"stack": "production", "out": "backups/prod"})
+        self.assertEqual(self._run_main("--stack", "staging", "status"), {"stack": "staging", "out": "backups/staging"})
+        self.assertEqual(self._run_main("status", "--stack", "staging"), {"stack": "staging", "out": "backups/staging"})
+
+    def test_an_explicit_out_folder_is_kept(self):
+        self.assertEqual(self._run_main("status", "--stack", "staging", "--out", "somewhere")["out"], "somewhere")
+
+    def test_a_stack_that_is_not_set_up_here_is_reported_not_run(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ops, "ROOT", pathlib.Path(tmp)), mock.patch("sys.argv", ["prod_ops.py", "backup", "--stack", "staging"]), \
+                mock.patch.object(ops, "cmd_backup") as backup:
+            self.assertEqual(ops.main(), 2)
+        backup.assert_not_called()
+
+
+class RestoreUploadsOnLinux(unittest.TestCase):
+    """On Linux the copied archive keeps the host user as owner, so root inside the hardened container cannot chmod or remove it (found on Ubuntu)."""
+
+    def setUp(self):
+        ops.use_stack("production")
+        self.calls = []
+
+    def _fake_run(self, failing):
+        def run(cmd, **kw):
+            self.calls.append(cmd)
+            tail = " ".join(cmd)
+            rc = 1 if any(word in tail for word in failing) else 0
+            return argparse.Namespace(returncode=rc, stdout="", stderr="Operation not permitted" if rc else "")
+        return run
+
+    def test_chmod_and_removal_may_fail_without_failing_the_restore(self):
+        with mock.patch.object(ops.subprocess, "run", self._fake_run(["chmod", "rm -f"])):
+            ops.restore_uploads(ops.DRILL, "somewhere")
+        joined = [" ".join(c) for c in self.calls]
+        self.assertTrue(any("tar -C /app -xf" in c for c in joined), "the archive must still be unpacked")
+
+    def test_a_failure_to_unpack_still_stops_the_restore(self):
+        with mock.patch.object(ops.subprocess, "run", self._fake_run(["tar -C /app -xf"])):
+            with self.assertRaises(ops.Fail):
+                ops.restore_uploads(ops.DRILL, "somewhere")
+
+    def test_nothing_fails_when_everything_works(self):
+        with mock.patch.object(ops.subprocess, "run", self._fake_run([])):
+            ops.restore_uploads(ops.DRILL, "somewhere")
+        self.assertEqual(len(self.calls), 4)
+
+
 if __name__ == "__main__":
     unittest.main()

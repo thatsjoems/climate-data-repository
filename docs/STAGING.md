@@ -38,6 +38,19 @@ will not go past the certificate warning (it remembers production's HSTS for the
    (all protections present) and `... exec backend python scripts/system_check.py` (the System Status checks).
 3. Sign in, try what changed. Only when staging is right, run `prod_up` for production.
 
+## Rehearse backup, restore drill and restore on staging
+`scripts/prod_ops.py` takes `--stack staging` (before or after the command name) and then works on the rehearsal copy instead of production:
+project `cdr-staging`, secrets from `.env.staging`, backups in `backups/staging`, and its status file in `backups/staging-status` (never the `backups/status`
+file that production's monitoring reads). Without `--stack` it is production, exactly as before, and the scheduled backup never passes it.
+```
+python3 scripts/prod_ops.py --stack staging backup
+python3 scripts/prod_ops.py --stack staging status
+python3 scripts/prod_ops.py --stack staging drill          (restores the newest staging backup into a throw-away copy, checks it, removes it)
+python3 scripts/prod_ops.py --stack staging check          (the System Status checks of staging)
+```
+`restore --stack staging <folder>` asks for the word `RESTORE-STAGING` (production asks for `RESTORE-PRODUCTION`, so the wrong word cannot restore the wrong stack).
+`schedule` is refused for staging. The drill uses its own project `cdr-drill`, so a staging drill and a production drill must not run at the same time.
+
 ## Stop, restart, erase
 * Stop (data kept): `docker compose -p cdr-staging -f docker-compose.prod.yml --env-file .env.staging down`
 * Start again: `staging_up` (safe to re-run).

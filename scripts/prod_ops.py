@@ -10,6 +10,11 @@ Backup, status, restore drill, restore and scheduling for the PRODUCTION stack (
     python scripts/prod_ops.py restore <backup folder>            (DESTRUCTIVE - replaces production data)
     python scripts/prod_ops.py schedule [--time 02:00] [--remove]  (Windows Task Scheduler; prints a cron line elsewhere)
 
+REHEARSAL ON STAGING. Every command except `schedule` also takes --stack staging (before or after the command name), which points it at the rehearsal copy
+(docs/STAGING.md): project cdr-staging, .env.staging, backups in backups/staging, and its status file in backups/staging-status. Without --stack nothing changes:
+the target is production, exactly as before. The scheduled task never passes --stack, so it can only ever back up production. Staging is disposable and
+holds synthetic data only; use it to practise backup, drill and restore (for example on Linux) before doing them on production.
+
 Needs only Python 3 and Docker. A backup holds the database dump and the uploaded files from the same moment,
 with SHA256SUMS and a MANIFEST (same layout as scripts/backup.ps1, so either restore script can read it).
 
@@ -30,7 +35,19 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-PROD, DRILL = "cdr-prod", "cdr-drill"
+PROD, DRILL, STAGING = "cdr-prod", "cdr-drill", "cdr-staging"
+# What each stack is called, where its secrets and backups live. ACTIVE is production unless main() is given --stack staging.
+STACKS = {
+    "production": {"name": "production", "project": PROD, "env": ".env.production", "out": "backups/prod", "status": "status"},
+    "staging": {"name": "staging", "project": STAGING, "env": ".env.staging", "out": "backups/staging", "status": "staging-status"},
+}
+ACTIVE = dict(STACKS["production"])
+
+
+def use_stack(name):
+    """Point every command at one stack. Only main() calls this."""
+    ACTIVE.clear()
+    ACTIVE.update(STACKS[name])
 STAMP = re.compile(r"^\d{8}T\d{6}Z$")
 SLEEP = float(os.environ.get("CDR_OPS_SLEEP", "5"))
 ROLE_SQL, BARE_ROLE_SQL = "database/roles/create_app_role.sql", "database/roles/create_bare_role.sql"
@@ -84,8 +101,9 @@ def append_log(out_dir, line):
         print(f"  WARNING: could not write backup.log ({exc.strerror or exc}); the backup itself is fine.")
 
 
-def compose(args, project=PROD, capture=False, check=True):
-    cmd = ["docker", "compose", "-p", project, "-f", "docker-compose.prod.yml", "--env-file", ".env.production", *args]
+def compose(args, project=None, capture=False, check=True):
+    project = project or ACTIVE["project"]
+    cmd = ["docker", "compose", "-p", project, "-f", "docker-compose.prod.yml", "--env-file", ACTIVE["env"], *args]
     r = subprocess.run(cmd, cwd=ROOT, capture_output=capture, text=True)
     if check and r.returncode != 0:
         tail = (r.stderr or "").strip()[-300:] if capture else ""
@@ -93,7 +111,7 @@ def compose(args, project=PROD, capture=False, check=True):
     return r
 
 
-def sh_in(service, script, project=PROD, capture=False):
+def sh_in(service, script, project=None, capture=False):
     return compose(["exec", "-T", service, "sh", "-c", script], project, capture=capture)
 
 
@@ -161,10 +179,16 @@ def restore_uploads(project, folder):
     # application's own user (cdr). So the emptying and the unpacking run AS cdr, which owns the folder; root only fixes the copied archive's mode and
     # removes it afterwards (it owns that file in /tmp). Run as root, tar failed with "Cannot open: File exists" and "Cannot utime", and `rm -rf /app/uploads/*`
     # could not have removed real files either. `find ... -delete` also removes hidden files, which `*` does not match.
+    # On Windows the copied archive belongs to root inside the container, so root can change its mode and remove it. On Linux `docker compose cp` keeps the
+    # owner of the file on the host (found on Ubuntu, 15 November 2026: "chmod: Operation not permitted"), and the hardened container's root may not change or
+    # remove a file that is not its own (/tmp is sticky). Both steps are therefore best effort: the archive is readable by everyone when the host created it
+    # with the usual mode (644 or 664), and if cdr still cannot read it the unpacking step below fails with a clear message. A leftover archive in /tmp
+    # disappears when the container is replaced.
     compose(["cp", str(pathlib.Path(folder) / "uploads.tar"), "backend:/tmp/uploads.tar"], project)
-    compose(["exec", "-T", "backend", "chmod", "644", "/tmp/uploads.tar"], project)
+    if compose(["exec", "-T", "backend", "chmod", "644", "/tmp/uploads.tar"], project, capture=True, check=False).returncode != 0:
+        print("  (note: the mode of the copied archive could not be changed; continuing, the next step shows whether it can be read)")
     compose(["exec", "-T", "-u", "cdr", "backend", "sh", "-c", "find /app/uploads -mindepth 1 -delete && tar -C /app -xf /tmp/uploads.tar"], project)
-    compose(["exec", "-T", "backend", "rm", "-f", "/tmp/uploads.tar"], project)
+    compose(["exec", "-T", "backend", "rm", "-f", "/tmp/uploads.tar"], project, capture=True, check=False)
 
 
 # ------------------------------------------------------------------------------------------------ backup
@@ -174,7 +198,7 @@ def make_backup(out_dir, keep, copy_to=None):
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     folder = out_dir / stamp
     folder.mkdir(parents=True, exist_ok=True)
-    print(f"Backing up production to {folder} ...")
+    print(f"Backing up {ACTIVE['name']} to {folder} ...")
     try:
         return _take_backup(out_dir, keep, copy_to, stamp, folder)
     except BaseException:
@@ -198,7 +222,7 @@ def _take_backup(out_dir, keep, copy_to, stamp, folder):
     r = compose(["exec", "-T", "backend", "sh", "-c", "cd /app && python -m alembic current 2>/dev/null"], capture=True, check=False)
     if r.returncode == 0 and r.stdout.strip():
         revision = r.stdout.strip().splitlines()[-1].strip()
-    manifest = ["CDR backup (production)", f"taken (UTC):     {stamp}", f"schema revision: {revision}", "files:"]
+    manifest = [f"CDR backup ({ACTIVE['name']})", f"taken (UTC):     {stamp}", f"schema revision: {revision}", "files:"]
     manifest += [f"  {p.stat().st_size:>12}  {p.name}" for p in sorted(folder.iterdir())]
     (folder / "MANIFEST.txt").write_text("\n".join(manifest) + "\n", encoding="utf-8", newline="\n")
     problems = verify_sums(folder)
@@ -236,7 +260,7 @@ def write_status(out_dir, stamp, folder, revision, copy_to, copy_error):
     Leaves the result of the backup in <backups>/status/last_backup.json, a folder that the production backend can READ (and nothing else
     of the backups: only this small file). The System Status page and the alerts use it to notice a backup that did not happen.
     """
-    status_dir = pathlib.Path(out_dir).parent / "status"
+    status_dir = pathlib.Path(out_dir).parent / ACTIVE["status"]      # staging has its own: it must never overwrite the file production's monitoring reads
     status_dir.mkdir(parents=True, exist_ok=True)
     data = {
         "taken_utc": stamp, "result": "COPY-FAILED" if copy_error else "OK", "revision": revision,
@@ -353,12 +377,12 @@ def privileges(project):
 
 def teardown_drill():
     project = DRILL
-    assert project == DRILL and project != PROD, "refusing to remove anything but the drill project"
+    assert project == DRILL and project not in (PROD, STAGING), "refusing to remove anything but the drill project"
     compose(["down", "-v", "--remove-orphans"], project, check=False)
 
 
 def cmd_drill(a):
-    folder = pathlib.Path(a.backup) if a.backup else newest_backup("backups/prod")
+    folder = pathlib.Path(a.backup) if a.backup else newest_backup(ACTIVE["out"])
     if folder is None:
         print("No backup to test. Take one first: python scripts/prod_ops.py backup (or give --backup <folder>).")
         return 2
@@ -367,7 +391,7 @@ def cmd_drill(a):
     if problems:
         print("The backup is damaged, so the drill stops here:", "; ".join(problems))
         return 1
-    print(f"RESTORE DRILL of {folder.name} into a throw-away copy (project {DRILL}). Production is not touched.")
+    print(f"RESTORE DRILL of {folder.name} ({ACTIVE['name']}) into a throw-away copy (project {DRILL}). The {ACTIVE['name']} stack itself is not touched.")
     started = time.time()
     results, ok = [], True
     try:
@@ -392,14 +416,14 @@ def cmd_drill(a):
         ok = False
     finally:
         if a.keep_drill:
-            print(f"The drill stack was left running (project {DRILL}). Remove it with: docker compose -p {DRILL} -f docker-compose.prod.yml --env-file .env.production down -v")
+            print(f"The drill stack was left running (project {DRILL}). Remove it with: docker compose -p {DRILL} -f docker-compose.prod.yml --env-file {ACTIVE['env']} down -v")
         else:
             teardown_drill()
     seconds = time.time() - started
     for name, value, passed in results:
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}: {value}")
-    prod = compose(["ps", "-q"], PROD, capture=True, check=False).stdout.split()
-    print(f"  production containers still present: {len(prod)}")
+    live = compose(["ps", "-q"], ACTIVE["project"], capture=True, check=False).stdout.split()
+    print(f"  {ACTIVE['name']} containers still present: {len(live)}")
     print(f"  backup size {(folder / 'db.dump').stat().st_size / 1e6:.1f} MB database; whole drill took {seconds:.0f} s")
     print("RESTORE DRILL: " + ("PASSED" if ok else "FAILED"))
     return 0 if ok else 1
@@ -412,21 +436,23 @@ def cmd_restore(a):
     if problems:
         print("The backup is damaged. Nothing was changed:", "; ".join(problems))
         return 1
-    print(f"This will REPLACE the PRODUCTION database and uploaded files with the backup in:\n    {folder}")
-    if input("Type RESTORE-PRODUCTION to continue: ").strip() != "RESTORE-PRODUCTION":
+    word = "RESTORE-" + ACTIVE["name"].upper()
+    print(f"This will REPLACE the {ACTIVE['name'].upper()} database and uploaded files with the backup in:\n    {folder}")
+    if input(f"Type {word} to continue: ").strip() != word:
         print("Cancelled. Nothing was changed.")
         return 1
     if not a.no_safety_backup:
         print("First, a safety backup of the current state ...")
-        make_backup("backups/prod", keep=0)   # the safety backup is local; a missing off-machine copy does not stop a restore
+        make_backup(ACTIVE["out"], keep=0)   # the safety backup is local; a missing off-machine copy does not stop a restore
+    project = ACTIVE["project"]
     compose(["up", "-d", "db"])
-    wait_healthy("db", PROD)
+    wait_healthy("db", project)
     compose(["stop", "backend"])
-    restore_dump(PROD, folder)
+    restore_dump(project, folder)
     compose(["up", "-d", "backend"])
-    wait_healthy("backend", PROD)
-    restore_uploads(PROD, folder)
-    out = compose(["exec", "-T", "backend", "python", "scripts/verify_db_constraints.py"], PROD, capture=True, check=False)
+    wait_healthy("backend", project)
+    restore_uploads(project, folder)
+    out = compose(["exec", "-T", "backend", "python", "scripts/verify_db_constraints.py"], project, capture=True, check=False)
     print(out.stdout.strip().splitlines()[-1] if out.stdout.strip() else "(no verification output)")
     print("Restored. Sign in and check the data before announcing it.")
     return 0 if out.returncode == 0 else 1
@@ -450,6 +476,9 @@ def task_settings_ps(name="CDR-Backup"):
 
 
 def cmd_schedule(a):
+    if ACTIVE["name"] != "production":
+        print("Scheduling is for production only. Staging is disposable and has no scheduled backup.")
+        return 2
     if os.name != "nt":
         print("Add this line with `crontab -e` (daily at 02:00):")
         print(f"  0 2 * * * cd {ROOT} && {sys.executable} scripts/prod_ops.py backup --copy-to <off-machine folder> --purge --wait-docker 10 --retries 2 >> backups/prod/{SCHEDULED_LOG} 2>&1")
@@ -475,20 +504,27 @@ def cmd_schedule(a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--stack", choices=sorted(STACKS), default="production", help="production (the default) or staging, the rehearsal copy")
+    common = argparse.ArgumentParser(add_help=False)          # the same option after the command name; absent there means "as given before it"
+    common.add_argument("--stack", choices=sorted(STACKS), default=argparse.SUPPRESS)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    b = sub.add_parser("backup"); b.add_argument("--out", default="backups/prod"); b.add_argument("--keep", type=int, default=14); b.add_argument("--copy-to"); b.add_argument("--purge", action="store_true", help="after the backup, remove expired refresh tokens and old notifications")
+    b = sub.add_parser("backup", parents=[common]); b.add_argument("--out", default=None); b.add_argument("--keep", type=int, default=14); b.add_argument("--copy-to"); b.add_argument("--purge", action="store_true", help="after the backup, remove expired refresh tokens and old notifications")
     b.add_argument("--wait-docker", type=float, default=0, metavar="MINUTES", help="wait (and start Docker Desktop on Windows) up to this long for Docker")
     b.add_argument("--retries", type=int, default=0, help="extra attempts when the backup fails")
     b.add_argument("--retry-wait", type=float, default=5, metavar="MINUTES", help="pause between attempts")
-    s = sub.add_parser("status"); s.add_argument("--out", default="backups/prod"); s.add_argument("--max-age-hours", type=float, default=26)
-    sub.add_parser("check")
-    pg = sub.add_parser("purge"); pg.add_argument("--apply", action="store_true")
-    d = sub.add_parser("drill"); d.add_argument("--backup"); d.add_argument("--keep-drill", action="store_true")
-    r = sub.add_parser("restore"); r.add_argument("backup"); r.add_argument("--no-safety-backup", action="store_true")
-    c = sub.add_parser("schedule"); c.add_argument("--time", default="02:00"); c.add_argument("--remove", action="store_true"); c.add_argument("--copy-to"); c.add_argument("--no-purge", action="store_true", help="schedule the backup only, without housekeeping")
+    s = sub.add_parser("status", parents=[common]); s.add_argument("--out", default=None); s.add_argument("--max-age-hours", type=float, default=26)
+    sub.add_parser("check", parents=[common])
+    pg = sub.add_parser("purge", parents=[common]); pg.add_argument("--apply", action="store_true")
+    d = sub.add_parser("drill", parents=[common]); d.add_argument("--backup"); d.add_argument("--keep-drill", action="store_true")
+    r = sub.add_parser("restore", parents=[common]); r.add_argument("backup"); r.add_argument("--no-safety-backup", action="store_true")
+    c = sub.add_parser("schedule", parents=[common]); c.add_argument("--time", default="02:00"); c.add_argument("--remove", action="store_true"); c.add_argument("--copy-to"); c.add_argument("--no-purge", action="store_true", help="schedule the backup only, without housekeeping")
     a = ap.parse_args()
-    if not (ROOT / ".env.production").is_file() and a.cmd in ("backup", "check", "drill", "restore", "purge"):
-        print(".env.production not found. This tool is for the production stack (scripts/prod_setup.py).")
+    use_stack(a.stack)
+    if getattr(a, "out", 1) is None:
+        a.out = ACTIVE["out"]
+    if not (ROOT / ACTIVE["env"]).is_file() and a.cmd in ("backup", "check", "drill", "restore", "purge"):
+        hint = "scripts/prod_setup.py --stack staging" if a.stack == "staging" else "scripts/prod_setup.py"
+        print(f"{ACTIVE['env']} not found. This stack is not set up here ({hint}).")
         return 2
     try:
         return {"backup": cmd_backup, "status": cmd_status, "check": cmd_check, "purge": cmd_purge, "drill": cmd_drill, "restore": cmd_restore, "schedule": cmd_schedule}[a.cmd](a)
