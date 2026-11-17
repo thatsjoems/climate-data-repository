@@ -35,3 +35,6 @@ frontend/tsconfig.tsbuildinfo
 # compiled Python files, anywhere
 __pycache__/
 *.pyc
+
+# offline image bundles (large, made on demand)
+offline/
