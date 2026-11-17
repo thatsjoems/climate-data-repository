@@ -3,9 +3,17 @@
 # check, start db + backend as owner, create the restricted role cdr_app and switch to it, start the web server.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# --offline: no internet needed. Loads the images from offline/cdr-images.tar (made by scripts/offline_bundle.sh save) and never builds or pulls.
+BUILD=--build; BUNDLE=offline/cdr-images.tar
+while [ $# -gt 0 ]; do case "$1" in
+  --offline) BUILD=--no-build; shift;;
+  --bundle) BUNDLE="$2"; shift 2;;
+  *) echo "Unknown option: $1 (use --offline [--bundle <file>])"; exit 2;; esac; done
 [ -f .env.production ] || { echo "No .env.production. Run: python3 scripts/prod_setup.py --domain <address>"; exit 1; }
+[ "$BUILD" = "--no-build" ] && "$(dirname "$0")/offline_bundle.sh" load --stack production --file "$BUNDLE"
 
 if command -v python3 >/dev/null 2>&1; then python3 scripts/check_production_config.py
+elif [ "$BUILD" = "--no-build" ]; then echo "NOTE: python3 not found; configuration check skipped (offline, no image to run it in)."
 else docker run --rm -v "$PWD:/work" -w /work python:3.12-slim python scripts/check_production_config.py --no-certs; fi
 
 C=(-f docker-compose.prod.yml --env-file .env.production)
@@ -30,7 +38,7 @@ if ! echo "$role_there" | grep -q 1; then
   echo "    (a new database: the backend starts as the database owner until cdr_app exists)"
   sed -i.bak "s|^BACKEND_DATABASE_URL=.*|BACKEND_DATABASE_URL=postgresql://$(env_value POSTGRES_USER):$(env_value POSTGRES_PASSWORD)@db:5432/climate_data_repository|" .env.production && rm -f .env.production.bak
 fi
-docker compose "${C[@]}" up -d --build backend
+docker compose "${C[@]}" up -d $BUILD backend
 wait_healthy backend
 
 echo "2/4 Creating the restricted database role cdr_app ..."
@@ -45,7 +53,7 @@ docker compose "${C[@]}" up -d --force-recreate backend
 wait_healthy backend
 
 echo "4/4 Starting the web server ..."
-docker compose "${C[@]}" up -d --build --force-recreate frontend
+docker compose "${C[@]}" up -d $BUILD --force-recreate frontend
 wait_healthy frontend
 
 echo; echo "Production is up: https://$(env_value CDR_DOMAIN)"

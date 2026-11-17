@@ -3,9 +3,17 @@
 # check, start db + backend as owner, create the restricted role cdr_app and switch to it, start the web server.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# --offline: no internet needed. Loads the images from offline/cdr-images.tar (made by scripts/offline_bundle.sh save) and never builds or pulls.
+BUILD=--build; BUNDLE=offline/cdr-images.tar
+while [ $# -gt 0 ]; do case "$1" in
+  --offline) BUILD=--no-build; shift;;
+  --bundle) BUNDLE="$2"; shift 2;;
+  *) echo "Unknown option: $1 (use --offline [--bundle <file>])"; exit 2;; esac; done
 [ -f .env.staging ] || { echo "No .env.staging. Run: python3 scripts/prod_setup.py --stack staging"; exit 1; }
+[ "$BUILD" = "--no-build" ] && "$(dirname "$0")/offline_bundle.sh" load --stack staging --file "$BUNDLE"
 
 if command -v python3 >/dev/null 2>&1; then python3 scripts/check_production_config.py --env-file .env.staging
+elif [ "$BUILD" = "--no-build" ]; then echo "NOTE: python3 not found; configuration check skipped (offline, no image to run it in)."
 else docker run --rm -v "$PWD:/work" -w /work python:3.12-slim python scripts/check_production_config.py --env-file .env.staging --no-certs; fi
 
 C=(-p cdr-staging -f docker-compose.prod.yml --env-file .env.staging)
@@ -30,7 +38,7 @@ if ! echo "$role_there" | grep -q 1; then
   echo "    (a new database: the backend starts as the database owner until cdr_app exists)"
   sed -i.bak "s|^BACKEND_DATABASE_URL=.*|BACKEND_DATABASE_URL=postgresql://$(env_value POSTGRES_USER):$(env_value POSTGRES_PASSWORD)@db:5432/climate_data_repository|" .env.staging && rm -f .env.staging.bak
 fi
-docker compose "${C[@]}" up -d --build backend
+docker compose "${C[@]}" up -d $BUILD backend
 wait_healthy backend
 
 echo "2/4 Creating the restricted database role cdr_app ..."
@@ -45,7 +53,7 @@ docker compose "${C[@]}" up -d --force-recreate backend
 wait_healthy backend
 
 echo "4/4 Starting the web server ..."
-docker compose "${C[@]}" up -d --build --force-recreate frontend
+docker compose "${C[@]}" up -d $BUILD --force-recreate frontend
 wait_healthy frontend
 
 echo; echo "Staging is up: https://localhost:8443   (open exactly this address; if the browser will not go past the certificate warning because production's HSTS is remembered for 'localhost', use https://127.0.0.1:8443)"

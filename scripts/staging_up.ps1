@@ -3,11 +3,16 @@
 #   3. create the restricted database role cdr_app and switch the backend to it
 #   4. start the web server (HTTPS)
 # Needs: .env.staging (python scripts/prod_setup.py --stack staging). Never touches the production stack: own project, volumes, secrets and ports.
+# -Offline: no internet needed. Loads the images from offline\cdr-images.tar (made by scripts\offline_bundle.ps1 save) and never builds or pulls.
+param([switch]$Offline, [string]$Bundle = 'offline\cdr-images.tar')
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
+$build = if ($Offline) { '--no-build' } else { '--build' }
 if (-not (Test-Path .env.staging)) { throw "No .env.staging. Run: python scripts/prod_setup.py --stack staging" }
+if ($Offline) { & "$PSScriptRoot\offline_bundle.ps1" load -Stack staging -File $Bundle }
 
 if (Get-Command python -ErrorAction SilentlyContinue) { python scripts/check_production_config.py --env-file .env.staging }
+elseif ($Offline) { Write-Host "NOTE: python not found; configuration check skipped (offline, no image to run it in)." }
 else { docker run --rm -v "${PWD}:/work" -w /work python:3.12-slim python scripts/check_production_config.py --env-file .env.staging --no-certs }
 if ($LASTEXITCODE -ne 0) { throw "Configuration check failed. Nothing was started." }
 
@@ -35,7 +40,7 @@ if (-not ("$roleThere" -match '1')) {
   $owner = Get-EnvValue 'POSTGRES_USER'; $ownerPw = Get-EnvValue 'POSTGRES_PASSWORD'
   (Get-Content .env.staging) -replace '^BACKEND_DATABASE_URL=.*$', "BACKEND_DATABASE_URL=postgresql://${owner}:${ownerPw}@db:5432/climate_data_repository" | Set-Content .env.staging
 }
-docker compose @c up -d --build backend
+docker compose @c up -d $build backend
 Wait-Healthy 'backend'
 
 Write-Host "2/4 Creating the restricted database role cdr_app ..."
@@ -51,7 +56,7 @@ docker compose @c up -d --force-recreate backend
 Wait-Healthy 'backend'
 
 Write-Host "4/4 Starting the web server ..."
-docker compose @c up -d --build --force-recreate frontend
+docker compose @c up -d $build --force-recreate frontend
 Wait-Healthy 'frontend'
 
 $domain = Get-EnvValue 'CDR_DOMAIN'
