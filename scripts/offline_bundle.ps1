@@ -25,7 +25,7 @@ if ($Mode -eq 'save') {
   docker save -o $File $nb $nf $db
   if ($LASTEXITCODE -ne 0) { throw "docker save failed" }
   $h = (Get-FileHash -Algorithm SHA256 $File).Hash.ToLower()
-  [IO.File]::WriteAllText("$File.sha256", "$h  $(Split-Path $File -Leaf)`n")
+  Set-Content -Path "$File.sha256" -Value "$h  $(Split-Path $File -Leaf)" -Encoding ASCII
   docker rmi $nb $nf *> $null
   Write-Host ("Done: {0} ({1:N0} MB); checksum in {0}.sha256" -f $File, ((Get-Item $File).Length / 1MB))
   Write-Host "Copy BOTH files to the offline machine, into the project's offline folder."
